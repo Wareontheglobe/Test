@@ -9,8 +9,8 @@ A single-player story game that walks through Stargate SG-1 one episode at a tim
 | Format | Story adventure in visual-novel form, with scenes, choices, investigation, small puzzles and choice-driven firefights |
 | Player role | The SG-1 team as a unit. At each decision you choose what happens and who does it |
 | Engine | Ren'Py 8 |
-| Episode delivery | One folder per episode that registers itself with the shell's mission select |
-| Text | Original scene writing in each character's voice, following the real plot beat by beat |
+| Episode delivery | One folder per episode, each built on its own and playable in any order from mission select |
+| Text | Real dialogue excerpts from transcripts kept on your computer, plus new writing for the interactive branches |
 | Art | Local Stable Diffusion through ComfyUI, driven by a script that reads a per-episode asset list |
 | Repo | A new private repo. This one is public |
 
@@ -52,18 +52,25 @@ Rib outcomes vary and carry forward: who got hurt, which villagers got out, whet
 
 Keep the systems few. Every stat has to be accounted for in every episode, and that cost multiplies by 200.
 
+### Playing in any order
+
+Any installed episode can be played at any time, so no episode can depend on you having played another. Each episode starts from a canon baseline: the state of the show at that point (who's on the team, what they know, which addresses are in the book), written into `content/canon/continuity.yaml` when the episode is built. Your own campaign results sit on top of that baseline. If you've played earlier episodes, their outcomes show up as callbacks and extra dialogue options. If you haven't, the episode runs on canon and loses nothing it needs. A check that reads a knowledge flag always falls back to the baseline value, and every briefing carries enough of a recap to stand alone.
+
 ### Left out on purpose
 
 Real-time combat, inventory management and RPG leveling. Each would need its own content in every episode, and none of them is what the show is about.
 
 ## Where the text comes from
 
-Full episode transcripts are copyrighted, and this repo is public, so the scripts don't get reproduced. The practical reason matters as much: recall of exact dialogue across 214 episodes is unreliable, and a misremembered line in O'Neill's mouth reads worse than a fresh one written in his voice.
+The dialogue comes from real episode transcripts kept on your computer. Without discs, the source is fan transcript sites. You pick the site, and Claude Code fetches the page or reads a copy you saved. The transcripts go in a `reference/` folder that is gitignored and never pushed anywhere, including the private repo.
 
-1. Claude writes each episode as original scenes and dialogue that follow the real plot in each character's established voice. A few short signature lines can appear as said. The rest is new writing.
-2. Before writing, Claude produces a beat sheet (the plot, scene by scene) and you check it against your memory or a synopsis. Recall of the big episodes is good. Mid-season ones can drift, and five minutes of review catches a wrong beat before 4,000 words get built on it.
-3. If you own the discs, you can pull an episode's subtitle track (Subtitle Edit or MKVToolNix) into a local `reference/` folder. Claude Code reads it while drafting that episode so the scene flow tracks the real one closely. That folder is gitignored and never leaves your machine.
-4. A voice guide in `CLAUDE.md` pins each character down. O'Neill deflects with jokes and hates long briefings. Daniel argues for the locals and gets cut off. Carter explains, then gets asked to explain it simpler. Teal'c says the least. The guide changes as the characters do over ten seasons.
+1. `tools/import_transcript.py` takes a URL or a saved file and converts it to one standard format: scene headings, then `SPEAKER: line`. Fan transcripts vary in layout and quality, so cleaning them up once means every later step reads the same thing.
+2. Claude builds the beat sheet (the plot, scene by scene) from the transcript instead of from memory. That removes the main accuracy risk. You skim it rather than fact-check it.
+3. The episode script uses real lines for the canon path: briefings, the scenes you watch rather than steer, and the line a character says when you pick the choice the show actually made. It doesn't use the whole transcript. Long stretches get cut down to the exchanges that carry the scene, and connecting material gets condensed so an episode plays in 30 to 45 minutes.
+4. Choices the show didn't make get new lines written in the character's voice. A voice guide in `CLAUDE.md` keeps those consistent. O'Neill deflects with jokes and hates long briefings. Daniel argues for the locals and gets cut off. Carter explains, then gets asked to explain it simpler. Teal'c says the least. The guide changes as the characters do over ten seasons, and the transcripts are the source Claude checks it against.
+5. Every transcript line in the script carries a `# tx` comment and every written line doesn't, so you can always tell which is which. The debrief's "how it went in the show" note uses the same tags.
+
+Fan transcripts have errors (misheard words, wrong speaker labels), and a line that reads wrong probably is. Fixing it in the cleaned copy fixes it for good.
 
 The series is 214 episodes. Clip shows become a short codex-review episode or get skipped. The two follow-up films, The Ark of Truth and Continuum, fit as two final packs. The 1994 film can be a short playable prologue on Abydos.
 
@@ -93,8 +100,9 @@ sg1/
     canon/continuity.yaml      team roster, who's alive, what's known, per episode
     beats/s01e01.md            approved beat sheet
     assets/s01e01.yaml         art list for the generator
-  reference/                   your subtitle extracts, gitignored
+  reference/                   cleaned transcripts, gitignored
   tools/
+    import_transcript.py       fetches or reads a transcript, converts it to the standard format
     gen_assets.py              sends asset lists to ComfyUI, files the results
     check_episode.py           registration checks, missing art, branch coverage
   .claude/skills/new-episode/SKILL.md
@@ -103,9 +111,9 @@ sg1/
 
 ### How an episode plugs in
 
-Each `episode.rpy` calls `register_episode(...)` at init with its ID, title, season, number, entry label, and the campaign flags it reads and writes. Mission select lists whatever has registered, in order, and locks each episode until the one before it is done (with a setting to turn that off). Adding an episode means copying its folder into `game/episodes/` and restarting. Unwritten episodes don't appear, so you can play season 1 while season 2 is in progress.
+Each `episode.rpy` calls `register_episode(...)` at init with its ID, title, season, number, entry label, and the campaign flags it reads and writes. Mission select lists whatever has registered, grouped by season, all of it open. Adding an episode means copying its folder into `game/episodes/` and restarting. Unwritten episodes don't appear, so the menu fills in as you build, in whatever order you build.
 
-Campaign state lives in one object that every episode goes through, with helpers like `campaign.learn("zat_mechanics")` and `campaign.rapport("tealc", +1)`. Episodes never create their own globals. That's what keeps old saves loading after new episodes arrive.
+Campaign state lives in one object that every episode goes through, with helpers like `campaign.learn("zat_mechanics")` and `campaign.knows("zat_mechanics")`, where `knows` falls back to the episode's canon baseline. Episodes never create their own globals. That's what keeps old saves loading after new episodes arrive.
 
 ### Testing
 
@@ -166,13 +174,13 @@ Not in the first build. Ren'Py's music and sound channels are there when you wan
 
 A Claude Code skill in `.claude/skills/new-episode/` turns this into one request ("build S02E05"):
 
-1. Read `continuity.yaml` and the last two debriefs for the current state of the campaign.
-2. Draft the beat sheet and stop for your approval.
+1. Import the transcript into `reference/` with `import_transcript.py`.
+2. Draft the beat sheet from the transcript and write the episode's canon baseline into `continuity.yaml`. Stop for your approval.
 3. Design the interaction: decision points, which ones are spine and which are rib, which flags each check reads, any puzzle.
 4. Write `episode.rpy`.
 5. Write the asset list, reusing shared art first.
 6. Run lint and `check_episode.py`, fix until clean.
-7. Update `continuity.yaml` and add codex entries.
+7. Add codex entries.
 8. On your PC, run `gen_assets.py` and pick the winners.
 9. Play it.
 
@@ -184,16 +192,15 @@ Steps 1 to 7 can run anywhere, including a cloud session. Step 8 needs your GPU,
 2. **Shell with placeholders.** Main menu, mission select, campaign state, codex, dial screen, debrief. A dummy two-scene episode proves that registration and saves work.
 3. **Vertical slice: Children of the Gods.** Complete, with real art. It has a briefing, a dial, an off-world rescue, a firefight, a spine beat (Teal'c) and a Goa'uld. If the format has a problem, it shows up here, before 213 more episodes are built on it.
 4. **Shared art library and cast sprites,** reworked with what the slice taught.
-5. **Season 1** in order, with a review every three or four episodes to adjust the format.
-6. **Seasons 2 to 10,** adding cast as the show does, then the two films.
+5. **Episodes one at a time, in whatever order you want them,** with a review every three or four to adjust the format. New cast members get their sprites the first time an episode needs them. The two films fit in whenever you like.
 
 ## Repo note
 
-This repository (Wareontheglobe/Test) is public. The plan is fine here, but the game, the episode scripts, the art and anything in `reference/` belong in a new private repo, with `reference/` gitignored even there.
+This repository (Wareontheglobe/Test) is public. The plan is fine here, but the game, the episode scripts and the art belong in a new private repo. Transcripts stay in the gitignored `reference/` folder on your computer and aren't pushed even to the private repo.
 
-## Needed from you before phase 1
+## Decisions so far
 
-- Your GPU and how much VRAM it has. This decides SDXL or Flux.
-- Whether you own the series on disc. This decides whether the subtitle reference step exists.
-- Whether the graphic-novel style suits you, or you'd rather something else (painterly, anime, pixel art). Pixel art would change the art pipeline the most.
-- Strict episode order, or free choice once an episode is unlocked.
+- **Discs:** none, so transcripts come from fan sites.
+- **Art style:** the graphic-novel look.
+- **Episode order:** free play, each episode built on its own.
+- **GPU:** still open. On Windows, Task Manager, then Performance, then GPU shows "Dedicated GPU memory". With an NVIDIA card, `nvidia-smi` in a terminal prints it too. NVIDIA is the easy path for ComfyUI. AMD cards and Apple Silicon Macs work but run slower and need more setup. Phases 1 to 3 (shell, placeholders, the first episode's script) don't need this answer, so it can wait until the first art batch.
