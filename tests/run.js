@@ -224,8 +224,8 @@ let BASE;
     await G(page, () => { window.__pw.G.lives = 1; });
     await sendWave(page);
     await runUntilCalm(page);
-    await page.waitForTimeout(80);
     check(await G(page, () => window.__pw.G.over), 'game ends at 0 lives');
+    await page.waitForTimeout(1000); // the end screen follows a 900ms beat
     check(!(await hidden(page, '#endOv')) && (await text(page, '#endTitle')) === 'The keep has fallen', 'loss screen shown');
     check((await G(page, () => JSON.parse(localStorage.getItem('pathwarden.v1')).saves.quarry)) === undefined, 'save cleared on loss');
     check((await text(page, '#sLives span')) === '0', 'HUD shows 0 lives');
@@ -488,6 +488,7 @@ let BASE;
     const ls = await stored(page);
     check(ls.saves.quarry === undefined, 'loss deletes saves.quarry');
     check(ls.saves.meadow && ls.saves.meadow.wave === 5 && ls.saves.switch && ls.saves.switch.wave === 2, 'saves for other roads survive the loss');
+    await page.waitForTimeout(1000); // the end screen follows a 900ms beat
     await page.click('#bEndAlt');
     check((await card(page, 1)).includes('In progress · wave 6') && (await card(page, 0)).includes('In progress · wave 3') && !(await card(page, 2)).includes('In progress'), 'cards reflect the remaining runs');
     check((await text(page, '#bContinue')) === 'Continue · Long Switchback, wave 3', 'Continue falls back to the first road with a save (' + (await text(page, '#bContinue')) + ')');
@@ -565,6 +566,7 @@ let BASE;
     check(await hidden(page, '#menu') && (await G(page, () => window.__pw.G.running)), 'a tap there after 350ms opens the road as usual');
     // The game-over overlay's Main menu gets the same guard.
     await G(page, () => { const W = window.__pw, g = W.G; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); for (let i = 0; i < 30 && !g.over; i++) W.step(1 / 30); });
+    await page.waitForTimeout(1000); // the end screen follows a 900ms beat
     check(!(await hidden(page, '#endOv')), 'run lost');
     await doubleTap(page, '#bEndAlt');
     await page.waitForTimeout(100);
@@ -637,6 +639,7 @@ let BASE;
 
     // Back while the end overlay is up does nothing; the end overlay takes focus.
     await G(page, () => { const W = window.__pw, g = W.G; g.running = true; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); for (let i = 0; i < 30 && !g.over; i++) W.step(1 / 30); });
+    await page.waitForTimeout(1000); // the end screen follows a 900ms beat
     a = await active(page);
     check((await G(page, () => window.__pw.G.over)) && a.id === 'bEndMain' && a.inEnd, 'game over moves focus to Try again ' + JSON.stringify(a));
     await page.keyboard.press('Escape');
@@ -929,6 +932,7 @@ let BASE;
     check(lives === 4 && near(await vals(page, 'sawtooth'), 180), 'a leak that leaves lives plays the 180Hz leak tone');
     await clearRec(page, 50);
     const over = await G(page, () => { const W = window.__pw, g = W.G; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); for (let i = 0; i < 30 && !g.over; i++) W.step(1 / 30); return g.over; });
+    await page.waitForTimeout(1000); // the end screen follows a 900ms beat
     const endShown = !(await hidden(page, '#endOv'));
     v = await vals(page);
     const tri = await vals(page, 'triangle');
@@ -1393,6 +1397,184 @@ let BASE;
     await tapTile(page, 4, 5);
     sb = await sellBtn();
     check(sb.label === 'Sell' && sb.small === '+' + Math.floor(90 * 0.7), 'after a reload the same tower sells at 70% (Sell) ' + JSON.stringify(sb));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------
+  // leak-feedback: the keep draws over leaking enemies, which fade out; a red vignette, '-N' over the keep,
+  // a hurt flash and low-lives heartbeat on the HUD heart, a red keep flag at 5 lives or fewer, and a 900ms beat before the loss screen.
+  // px(page, x, y, t): render (t null = clock) and read one canvas pixel. A leak is driven by __pw.step, so frames never interleave.
+  const px = (page, x, y, t = 0) => G(page, ([x, y, t]) => { const W = window.__pw; W.render(t === null ? undefined : t); return [...document.querySelector('#cv').getContext('2d').getImageData(Math.round(x), Math.round(y), 1, 1).data].slice(0, 3); }, [x, y, t]);
+  const near3 = (a, b, tol) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
+
+  current = 'leak-feedback: a leak shows -N over the keep, flashes the heart and tints the board edges';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const edgeY = await G(page, () => document.querySelector('#cv').height / 2);
+    const calm = await px(page, 2, edgeY);
+    // A single 1/30s step moves a grunt 0.033 tiles, so from path.len-0.25 it crosses the leak line (path.len-0.2) on the second step.
+    const a = await G(page, () => {
+      const W = window.__pw; W.newGame(1); const g = W.G; g.running = true; g.enemies = [];
+      W.spawn('grunt', g.map.path.len - 0.25);
+      W.step(1 / 30); const l1 = g.lives;
+      W.step(1 / 30);
+      const kp = W.keep(), t = g.fx.find(f => f.k === 'text' && f.s === '-1'), el = document.querySelector('#sLives'), cs = getComputedStyle(el.querySelector('svg'));
+      // Render in the same task as the leak, so no frame has faded the vignette yet.
+      W.render(0); const cv = document.querySelector('#cv'), edge = [...cv.getContext('2d').getImageData(2, cv.height / 2, 1, 1).data].slice(0, 3);
+      return { l1, lives: g.lives, t, kp, edge, hurt: el.classList.contains('hurt'), hurtT: g.hurtT, hurtDur: g.hurtDur, span: getComputedStyle(el.querySelector('span')).color, anim: cs.animationName, dur: cs.animationDuration, label: el.getAttribute('aria-label') };
+    });
+    check(a.l1 === 20 && a.lives === 19, `newGame(1); G.running=true; spawn('grunt', path.len-0.25); step(1/30) until it crosses the leak line: G.lives === 19 (${a.l1} -> ${a.lives})`);
+    check(!!a.t, "G.fx has a text effect with s === '-1'");
+    check(a.t && a.t.c === '#ff8a75' && a.t.sz === 1.25 && a.t.dur === 1 && a.t.t < 0.04 && a.t.x === a.kp.x && Math.abs(a.t.y - (a.kp.y - 0.5)) < 1e-9, "the text is #ff8a75, size 1.25, 1s long, at the keep and 0.5 tile above it " + JSON.stringify(a.t) + ' keep ' + JSON.stringify(a.kp));
+    check(a.hurt && a.span === 'rgb(255, 138, 117)' && a.anim === 'lifehit' && a.label === '19 lives', "#sLives has class 'hurt': the count is #ff8a75 and the heart runs its scale keyframes " + JSON.stringify(a));
+    check(a.hurtT === 0.45 && a.hurtDur === 0.45, 'a grunt leak sets G.hurtT = G.hurtDur = 0.45');
+    const full = a.edge;
+    check(full[0] > full[1] + 40, `after __pw.render() following a leak, the pixel at (2, cv.height/2) has red > green+40 (${full} / before the leak ${calm})`);
+    check(calm[1] > calm[0], 'before the leak that pixel is grass green ' + JSON.stringify(calm));
+    const kf = await G(page, () => { const k = [...document.styleSheets].flatMap(s => [...s.cssRules]).find(r => r.type === CSSRule.KEYFRAMES_RULE && r.name === 'lifehit'); return { peak: k ? [...k.cssRules].map(r => r.keyText + ' ' + r.style.transform).join() : '' }; });
+    kf.dur = a.dur;
+    check(kf.dur === '0.45s' && kf.peak.includes('scale(1.35)') && kf.peak.includes('scale(1)'), 'the hurt keyframes scale the heart 1 -> 1.35 -> 1 over 0.45s ' + JSON.stringify(kf));
+    await page.waitForTimeout(600);
+    check(!(await cls(page, '#sLives', 'hurt')), "'hurt' is gone after 450ms");
+    // The vignette fades by real time in frame(), not by sim time: the run is at 3x here.
+    const dec = await G(page, () => new Promise(res => {
+      const W = window.__pw, g = W.G; g.speed = 3; g.enemies = []; W.spawn('grunt', g.map.path.len - 0.21); W.step(1 / 30);
+      const h0 = g.hurtT; let n = 0, t0 = 0, a0 = 0;
+      const f = ts => { if (n === 0) { t0 = ts; a0 = g.hurtT; } if (++n < 12) requestAnimationFrame(f); else res({ h0, a0, a1: g.hurtT, el: (ts - t0) / 1000 }); };
+      requestAnimationFrame(f);
+    }));
+    check(dec.h0 === 0.45 && dec.el > 0.1 && dec.a0 - dec.a1 > dec.el * 0.6 && dec.a0 - dec.a1 < dec.el * 1.1, `at 3x the vignette fades by real time: ${(dec.a0 - dec.a1).toFixed(3)}s gone in ${dec.el.toFixed(3)}s of frames`);
+    await page.waitForTimeout(500);
+    const after = await G(page, () => window.__pw.G.hurtT);
+    check(after === 0 && near3(await px(page, 2, edgeY), calm, 2), 'once it has faded (hurtT 0) the edge is grass again');
+    // Repeated leaks refresh the vignette and never stack.
+    const st = await G(page, () => {
+      const W = window.__pw, g = W.G, leak = (type, d) => { W.spawn(type, g.map.path.len - (d || 0.21)); W.step(1 / 30); };
+      g.running = false; g.speed = 1; g.lives = 20; g.enemies = [];
+      g.hurtT = 0.2; leak('grunt'); const r1 = g.hurtT;
+      leak('grunt'); const r2 = g.hurtT;
+      g.wave = 10; leak('boss', 0.205); const boss = { t: g.hurtT, d: g.hurtDur, txt: g.fx.some(f => f.k === 'text' && f.s === '-5' && f.sz === 1.25) };
+      g.hurtT = 0.6; leak('grunt'); const r3 = { t: g.hurtT, d: g.hurtDur };
+      W.render(0); const cv = document.querySelector('#cv'), edge = [...cv.getContext('2d').getImageData(2, cv.height / 2, 1, 1).data].slice(0, 3);
+      return { r1, r2, boss, r3, edge, lives: g.lives };
+    });
+    check(st.r1 === 0.45 && st.r2 === 0.45, 'a leak while the vignette is fading refreshes it to 0.45, and a second leak does not stack it ' + JSON.stringify(st));
+    check(st.boss.t === 0.8 && st.boss.d === 0.8 && st.boss.txt, "a Warlord leak sets hurtDur 0.8 and shows '-5' " + JSON.stringify(st.boss));
+    check(st.r3.t === 0.6 && st.r3.d === 0.45, 'a grunt leak right after keeps the longer vignette (max, not a sum) ' + JSON.stringify(st.r3));
+    check(near3(st.edge, full, 2), 'and its edges are no stronger than a single leak: a stays at 0.55 at most ' + JSON.stringify(st.edge));
+    // The 'text' fx takes a colour (default #f3d27a) and a size (default 1) on the 0.34T font.
+    const tx = await G(page, () => {
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      g.enemies = []; g.hurtT = 0; g.gateFlash = 0;
+      const count = (fx, want) => { g.fx = [fx]; W.render(0); const d = c.getImageData(Math.round(3 * T), Math.round(4 * T), Math.round(3 * T), Math.round(2 * T)).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - want[0]) < 30 && Math.abs(d[i + 1] - want[1]) < 30 && Math.abs(d[i + 2] - want[2]) < 30) n++; return n; };
+      const one = count({ k: 'text', x: 4.5, y: 5.3, t: 0, dur: 1e9, s: '88', c: '#20ff20' }, [32, 255, 32]);
+      const two = count({ k: 'text', x: 4.5, y: 5.3, t: 0, dur: 1e9, s: '88', c: '#20ff20', sz: 2 }, [32, 255, 32]);
+      const def = count({ k: 'text', x: 4.5, y: 5.3, t: 0, dur: 1e9, s: '88' }, [243, 210, 122]);
+      g.fx = []; return { one, two, def };
+    });
+    check(tx.one > 10 && tx.two > tx.one * 2.5 && tx.def > 10, "text fx: f.c sets the colour, f.sz scales the font, and the default is still #f3d27a " + JSON.stringify(tx));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'leak-feedback: the keep is drawn over leaking enemies, which fade out';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const k = await G(page, () => { const W = window.__pw, g = W.G, T = document.querySelector('#cv').width / W.COLS, kp = W.keep(); g.running = false; g.enemies = []; g.wave = 10; return { T, kp, door: [kp.x * T, (kp.y + 0.1) * T], flag: [(kp.x + 0.32) * T, (kp.y - 0.54) * T] }; });
+    const door0 = await px(page, k.door[0], k.door[1]);
+    check(near3(door0, [0x2b, 0x24, 0x1c], 3), "the keep's door centre is the door colour #2b241c " + JSON.stringify(door0));
+    const cover = await G(page, () => { const W = window.__pw, g = W.G, kp = W.keep(); W.spawn('boss', g.map.path.len - 0.4); const e = g.enemies[0]; return { d: Math.hypot(e.x - kp.x, e.y - kp.y - 0.1), r: e.r * 0.85, dist: g.map.path.len - e.dist }; });
+    check(cover.d < cover.r && Math.abs(cover.dist - 0.4) < 1e-9, 'a Warlord at path.len-0.4 has its body over the door centre ' + JSON.stringify(cover));
+    const door1 = await px(page, k.door[0], k.door[1]);
+    check(near3(door1, door0, 1) && !near3(door1, [0x6a, 0x3d, 0x8f], 40), 'drawn under the keep: the door centre still matches the keep colour, not the enemy colour ' + JSON.stringify(door1));
+    // Fade: alpha = clamp((path.len-0.2-dist)/0.9, 0, 1), drawing only. Set dist without stepping, so the grunt stays where it was drawn.
+    const fade = await G(page, () => {
+      const W = window.__pw, g = W.G, c = document.querySelector('#cv').getContext('2d'), T = document.querySelector('#cv').width / W.COLS, L = g.map.path.len;
+      g.enemies = []; g.wave = 1; W.spawn('grunt', 3); const e = g.enemies[0], x = Math.round(e.x * T), y = Math.round(e.y * T);
+      const at = d => { e.dist = d; W.render(0); return [...c.getImageData(x, y, 1, 1).data].slice(0, 3); };
+      const solid = at(L - 1.1), half = at(L - 0.65), gone = at(L - 0.2), early = at(3);
+      g.enemies = []; W.render(0); const bg = [...c.getImageData(x, y, 1, 1).data].slice(0, 3);
+      return { solid, half, gone, early, bg, leaked: g.lives };
+    });
+    const mid = fade.solid.map((v, i) => (v + fade.bg[i]) / 2);
+    check(near3(fade.solid, [0xc9, 0x58, 0x3a], 3) && near3(fade.early, fade.solid, 1), 'a grunt is fully drawn up to 0.9 tile before the leak line ' + JSON.stringify(fade));
+    check(near3(fade.half, mid, 4), 'halfway through the fade it is drawn at half alpha ' + JSON.stringify({ half: fade.half, mid }));
+    check(near3(fade.gone, fade.bg, 1) && fade.leaked === 20, 'at the leak line it is not drawn at all, and setting dist alone leaks nothing');
+    const wisp = await G(page, () => { const W = window.__pw, g = W.G, c = document.querySelector('#cv').getContext('2d'), T = document.querySelector('#cv').width / W.COLS; g.enemies = []; g.wave = 5; W.spawn('wisp', 3); const e = g.enemies[0], x = Math.round(e.x * T), y = Math.round((e.y - 0.25) * T);
+      W.render(0); const on = [...c.getImageData(x, y, 1, 1).data].slice(0, 3); e.dist = g.map.path.len - 0.2; W.render(0); const off = [...c.getImageData(x, y, 1, 1).data].slice(0, 3); g.enemies = []; W.render(0); return { on, off, bg: [...c.getImageData(x, y, 1, 1).data].slice(0, 3) }; });
+    check(!near3(wisp.on, wisp.bg, 10) && near3(wisp.off, wisp.bg, 1), 'fliers fade out the same way ' + JSON.stringify(wisp));
+    // Leak distance is unchanged: path.len-0.2.
+    const ld = await G(page, () => { const W = window.__pw, g = W.G; g.enemies = []; g.lives = 20; g.wave = 1; W.spawn('grunt', g.map.path.len - 0.25); const e = g.enemies[0]; e.spd = 0.045 * 30; W.step(1 / 30); const a = g.lives; e.spd = 0.006 * 30; W.step(1 / 30); return [a, g.lives]; });
+    check(ld[0] === 20 && ld[1] === 19, 'the leak line is still path.len-0.2 (at -0.205 no leak, at -0.199 a leak) ' + JSON.stringify(ld));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'leak-feedback: low lives';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const flagAt = await G(page, () => { const W = window.__pw, T = document.querySelector('#cv').width / W.COLS, kp = W.keep(); W.G.running = false; W.G.gold = 100; return [(kp.x + 0.33) * T, (kp.y - 0.54) * T]; });
+    const flag20 = await px(page, flagAt[0], flagAt[1]);
+    check(!(await cls(page, '#sLives', 'low')) && near3(flag20, [0xe3, 0xad, 0x45], 12), 'at 20 lives: no low class and a brass keep flag ' + JSON.stringify(flag20));
+    await G(page, () => { window.__pw.G.lives = 6; }); await page.waitForTimeout(100);
+    check(!(await cls(page, '#sLives', 'low')), 'at 6 lives #sLives has no low class');
+    await G(page, () => { window.__pw.G.lives = 5; }); await page.waitForTimeout(100);
+    const low = await page.$eval('#sLives svg', el => { const cs = getComputedStyle(el); return { low: el.parentNode.classList.contains('low'), anim: cs.animationName, dur: cs.animationDuration, n: cs.animationIterationCount }; });
+    check(low.low && low.anim === 'heartbeat' && low.dur === '1.1s' && low.n === 'infinite', "with lives<=5, #sLives has class 'low': a 1.1s heartbeat loop on the heart " + JSON.stringify(low));
+    const flag5 = await px(page, flagAt[0], flagAt[1]);
+    check(near3(flag5, [0xe3, 0x64, 0x4f], 12), 'and the keep flag is #e3644f instead of brass ' + JSON.stringify(flag5));
+    await G(page, () => { const W = window.__pw, g = W.G; g.lives = 3; W.spawn('grunt', g.map.path.len - 0.21); W.step(1 / 30); });
+    const both = await page.$eval('#sLives svg', el => ({ low: el.parentNode.classList.contains('low'), hurt: el.parentNode.classList.contains('hurt'), anim: getComputedStyle(el).animationName }));
+    check(both.low && both.hurt && both.anim === 'lifehit', 'a leak at low lives plays the hurt jump over the heartbeat ' + JSON.stringify(both));
+    await page.waitForTimeout(600);
+    check((await page.$eval('#sLives svg', el => getComputedStyle(el).animationName)) === 'heartbeat', 'then the heartbeat resumes');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const rmLow = await page.$eval('#sLives svg', el => getComputedStyle(el).animationName);
+    check(rmLow === 'none', 'reduced motion: no heartbeat (' + rmLow + ')');
+    await G(page, () => { const W = window.__pw, g = W.G; W.spawn('grunt', g.map.path.len - 0.21); W.step(1 / 30); });
+    const rmHurt = await page.$eval('#sLives', el => ({ hurt: el.classList.contains('hurt'), anim: getComputedStyle(el.querySelector('svg')).animationName, span: getComputedStyle(el.querySelector('span')).color }));
+    check(rmHurt.hurt && rmHurt.anim === 'none', "emulateMedia reducedMotion 'reduce': the computed animation-name on '#sLives svg' is 'none' during 'hurt' " + JSON.stringify(rmHurt));
+    check(rmHurt.span === 'rgb(255, 138, 117)', 'reduced motion: only the colour changes (#ff8a75)');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await G(page, () => { window.__pw.newGame(1); });
+    await page.waitForTimeout(100);
+    check(!(await cls(page, '#sLives', 'low')), 'a new run at 20 lives clears low');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'leak-feedback: a beat before the loss screen';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    check(((await stored(page)).saves.meadow || {}).wave === 0, 'a run with a tower is saved');
+    const o = await G(page, () => { const W = window.__pw, g = W.G; g.lives = 1; g.cleared = 3; g.enemies = []; W.spawn('grunt', g.map.path.len - 0.21); W.step(1 / 30); window.__overAt = performance.now();
+      return { over: g.over, running: g.running, hurtT: g.hurtT, lives: g.lives, save: W.S.saves.meadow, best: JSON.parse(localStorage.getItem('pathwarden.v1')).best.meadow, text: g.fx.some(f => f.k === 'text' && f.s === '-1') }; });
+    check(o.over && !o.running && o.lives === 0, 'G.lives=1 then a leak: the run is over at once');
+    check(o.save === undefined && o.best === 3, "gameOver still records the best wave and deletes the road's save right away " + JSON.stringify(o));
+    check(o.hurtT === 0.9 && o.text, "gameOver sets G.hurtT to 0.9, and the '-1' still shows");
+    await page.waitForTimeout(100);
+    const hold = await G(page, () => ({ el: performance.now() - window.__overAt, hidden: document.querySelector('#endOv').hidden, inert: document.querySelector('#app').inert, hurtT: window.__pw.G.hurtT }));
+    check(hold.hidden && hold.el < 900, `#endOv is still hidden after 100ms (${Math.round(hold.el)}ms)`);
+    check(hold.hurtT > 0 && hold.hurtT < 0.9 && !hold.inert, 'during the hold the vignette keeps fading after game over, and the board is not covered ' + JSON.stringify(hold));
+    await tapTile(page, 4, 2);
+    await G(page, () => document.querySelector('#bPause').click());
+    check((await G(page, () => window.__pw.G.sel)) === null && (await hidden(page, '#pauseOv')), 'board taps and Pause do nothing during the hold');
+    const left = await G(page, () => 1000 - (performance.now() - window.__overAt));
+    if (left > 0) await page.waitForTimeout(left);
+    check(!(await hidden(page, '#endOv')) && (await text(page, '#endTitle')) === 'The keep has fallen', '#endOv is visible after 1000ms');
+    const a = await active(page);
+    check(a.id === 'bEndMain' && (await G(page, () => document.querySelector('#app').inert)), 'the loss screen takes focus and makes the game inert ' + JSON.stringify(a));
+    // A run started during the hold never gets the old loss screen.
+    await page.click('#bEndMain');
+    await G(page, () => { const W = window.__pw, g = W.G; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.21); W.step(1 / 30); W.newGame(1); window.__pw.G.running = true; });
+    await page.waitForTimeout(1000);
+    check((await hidden(page, '#endOv')) && (await G(page, () => !window.__pw.G.over)), 'a new run started during the hold does not show the old loss screen');
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
