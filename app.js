@@ -7,7 +7,10 @@ import { pip } from "./mascot.js";
    responses/*.json in the same repo whenever the phone is online.
    ========================================================================= */
 
-const KEY = "blogquest.v1";
+// Demo mode: a page can set window.BQ_DEMO = {deck} before loading this script.
+// Cards come from that deck, nothing is sent anywhere, and progress stays in this browser.
+const DEMO = window.BQ_DEMO || null;
+const KEY = DEMO ? "blogquest.demo" : "blogquest.v1";
 const LESSON_SIZE = 5;
 const XP = { answer: 10, high: 5, note: 5, source: 5, later: 2 };
 const SEV_ORDER = { high: 0, medium: 1, low: 2 };
@@ -43,8 +46,10 @@ function load() {
   } catch (e) { /* storage blocked or corrupt — start fresh in memory */ }
   return structuredClone(DEFAULTS);
 }
+let saveWarned = false;
 function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast("Couldn't save on this device"); }
+  try { localStorage.setItem(KEY, JSON.stringify(S)); }
+  catch (e) { if (!saveWarned) { saveWarned = true; toast("This browser won't save progress — it resets when you close the app"); } }
 }
 
 /* ---------------- helpers ---------------- */
@@ -227,6 +232,15 @@ async function restoreAnswered() {
 }
 
 async function sync({ quiet = false } = {}) {
+  if (DEMO) {
+    packagePending();
+    const n = S.outbox.reduce((k, o) => k + o.body.answers.length, 0);
+    S.demoSent = [...(S.demoSent || []), ...S.outbox].slice(-20); S.outbox = []; save();
+    if (n) toast(`Demo: ${n} answer${n === 1 ? "" : "s"} would upload now`);
+    else if (!quiet) toast("Demo mode: nothing to upload");
+    refreshAfterSync();
+    return;
+  }
   if (syncing) return;
   if (!S.settings.token) { if (!quiet) toast("Add the GitHub key in Settings first"); return; }
   if (!navigator.onLine) { if (!quiet) toast("Offline — will sync when you're back online"); return; }
@@ -336,7 +350,8 @@ function topbar() {
     <span class="pill streak" title="Day streak">🔥 ${streakNow()}</span>
     <span class="pill miles" title="Miles earned">✈️ ${S.xp}</span>
     <span class="spacer"></span>
-    ${offline ? `<span class="pill off">📴 Offline</span>` : waiting ? `<span class="pill off">⏳ ${waiting} to upload</span>` : ""}
+    ${DEMO ? `<span class="pill off" title="Nothing is sent anywhere">🧪 Demo</span>` : ""}
+    ${offline ?`<span class="pill off">📴 Offline</span>` : waiting ? `<span class="pill off">⏳ ${waiting} to upload</span>` : ""}
   </div>`;
 }
 
@@ -355,7 +370,7 @@ function homeView() {
   const goal = S.settings.dailyGoal;
   const pct = Math.min(100, Math.round((doneToday / goal) * 100));
   const ps = posts().sort((a, b) => (b.open > 0) - (a.open > 0));
-  const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  const standalone = DEMO || matchMedia("(display-mode: standalone)").matches || navigator.standalone;
   if (!S.settings.token) return `${topbar()}
     <div class="hero">${pip("happy", 104)}<div class="bubble">Hi! I'm Pip 👋 I hunt for things on the blog that might be out of date. Let's get connected!</div></div>
     ${!standalone ? `<div class="tip">📲 <b>Do this first:</b> add Blog Quest to your home screen, then open it from there and connect. (iPhone: Share → <i>Add to Home Screen</i>. Android: ⋮ → <i>Install app</i>.) The home-screen app keeps its own storage, so connecting in the browser won't carry over.</div>` : ""}
@@ -535,6 +550,7 @@ function finishLesson() {
 }
 
 function syncLine() {
+  if (DEMO) return "Demo: in the real app these answers upload to GitHub for fixing.";
   const waiting = S.outbox.length + (S.pending.length ? 1 : 0);
   if (!S.settings.token) return "Saved on your phone. Connect GitHub in Settings to upload.";
   if (waiting) return navigator.onLine ? "Uploading your answers…" : "📴 Saved on your phone — uploads when you're back online.";
@@ -601,7 +617,30 @@ function passportView() {
       : `<p class="muted small">Finish every card on a post to earn its stamp.</p>`}`;
 }
 
+function demoSettingsView() {
+  const s = S.settings;
+  const last = (S.demoSent || []).slice(-1)[0];
+  return `${topbar()}<h2>⚙️ Settings</h2>
+    <div class="tip"><b>Demo mode.</b> Cards are built in, nothing is sent to GitHub or the blog, and progress stays in this browser only.</div>
+    <div class="card">
+      <div class="field"><label for="goal">Daily goal (cards)</label><input type="number" id="goal" min="1" max="30" value="${s.dailyGoal}"></div>
+      <label class="toggle">Sounds <input type="checkbox" id="sound" ${s.sound ? "checked" : ""}></label>
+      <button class="btn teal" data-act="save-demo">Save</button>
+    </div>
+    <div class="card">
+      <b>Try the rest of the loop</b>
+      <p class="small muted" style="margin:6px 0 12px">See the file the real app would upload, or pretend your fixes went live on the blog.</p>
+      <div style="display:grid;gap:10px">
+        <button class="btn ghost" data-act="demo-file" ${last ? "" : "disabled"}>${last ? "Show the last upload file" : "Finish a lesson to see its upload file"}</button>
+        <pre id="demo-file" hidden style="overflow:auto;max-height:320px;font-size:12px;background:var(--surface-2);padding:12px;border-radius:12px;white-space:pre-wrap;word-break:break-word">${last ? esc(`${last.path}\n\n${JSON.stringify(last.body, null, 2)}`) : ""}</pre>
+        <button class="btn sun" data-act="demo-live">🎉 Pretend my fixes went live</button>
+      </div>
+    </div>
+    <button class="linkbtn" data-act="reset" style="color:var(--coral-dark)">Reset the demo</button>`;
+}
+
 function settingsView() {
+  if (DEMO) return demoSettingsView();
   const s = S.settings;
   const waiting = S.outbox.reduce((n, o) => n + o.body.answers.length, 0) + S.pending.length;
   return `${topbar()}<h2>⚙️ Settings</h2>
@@ -649,9 +688,12 @@ function act(a) {
     case "later-all": startLesson(laterCards()); break;
     case "check": checkAnswer(); break;
     case "later": parkLater(); break;
-    case "quit":
-      if (lesson.answered && !confirm("Leave this lesson? Your answers so far are saved.")) return;
-      packagePending(); view = { name: "home" }; render(); sync({ quiet: true }); break;
+    case "quit": {
+      const leave = () => { packagePending(); view = { name: "home" }; render(); sync({ quiet: true }); };
+      if (lesson.answered) askConfirm("Leave this lesson?", "Your answers so far are saved.", "Leave", "Keep going").then((ok) => ok && leave());
+      else leave();
+      break;
+    }
     case "home": view = { name: "home" }; render(); break;
     case "sync": if (!S.settings.token) { view = { name: "settings" }; render(); } else sync(); break;
     case "paste-key":
@@ -668,6 +710,9 @@ function act(a) {
       connectWith(k); break;
     }
     case "undo": undoLast(); break;
+    case "save-demo":
+      S.settings.dailyGoal = Math.max(1, Math.min(30, parseInt($("#goal").value, 10) || 5));
+      S.settings.sound = $("#sound").checked; save(); toast("Saved"); break;
     case "save-settings":
       S.settings.token = $("#token").value.trim();
       S.settings.repo = $("#repo").value.trim() || DEFAULTS.settings.repo;
@@ -676,11 +721,46 @@ function act(a) {
       S.settings.sound = $("#sound").checked;
       save(); toast("Saved"); sync(); break;
     case "reset":
-      if (confirm("Reset progress on this phone? Answers already uploaded stay safe in GitHub.")) {
-        const settings = S.settings; S = structuredClone(DEFAULTS); S.settings = settings; save(); render(); sync({ quiet: true });
-      }
+      askConfirm("Reset progress?", DEMO ? "Clears this demo so you can start over." : "Answers already uploaded stay safe in GitHub.", "Reset", "Cancel").then((ok) => {
+        if (!ok) return;
+        const settings = S.settings; S = structuredClone(DEFAULTS); S.settings = settings;
+        if (DEMO) loadDemoDeck();
+        save(); view = { name: "home" }; render(); sync({ quiet: true });
+      });
       break;
+    case "demo-live": {
+      // Pretend some of her answers were applied to the blog, to preview the celebration.
+      const ids = Object.values(S.answers).filter((a) => a.decision !== "post_is_fine").map((a) => a.card_id);
+      if (!ids.length) { toast("Answer a card with a fix first"); return; }
+      const before = Object.keys(S.live).length;
+      ids.forEach((id) => (S.live[id] = { status: "applied", date: today() }));
+      const fresh = Object.keys(S.live).length - before; S.seenLive = Object.keys(S.live).length;
+      checkBadges(); save(); render();
+      toast(fresh ? `🎉 ${fresh} of your fixes ${fresh === 1 ? "is" : "are"} live on the blog!` : "Those fixes are already live");
+      if (fresh) { chime("win"); confetti(); }
+      break;
+    }
+    case "demo-file": {
+      const box = $("#demo-file");
+      if (box) box.hidden = !box.hidden;
+      break;
+    }
   }
+}
+
+// In-page confirmation (pop-up dialogs are blocked in some places the app runs).
+function askConfirm(title, body, yes, no) {
+  return new Promise((resolve) => {
+    const wrap = document.createElement("div");
+    wrap.className = "modal";
+    wrap.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="mt">${pip("wow", 64)}
+      <h3 id="mt">${esc(title)}</h3><p class="muted">${esc(body)}</p>
+      <div style="display:grid;gap:10px"><button class="btn" data-a="yes">${esc(yes)}</button><button class="btn ghost" data-a="no">${esc(no)}</button></div></div>`;
+    const done = (v) => { wrap.remove(); resolve(v); };
+    wrap.addEventListener("click", (e) => { const a = e.target.closest("[data-a]")?.dataset.a; if (a) done(a === "yes"); else if (e.target === wrap) done(false); });
+    document.body.appendChild(wrap);
+    $("[data-a=no]", wrap).focus();
+  });
 }
 
 async function connectWith(key) {
@@ -696,9 +776,17 @@ async function connectWith(key) {
   render(); sync({ quiet: true });
 }
 
+function loadDemoDeck() {
+  const d = DEMO.deck;
+  S.decks = { [d.created]: { id: d.created, sha: "demo", created: d.created, cards: d.cards } };
+  S.settings.token = "demo"; S.restored = true;
+}
+
 /* ---------------- boot ---------------- */
+if (DEMO) { loadDemoDeck(); save(); }
 // Setup link support: …/#token=github_pat_xxx  (the hash never leaves the phone)
 (function readSetupLink() {
+  if (DEMO) return;
   const h = new URLSearchParams(location.hash.slice(1));
   if (h.get("token")) {
     S.settings.token = h.get("token");
@@ -709,7 +797,7 @@ async function connectWith(key) {
   }
 })();
 
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+if (!DEMO && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 window.addEventListener("online", () => { sync({ quiet: true }); if (view.name !== "lesson") render(); });
 window.addEventListener("offline", () => { if (view.name !== "lesson") render(); });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") sync({ quiet: true }); });
