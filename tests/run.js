@@ -126,7 +126,7 @@ let BASE;
     const goldBefore = await G(page, () => window.__pw.G.gold);
     await page.click('#bSell');
     check((await G(page, () => window.__pw.G.towers.length)) === 1 && (await text(page, '#bSell')).startsWith('Confirm'), 'first sell tap asks to confirm');
-    await page.click('#bSell');
+    await page.waitForTimeout(450); await page.click('#bSell'); // (release review: the confirming tap must be its own tap, 400ms on)
     check((await G(page, () => window.__pw.G.towers.length)) === 0, 'second sell tap sells');
     check(spent === 160 && (await G(page, () => window.__pw.G.gold)) === goldBefore + spent, 'built and upgraded before wave 1, so the refund is everything spent (' + spent + ')');
     check((await G(page, () => window.__pw.G.grid[2 * 9 + 2])) === 0, 'tile is free again after selling');
@@ -203,7 +203,7 @@ let BASE;
     await page.click('#bResume');
     await page.waitForTimeout(200);
     check((await G(page, () => window.__pw.G.time)) > t0, 'time runs after resume');
-    await page.click('#bPause'); await page.click('#bRestart'); await page.click('#bRestart');
+    await page.click('#bPause'); await page.click('#bRestart'); await page.waitForTimeout(450); await page.click('#bRestart');
     const spd = await G(page, () => window.__pw.G.speed);
     check((await text(page, '#bSpeed')) === spd + '×', `speed label matches game speed after restart (label ${await text(page, '#bSpeed')}, speed ${spd})`);
     check(await hidden(page, '#pauseOv'), 'restart closes pause overlay');
@@ -437,7 +437,7 @@ let BASE;
     check((await stored(page)).saves.meadow.wave === 2, 'save untouched by an expired restart tap');
     await page.click('#bRestart'); await page.click('#bResume'); await page.click('#bPause');
     check((await text(page, '#bRestart')) === 'Restart road', 'restart disarms on Resume and when pause reopens');
-    await page.click('#bRestart'); await page.click('#bRestart');
+    await page.click('#bRestart'); await page.waitForTimeout(450); await page.click('#bRestart');
     g = await G(page, () => ({ wave: window.__pw.G.wave, towers: window.__pw.G.towers.length, map: window.__pw.G.map.id }));
     check(g.wave === 0 && g.towers === 0 && g.map === 'meadow', 'two taps restart the road at wave 0 ' + JSON.stringify(g));
     check(await hidden(page, '#pauseOv'), 'restart closes the pause overlay');
@@ -646,8 +646,13 @@ let BASE;
     check((await G(page, () => window.__pw.G.over)) && a.id === 'bEndMain' && a.inEnd, 'game over moves focus to Try again ' + JSON.stringify(a));
     await page.keyboard.press('Escape');
     check(await hidden(page, '#pauseOv'), 'Escape does not pause behind the end overlay');
+    // (release review: Back on the end card used to do nothing, which used up the run's history entry, so the next Back left the
+    // app. It now does what the card's Main menu does.)
     await G(page, () => window.dispatchEvent(new PopStateEvent('popstate', { state: null })));
-    check(await hidden(page, '#pauseOv') && !(await hidden(page, '#endOv')), 'popstate after game over does nothing');
+    check(await hidden(page, '#pauseOv') && (await hidden(page, '#endOv')) && !(await hidden(page, '#menu')), 'popstate on the end card opens the menu, as its Main menu does');
+    await startMap(page, 1);
+    await G(page, () => { const W = window.__pw, g = W.G; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); for (let i = 0; i < 30 && !g.over; i++) W.step(1 / 30); });
+    await page.waitForTimeout(1000);
     await page.click('#bEndMain');
     check((await G(page, () => history.state && history.state.pw)) === 'game' && !(await G(page, () => document.querySelector('#app').inert)), 'Try again keeps the run entry and clears inert');
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
@@ -1364,7 +1369,7 @@ let BASE;
     await page.click('#bSell');
     sb = await sellBtn();
     check(sb.label === 'Confirm' && sb.small === '+50' && (await G(page, () => window.__pw.G.towers.length)) === 1, "the first tap only arms it ('Confirm')");
-    await page.click('#bSell');
+    await page.waitForTimeout(450); await page.click('#bSell');
     check((await G(page, () => window.__pw.G.towers.length)) === 0 && (await G(page, () => window.__pw.G.gold)) === g0, 'selling twice returns gold to its prior value (' + g0 + ')');
 
     await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
@@ -1712,31 +1717,36 @@ let BASE;
 
     // The pinned bar fades in over the first 0.3s after the Warlord leaves the cave.
     const fadeIn = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), DPR = cv.width / cv.getBoundingClientRect().width;
-      const px = () => { W.render(0); return [...c.getImageData(Math.round(cv.width / 2), Math.round(9 * DPR), 1, 1).data].slice(0, 3); };
+      const px = () => { W.render(0); const bb = W.bossBarBox(); return [...c.getImageData(Math.round(cv.width / 2), Math.round((bb ? bb.y + 3 : 9) * DPR), 1, 1).data].slice(0, 3); };
       const t0 = g.bossBar.t, p0 = px(); for (let i = 0; i < 10; i++) W.step(1 / 30); return { t0, p0, t1: g.bossBar.t, p1: px() }; });
     check(fadeIn.t0 < 0.05 && !(fadeIn.p0[2] > fadeIn.p0[1] + 40), 'as the Warlord leaves the cave the pinned bar is still faint ' + JSON.stringify(fadeIn));
     check(fadeIn.t1 >= 0.3 && fadeIn.p1[2] > fadeIn.p1[1] + 40, 'and 0.3s later it is fully in ' + JSON.stringify(fadeIn));
 
-    // The acceptance pixel, then the bar's extent: x 6 to board-6, top 6px, Math.max(8, 0.2T) tall, or taller to hold its 0.28T labels.
+    // The acceptance pixel, then the bar's extent: x 6 to board-6, Math.max(8, 0.2T) tall, or taller to hold its 0.28T labels.
+    // (release review: on Meadow Bend and Quarry Run the cave is on the top edge, so the bar sits just below it instead of 6px down,
+    // where it covered the cave and the Warlord coming out; on Long Switchback, whose cave is on the left edge, it is still 6px down.
+    // y0 is where it is drawn: W.bossBarBox().)
     const pix = await G(page, () => { const W = window.__pw; W.newGame(1); const g = W.G; g.running = true; g.wave = 10;
       const cv = document.querySelector('#cv'), c = cv.getContext('2d'), DPR = cv.width / cv.getBoundingClientRect().width, T = cv.width / DPR / W.COLS, at = (x, y) => [...c.getImageData(Math.round(x * DPR), Math.round(y * DPR), 1, 1).data].slice(0, 3);
-      W.render(); const before = at(cv.width / DPR / 2, 9);
+      const cave = W.cave(), y0 = Math.ceil((cave.y + 0.33) * T) + 2;
+      W.render(); const before = at(cv.width / DPR / 2, y0 + 3);
       W.spawn('boss', 3); W.step(1 / 30); W.render();
-      const after = at(cv.width / DPR / 2, 9), h = Math.max(8, 0.2 * T, Math.max(9, Math.round(0.28 * T)) + 4), Wd = cv.width / DPR;
-      const r = { before, after, DPR, left: at(8, 9), right: at(Wd - 8, 9), outL: at(3, 9), top: at(Wd / 2, 4), bottom: at(Wd / 2, 6 + h - 2), below: at(Wd / 2, 6 + h + 1.5) };
+      const bb = W.bossBarBox(), after = at(cv.width / DPR / 2, y0 + 3), h = Math.max(8, 0.2 * T, Math.max(9, Math.round(0.28 * T)) + 4), Wd = cv.width / DPR;
+      const r = { y0, bb, before, after, DPR, left: at(8, y0 + 3), right: at(Wd - 8, y0 + 3), outL: at(3, y0 + 3), top: at(Wd / 2, y0 - 2), bottom: at(Wd / 2, y0 + h - 2), below: at(Wd / 2, y0 + h + 1.5) };
       g.running = false; return r; });
     const purple = p => p[2] > p[1] + 40;
-    check(purple(pix.after), `newGame(1); G.running=true; G.wave=10; spawn('boss',3); step(1/30); render(): canvas pixel (cv.width/2, 9*DPR) is purple-ish ${JSON.stringify(pix.after)}`);
+    check(purple(pix.after), `newGame(1); G.running=true; G.wave=10; spawn('boss',3); step(1/30); render(): canvas pixel (cv.width/2, (y0+3)*DPR) is purple-ish ${JSON.stringify(pix.after)}`);
     check(pix.before[1] > pix.before[2], 'with no Warlord that pixel is grass ' + JSON.stringify(pix.before));
-    check(purple(pix.left) && purple(pix.right) && purple(pix.bottom) && !purple(pix.outL) && !purple(pix.top) && !purple(pix.below), 'the bar runs from x 6 to board-6, from y 6 down Math.max(8, 0.2T, label size + 4) ' + JSON.stringify(pix));
+    check(pix.bb.y === pix.y0 && purple(pix.left) && purple(pix.right) && purple(pix.bottom) && !purple(pix.outL) && !purple(pix.top) && !purple(pix.below), 'the bar runs from x 6 to board-6, from just below the cave down Math.max(8, 0.2T, label size + 4) ' + JSON.stringify(pix));
     // Its labels sit inside it: the band under the bar (where the cave and the first stretch of road are) is the same with the bar
     // as without it, and 'WARLORD' is drawn in cream inside the bar.
     const lab = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), DPR = cv.width / cv.getBoundingClientRect().width, T = cv.width / DPR / W.COLS;
       const fs = Math.max(9, Math.round(0.28 * T)), h = Math.max(8, 0.2 * T, fs + 4), b = g.enemies.find(e => e.d.boss); g.fx = []; g.banner = null;
-      const strip = () => { W.render(0); return c.getImageData(0, Math.round((6 + h + 1) * DPR), cv.width, Math.round((fs + 6) * DPR)).data; };
+      W.render(0); const y0 = W.bossBarBox().y;
+      const strip = () => { W.render(0); return c.getImageData(0, Math.round((y0 + h + 1) * DPR), cv.width, Math.round((fs + 6) * DPR)).data; };
       const on = strip(); b.dead = true; const off = strip(); b.dead = false;
       let diff = 0; for (let i = 0; i < on.length; i++) if (Math.abs(on[i] - off[i]) > 2) diff++;
-      W.render(0); const d = c.getImageData(Math.round(6 * DPR), Math.round(6 * DPR), Math.round(2.5 * T * DPR), Math.round(h * DPR)).data; let cream = 0;
+      W.render(0); const d = c.getImageData(Math.round(6 * DPR), Math.round(y0 * DPR), Math.round(2.5 * T * DPR), Math.round(h * DPR)).data; let cream = 0;
       for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - 240) < 25 && Math.abs(d[i + 1] - 233) < 25 && Math.abs(d[i + 2] - 210) < 25) cream++;
       return { diff, cream, fs, h, T }; });
     check(lab.diff === 0 && lab.cream > 15, "the Warlord bar's labels are drawn inside it, and nothing under the bar changes " + JSON.stringify(lab));
@@ -1744,7 +1754,7 @@ let BASE;
     // The white trail lags the fill.
     const tr = await G(page, () => { const W = window.__pw, g = W.G, b = g.enemies.find(e => e.d.boss); const t0 = g.bossBar.trail; b.hp = b.max * 0.5; W.step(1 / 30); const t1 = g.bossBar.trail;
       const cv = document.querySelector('#cv'), c = cv.getContext('2d'), DPR = cv.width / cv.getBoundingClientRect().width, Wd = cv.width / DPR; W.render(0);
-      const at = f => [...c.getImageData(Math.round((7 + (Wd - 14) * f) * DPR), Math.round(9 * DPR), 1, 1).data].slice(0, 3); const white = at(0.75), fill = at(0.25);
+      const y = W.bossBarBox().y + 3, at = f => [...c.getImageData(Math.round((7 + (Wd - 14) * f) * DPR), Math.round(y * DPR), 1, 1).data].slice(0, 3); const white = at(0.75), fill = at(0.25);
       for (let i = 0; i < 45; i++) W.step(1 / 30); return { t0, t1, t45: g.bossBar.trail, frac: g.bossBar.frac, white, fill }; });
     check(tr.t0 === 1 && tr.t1 > 0.5 && tr.t1 < 1, `set boss hp to 50%: after one step G.bossBar.trail is ${tr.t1.toFixed(3)} (> 0.5)`);
     check(Math.abs(tr.t45 - 0.5) < 0.02 && tr.frac === 0.5, `after 45 more steps |trail-0.5| < 0.02 (${tr.t45.toFixed(4)})`);
@@ -2584,7 +2594,8 @@ let BASE;
       return { out, b6, b10, seen: W.S.seen.slice().sort().join() }; });
     // (review fix: the Brute's whole blurb runs past the intro's 2 lines on a 390px phone, so 'Armored, so small hits do less.' goes
     // and the line still ends on what it costs; see "the 'New' intro on every phone" below.)
-    check(seq.out[0] === 'New: Brute. Longshot ignores armor. Costs 2 lives.' && seq.out[1] === 'Next wave:' && seq.out[2] === 'New: Warlord. Heavy armor. Costs 5 lives.' && seq.out[3] === 'Next wave:', 'before waves 6 and 10 the Brute and the Warlord get their blurbs (the Brute\'s shortened to fit its 2 lines) ' + JSON.stringify(seq.out));
+    // (release review: the Warlord's blurb names its counter too, 'Longshot ignores armor.', and keeps it to the last.)
+    check(seq.out[0] === 'New: Brute. Longshot ignores armor. Costs 2 lives.' && seq.out[1] === 'Next wave:' && seq.out[2] === 'New: Warlord. Longshot ignores armor. Costs 5 lives.' && seq.out[3] === 'Next wave:', 'before waves 6 and 10 the Brute and the Warlord get their blurbs (the Brute\'s shortened to fit its 2 lines) ' + JSON.stringify(seq.out));
     check(seq.b6 === 'New: Brute' && seq.b10 === 'A Warlord is coming', "banner subs: 'New: Brute'; a Warlord's first wave keeps 'A Warlord is coming' " + JSON.stringify(seq));
     check(seq.out[4] === 'Next wave:' && seq.out[5] === 'Next wave:' && seq.seen === 'boss,brute,grunt,scout,splitter,wisp', 'once met, neither is introduced again ' + JSON.stringify(seq));
     const subs = await G(page, () => { const W = window.__pw, keep = W.S.seen, sub = (seen, w) => { W.S.seen = seen; return W.bannerSub(w); };
@@ -2672,17 +2683,20 @@ let BASE;
         W.refreshPanel();
         const nt = W.newTypes(w), type = nt[nt.length - 1], cr = c.getBoundingClientRect(), chips = [...c.querySelectorAll('.chip')], tag = c.querySelector('.theme');
         const inside = x => { const b = x.getBoundingClientRect(); return b.bottom <= cr.bottom + 0.5 && b.right <= cr.right + 0.5; };
-        out.push({ w, st, type, msg: m.textContent, l2: m.classList.contains('l2'), fits: m.scrollHeight <= m.clientHeight + 1, ends: m.textContent.endsWith(W.BLURB[type].split('. ').pop()),
+        // ends: the line keeps the sentence its blurb keeps to the last: 'Longshot ignores armor.' for an armored type, else the last one.
+        const keep = W.BLURB[type].includes('Longshot ignores armor.') ? 'Longshot ignores armor.' : W.BLURB[type].split('. ').pop();
+        out.push({ w, st, type, msg: m.textContent, l2: m.classList.contains('l2'), fits: m.scrollHeight <= m.clientHeight + 1, ends: m.textContent.includes(keep),
           named: m.textContent.startsWith(`New: ${W.ED[type].name}.`), lead: !!chips[0] && chips[0].dataset.t === type && inside(chips[0]), cut: chips.filter(x => !inside(x)).map(x => x.dataset.t),
           tag: tag ? !tag.hidden && inside(tag) : null, sh: i.scrollHeight, label: document.querySelector('#bWave').textContent });
       }
       W.S.seen = Object.keys(W.ED); g.W = {}; g.spawnQ = []; W.refreshPanel(); return out; });
     // At 320px wave 6 (Wisp, Grunt, Scout, Brute) leaves its last chip, the one Brute, past the row: the Wisp it introduces leads.
     const bad = r.filter(x => !x.l2 || !x.fits || !x.ends || !x.named || !x.lead || x.tag === false || x.sh > 50 || x.cut.length > (vp.width === 320 && x.w === 6 ? 1 : 0));
-    check(bad.length === 0 && r.length === 15, `${vp.width}px: every 'New' intro (Brute, Splitter, Wisp, Warlord; between waves, beside the early call and while a wave marches in) fits its 2 lines, keeps the name and the blurb's last sentence, leads the chips with the type it names, and keeps the theme tag ` + JSON.stringify(bad.slice(0, 3)));
+    check(bad.length === 0 && r.length === 15, `${vp.width}px: every 'New' intro (Brute, Splitter, Wisp, Warlord; between waves, beside the early call and while a wave marches in) fits its 2 lines, keeps the name and the sentence its blurb keeps last ('Longshot ignores armor.' for the Brute and the Warlord), leads the chips with the type it names, and keeps the theme tag ` + JSON.stringify(bad.slice(0, 3)));
     const brute = r.filter(x => x.w === 4).map(x => x.msg);
     // (While wave 3 marches in, the shorter 'Wave 3…' leaves room for 'Longshot ignores armor.' as well.)
-    if (vp.width === 320) check(brute[0] === 'New: Brute. Costs 2 lives.' && brute[1] === brute[0] && brute[2] === 'New: Brute. Longshot ignores armor. Costs 2 lives.' && r.filter(x => x.w === 5).every(x => x.tag) && r.find(x => x.w === 5 && x.st === 'early').label === 'Call early +45', "320px: the Brute's line is 'New: Brute. Costs 2 lives.' (beside 'Wave 3…' it keeps 'Longshot ignores armor.' too), and the wave-5 Swarm keeps its tag, also beside 'Call early +45' " + JSON.stringify(brute));
+    // (release review: armor decides runs, so where it can't all fit 'Costs 2 lives.' goes before 'Longshot ignores armor.'.)
+    if (vp.width === 320) check(brute[0] === 'New: Brute. Longshot ignores armor.' && brute[1] === brute[0] && brute[2] === 'New: Brute. Longshot ignores armor. Costs 2 lives.' && r.filter(x => x.w === 5).every(x => x.tag) && r.find(x => x.w === 5 && x.st === 'early').label === 'Call early +45', "320px: the Brute's line is 'New: Brute. Longshot ignores armor.' (beside 'Wave 3…' it keeps 'Costs 2 lives.' too), and the wave-5 Swarm keeps its tag, also beside 'Call early +45' " + JSON.stringify(brute));
     if (vp.width === 390) check(brute.every(x => x === 'New: Brute. Longshot ignores armor. Costs 2 lives.'), "390px: 'New: Brute. Longshot ignores armor. Costs 2 lives.' " + JSON.stringify(brute));
     if (vp.width === 320) await page.screenshot({ path: path.join(__dirname, 'out', 'new-intro-320.png') });
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
@@ -2719,7 +2733,7 @@ let BASE;
     const hpOf = (base, w) => Math.round(base * (1 + det.cfg.hpA * (w - 1) + det.cfg.hpB * (w - 1) ** 2));
     check(det.grunt6.t === `Grunt ×14 · ${hpOf(42, 6)} HP · Normal. Grunt. Steady and common.` && det.scout6.t === `Scout ×7 · ${hpOf(22, 6)} HP · Fast. Scout. Fast and fragile.`, 'Grunt: Normal; Scout: Fast (speed over 1.3) ' + JSON.stringify([det.grunt6, det.scout6]));
     check(det.wisp6.t === `Wisp ×4 · ${hpOf(36, 6)} HP · Normal. Wisp. Flies. Mortars can't hit it.` && det.splitter9.t === `Splitter ×${det.cfg.split9} · ${hpOf(80, 9)} HP · Normal. Splitter. Bursts into 2 Scouts.`, 'Wisp and Splitter ' + JSON.stringify([det.wisp6, det.splitter9]));
-    check(det.boss20.t === `Warlord ×2 · ${hpOf(900, 20)} HP · Slow · Armor 19. Warlord. Heavy armor. Costs 5 lives.`, 'Warlord at wave 20: Slow, Armor (12*(1+19*0.03)).toFixed(0) = 19 ' + JSON.stringify(det.boss20));
+    check(det.boss20.t === `Warlord ×2 · ${hpOf(900, 20)} HP · Slow · Armor 19. Heavy armor. Longshot ignores armor. Costs 5 lives.`, 'Warlord at wave 20: Slow, Armor (12*(1+19*0.03)).toFixed(0) = 19 ' + JSON.stringify(det.boss20));
     check(Object.entries(det).every(([k, d]) => k === 'cfg' || d.fits), 'every detail fits its 3 lines at 390px ' + JSON.stringify(Object.keys(det)));
     // A tap anywhere along the row picks the nearest chip (they are only 16px tall); a tile tap closes the detail.
     const box = await rect(page, '#chips');
@@ -2823,7 +2837,7 @@ let BASE;
     await tapTile(page, 2, 0);
     const mor = [];
     for (let i = 0; i < 4; i++) { await page.click('#bMode'); mor.push(await modeState(page)); }
-    check(mor.map(s => s.small).join(',') === 'Toughest,First,Toughest,First' && mor.every(s => s.msg === MODE_TIPS[s.small]), "a mortar cycles 'Toughest','First' " + JSON.stringify(mor.map(s => s.small)));
+    check(mor.map(s => s.small).join(',') === 'Toughest,First,Toughest,First' && mor.every(s => s.msg === (s.small === 'Toughest' ? 'Toughest: focuses Brutes and Warlords.' : MODE_TIPS[s.small])), "a mortar cycles 'Toughest','First' " + JSON.stringify(mor.map(s => s.small)));
     // Frost, Arc and Longshot hit fliers, so they cycle all three.
     const cyc = await G(page, () => { const W = window.__pw, g = W.G, out = {};
       for (const k of ['frost', 'arc', 'long']) { const t = g.towers.find(x => x.type === k && x.r === 0); g.selTower = t; W.refreshPanel(); const l = [];
@@ -3133,7 +3147,7 @@ let BASE;
     check(JSON.stringify(v.td) === JSON.stringify({ bolt: '50,2.4,0.55,11,0,0,0', mortar: '90,2.4,1.5,30,0.95,0,0', frost: '70,2,1,5,0.75,0.42,0', arc: '130,2.2,1.1,21,0,0,3', long: '120,4.6,2.1,78,0,0,0' }), 'no tower stat changed in this pass ' + JSON.stringify(v.td));
     // README 'Balance' records the numbers.
     const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8'), bal = readme.slice(readme.indexOf('## Balance'));
-    check(readme.includes('## Balance') && bal.includes('`CFG.hpB` 0.021') && bal.includes('`CFG.themeBudget` 0.85') && bal.includes('`hp` 1.06') && bal.includes('Brute 8') && bal.includes('Warlord 12') && bal.includes('node tests/balance.js') && /smart \(20 seeds\) \| 20\/20/.test(bal), "README.md has a 'Balance' section with the final numbers and the bot results");
+    check(readme.includes('## Balance') && bal.includes('`CFG.hpB` 0.021') && bal.includes('`CFG.themeBudget` 0.85') && bal.includes('`hp` 1.06') && bal.includes('Brute 8') && bal.includes('Warlord 12') && bal.includes('node tests/balance.js') && /smart \(20 seeds, 40 on Normal\) \| 20\/20/.test(bal), "README.md has a 'Balance' section with the final numbers and the bot results");
     // tests/balance.js: exists, parses, and holds the spec's profiles and targets. It is run by hand (10-20 minutes budgeted), never from here.
     const bj = path.join(__dirname, 'balance.js'), src = fs.existsSync(bj) ? fs.readFileSync(bj, 'utf8') : '';
     const parse = require('child_process').spawnSync(process.execPath, ['--check', bj], { encoding: 'utf8' });
@@ -3141,8 +3155,10 @@ let BASE;
     // (review fix: smart is the plan's profile again, with no reading ahead; the reading bot is the extra 'reader' profile. Smart and
     // early play Normal on past wave 30 until they fall, so the early target compares how far each gets, not 30 with 30.)
     // (1.1 balance: spam has smart's noise; every profile spends between waves and once a second during one; new targets.)
-    check(["smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1] }", "spam: { opts: { allow: ['bolt'], div: 0, noise: 0.3 }, maps: [0, 1, 2], seeds: range(5) }", "mlf: { opts: { allow: ['mortar', 'long', 'frost'] }, maps: [1], seeds: range(5) }", 'early: { opts: { ...SMART, early: true }', 'const SMART = { frostN: 3, div: 0.3, noise: 0.3 };', "reader: { opts: { ...SMART, look: 4 }", '(P.endless || []).includes(m) ? MAX_ENDLESS : 30', 'const MAX_ENDLESS = 100;', 'if (n % 30) continue;'].every(x => src.includes(x)), 'it defines the smart (the plan\'s profile), spam, mlf, early and reader profiles over the spec seeds, spends once a second during a wave, and plays smart and early on Normal until they fall');
-    check(['smart wins Easy >= 19/20', 'smart wins Normal >= 17/20', 'smart wins Hard 8-12/20', "const SPAM = [[15, 29], [15, 23], [12, 23]];", 'loses at least 1 life on an Air raid wave in every run', 'median cleared wave within 10', 'median lives at wave 30 within 3', 'early vs smart on Hard: wins within', 'Normal winners earn 3, 2 and 1 stars', 'Hard winners rarely earn 3 stars'].every(x => src.includes(x)) && !/require\(['"][^'"]*balance/.test(fs.readFileSync(__filename, 'utf8')), 'and checks every target; tests/run.js does not run it');
+    // (release review: a second Bolts-only profile, spamUp, upgrades first; smart and early play their endless Normal on 40 seeds.)
+    check(["smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40) }", "spam: { opts: { allow: ['bolt'], div: 0, noise: 0.3 }, maps: [0, 1, 2], seeds: range(5) }",
+      "spamUp: { opts: { allow: ['bolt'], div: 0, noise: 0.3, depth: 3 }, maps: [0, 1, 2], seeds: range(5) }", "early: { opts: { ...SMART, early: true }, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40) }", "mlf: { opts: { allow: ['mortar', 'long', 'frost'] }, maps: [1], seeds: range(5) }", 'early: { opts: { ...SMART, early: true }', 'const SMART = { frostN: 3, div: 0.3, noise: 0.3 };', "reader: { opts: { ...SMART, look: 4 }", '(P.endless || []).includes(m) ? MAX_ENDLESS : 30', 'const MAX_ENDLESS = 100;', 'if (n % 30) continue;'].every(x => src.includes(x)), 'it defines the smart (the plan\'s profile), spam, spamUp, mlf, early and reader profiles over the spec seeds, spends once a second during a wave, and plays smart and early on Normal until they fall');
+    check(['smart wins Easy >= 19/20', 'smart wins Normal >= 17/20', 'smart wins Hard 8-12/20', "const SPAM = [[15, 29], [15, 23], [12, 23]];", 'loses at least 1 life on an Air raid wave in every run', 'mean cleared wave within 3', 'median lives at wave 30 within 3', 'wins any road', 'const UP = [[15, 30], [15, 27], [15, 27]];', 'early vs smart on Hard: wins within', 'Normal winners earn 3, 2 and 1 stars', 'Hard winners rarely earn 3 stars'].every(x => src.includes(x)) && !/require\(['"][^'"]*balance/.test(fs.readFileSync(__filename, 'utf8')), 'and checks every target; tests/run.js does not run it');
     // A 1.1 save from before this item still loads: its run carries on into the themed waves.
     await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ saves: { meadow: { map: 'meadow', wave: 6, gold: 300, lives: 17, towers: [{ type: 'mortar', c: 2, r: 2, level: 2, spent: 160, mode: 'first' }] } }, last: 'meadow', best: { meadow: 6 } })));
     await page.reload(); await page.waitForTimeout(250);
@@ -3209,7 +3225,8 @@ let BASE;
     c = await endCard(page);
     check(w9.stars === 3 && (await stored(page)).stars.meadow === 3, 'acceptance: replaying with lives=9 keeps S.stars.meadow === 3 ' + JSON.stringify(w9));
     check(c.on === 1 && c.n === 3 && c.aria === '1 of 3 stars' && c.popAt.every(p => p === '-'), "the win card shows this run's 1 star, and nothing pops (the road already has more) " + JSON.stringify(c));
-    check(c.hint === 'Finish with 10 or more lives for a second star.', "1 star: the hint reads 'Finish with 10 or more lives for a second star.' (" + c.hint + ')');
+    // (release review: the road already has 3 stars, so the hint says it keeps them rather than asking for a second.)
+    check(c.hint === 'Meadow Bend keeps its 3 stars.', "1 star on a road that had 3: the hint reads 'Meadow Bend keeps its 3 stars.' (" + c.hint + ')');
     // With no run saved, the card reads 'Best wave 30' after its stars.
     await G(page, () => { delete window.__pw.S.saves.meadow; });
     await page.click('#bEndAlt'); await page.waitForTimeout(100);
@@ -3453,7 +3470,7 @@ let BASE;
       return { earned: g.stats.gold, delta: g.gold - g0, kills: g.stats.kills, early, cleared: g.cleared }; });
     check(gd.cleared === 2 && gd.earned === gd.delta && gd.earned > 0, 'over a wave and an early-called wave, gold earned is exactly the gold gained (kills, 2 wave bonuses, the early bonus) ' + JSON.stringify(gd));
     await G(page, () => { const W = window.__pw, g = W.G; g.running = true; });
-    await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]'); await tapTile(page, 2, 2); await page.click('#bSell'); await page.click('#bSell');
+    await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]'); await tapTile(page, 2, 2); await page.click('#bSell'); await page.waitForTimeout(450); await page.click('#bSell');
     const sold = await G(page, () => ({ towers: window.__pw.G.towers.length, earned: window.__pw.G.stats.gold }));
     check(sold.towers === 0 && sold.earned === gd.earned, 'selling a tower is not gold earned ' + JSON.stringify(sold));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
@@ -3592,6 +3609,431 @@ let BASE;
     f = await fit();
     check(f.whole && f.inside && f.noX && f.alt && f.title, '320x568, a 2-star win card with its hint and report fits the same way ' + JSON.stringify(f));
     await page.screenshot({ path: path.join(__dirname, 'out', 'stars-win-320.png') });
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // ===============================================================
+  // 1.1 release review fixes. Each block reproduces a reviewer's finding and checks the fix.
+  // vis(page, true) is the app going to the background (as when the player switches apps or tabs), false coming back.
+  const vis = (page, hide) => page.evaluate(h => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => h });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => h ? 'hidden' : 'visible' }); document.dispatchEvent(new Event('visibilitychange')); }, hide);
+  // Sets up a preview state: the next wave is w; st is 'calm', 'early' (a wave on the road, so #bWave offers the early call) or 'march'.
+  const PREVIEW_JS = `(g, W, w, st) => { g.wave = w - 1; g.W = {}; g.spawnQ = []; g.chipTip = null;
+    if (st === 'early') g.W = { [w - 1]: { rem: 0, alive: 1 } };
+    if (st === 'march') { g.spawnQ = [{ at: 1e9, type: 'grunt', w: w - 1 }]; g.W = { [w - 1]: { rem: 1, alive: 0 } }; }
+    W.refreshPanel(); }`;
+
+  // Armor decides runs now, so its answer must reach a 320px player before the loss card: every Brute and Warlord line keeps
+  // 'Longshot ignores armor.' to the last (lead designer), and the Warlord's blurb names it too.
+  current = 'release review: every Brute and Warlord line says Longshot ignores armor, from 320px up';
+  for (const vp of [{ width: 320, height: 568 }, { width: 330, height: 600 }, { width: 360, height: 640 }, { width: 390, height: 780 }]) {
+    const { ctx, page } = await newPage(browser, { viewport: vp });
+    await startMap(page, 1);
+    const r = await G(page, js => { const setPreview = eval(js), W = window.__pw, g = W.G, m = document.querySelector('#infoMsg'), out = [], all = Object.keys(W.ED); g.running = false; W.build('bolt', 2, 2);
+      const line = (k, w, st, t) => out.push({ k, w, st, t, msg: m.textContent, fits: m.scrollHeight <= m.clientHeight + 1 });
+      // Every wave to 100 that brings Brutes or Warlords: a tap on their chip, between waves, beside the early call and while a wave marches in.
+      for (let w = 2; w <= 100; w++) {
+        const types = all.filter(t => W.ED[t].armor && W.buildWave(w).some(([x]) => x === t)); if (!types.length) continue;
+        for (const st of ['calm', 'early', 'march']) for (const t of types) {
+          W.S.seen = all; setPreview(g, W, w, st); document.querySelector(`#chips .chip[data-t="${t}"]`).click(); line('detail', w, st, t);
+        }
+      }
+      // The 'New' intros: the Brute's first wave (4) and the Warlord's (10).
+      for (const [w, seen, t] of [[4, ['grunt', 'scout'], 'brute'], [10, ['grunt', 'scout', 'brute', 'wisp', 'splitter'], 'boss']]) for (const st of ['calm', 'early', 'march']) {
+        W.S.seen = seen; setPreview(g, W, w, st); line('new', w, st, t);
+      }
+      W.S.seen = all; setPreview(g, W, 1, 'calm'); return { out, boss: W.BLURB.boss }; }, PREVIEW_JS);
+    const name = t => t === 'boss' ? 'Warlord' : 'Brute';
+    const bad = r.out.filter(x => !x.fits || !x.msg.includes('Longshot ignores armor.') || !x.msg.startsWith(x.k === 'new' ? `New: ${name(x.t)}.` : `${name(x.t)} ×`));
+    check(r.boss === 'Warlord. Heavy armor. Longshot ignores armor. Costs 5 lives.', "the Warlord's blurb names its counter: " + r.boss);
+    check(bad.length === 0 && r.out.length > 150, `${vp.width}px: every Brute and Warlord chip detail (waves 4-100) and 'New' intro, between waves, beside the early call and while a wave marches in, fits and says 'Longshot ignores armor.' (${r.out.length} lines) ` + JSON.stringify(bad.slice(0, 3)));
+    const at = (k, w, t, st = 'calm') => r.out.find(o => o.k === k && o.w === w && o.t === t && o.st === st).msg;
+    if (vp.width === 320) {
+      check(at('detail', 6, 'brute').endsWith('Armor 9. Longshot ignores armor.') && at('new', 4, 'brute') === 'New: Brute. Longshot ignores armor.' && at('new', 10, 'boss') === 'New: Warlord. Longshot ignores armor.',
+        "320px: 'Costs 2 lives.' gives way before 'Longshot ignores armor.', in the intro and the detail " + JSON.stringify([at('detail', 6, 'brute'), at('new', 4, 'brute'), at('new', 10, 'boss')]));
+      check(at('detail', 30, 'boss') === `Warlord ×3 · ${at('detail', 30, 'boss').split(' · ')[1]} · Armor 22. Longshot ignores armor.`, "320px: the wave-30 Warlords' detail drops its speed rather than its counter (" + at('detail', 30, 'boss') + ')');
+      await G(page, js => { const setPreview = eval(js), W = window.__pw; setPreview(W.G, W, 14, 'calm'); document.querySelector('#chips .chip[data-t="brute"]').click(); }, PREVIEW_JS);
+      await page.screenshot({ path: path.join(__dirname, 'out', 'armor-counter-320.png') });
+    }
+    if (vp.width === 390) check(at('detail', 6, 'brute').endsWith('Armor 9. Longshot ignores armor. Costs 2 lives.') && at('new', 4, 'brute') === 'New: Brute. Longshot ignores armor. Costs 2 lives.',
+      '390px: the Brute keeps its counter and its cost ' + JSON.stringify([at('detail', 6, 'brute'), at('new', 4, 'brute')]));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // A tapped chip's detail folds the row away for 4s. A tap where another chip was used to do nothing; it now shows that chip, and
+  // a tap where the shown one was closes the detail.
+  current = 'release review: while a chip detail shows, the other chips are a tap away';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const spotsAt = w => G(page, w => { const W = window.__pw; W.G.running = false; W.S.seen = Object.keys(W.ED); W.G.wave = w - 1; W.G.chipTip = null; W.refreshPanel();
+      return Object.fromEntries([...document.querySelectorAll('#chips .chip,#chips .theme')].map(c => { const r = c.getBoundingClientRect(); return [c.classList.contains('theme') ? 'tag' : c.dataset.t, { x: r.left + r.width / 2, y: r.top + r.height / 2 }]; })); }, w);
+    const tip = () => G(page, () => { const g = window.__pw.G, c = document.querySelector('#chips'); return { type: g.chipTip && g.chipTip.type, msg: document.querySelector('#infoMsg').textContent, off: c.classList.contains('off'), shown: !c.hidden && c.getBoundingClientRect().height > 0 }; });
+    const tap = async p => { await page.touchscreen.tap(p.x, p.y); await page.waitForTimeout(60); return tip(); };
+    await G(page, () => window.__pw.build('bolt', 2, 2));
+    let sp = await spotsAt(3);
+    const a = await tap(sp.scout), b = await tap(sp.grunt), c = await tap(sp.grunt);
+    check(a.type === 'scout' && a.off && a.msg.startsWith('Scout ×5'), 'wave 3: a tap on the Scout chip shows its detail, and the row folds away ' + JSON.stringify(a));
+    check(b.type === 'grunt' && b.off && b.msg.startsWith('Grunt ×10'), 'a tap where the Grunt chip was shows the Grunt at once (it did nothing for 4s) ' + JSON.stringify(b));
+    check(c.type === null && !c.off && c.shown && c.msg === 'Next wave:', 'a tap where the chip on show was closes the detail, and the row is back ' + JSON.stringify(c));
+    // The wave-7 Air raid: its tag shows the Wisp; a tap where the Grunt was then shows the Grunt.
+    sp = await spotsAt(7);
+    const d = await tap(sp.tag), e = await tap(sp.grunt);
+    check(d.type === 'wisp' && e.type === 'grunt', "wave 7: the 'AIR RAID' tag shows the Wisp, and a tap where the Grunt was shows the Grunt " + JSON.stringify([d.type, e.type]));
+    // The wave-6 preview's four chips, one tap each, with no wait in between.
+    sp = await spotsAt(6);
+    const seen = [];
+    for (const t of ['grunt', 'scout', 'brute', 'wisp']) seen.push((await tap(sp[t])).type);
+    check(seen.join() === 'grunt,scout,brute,wisp', 'wave 6: four taps read all four chips ' + seen.join());
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // Each tab read the store once and wrote all of it back, so a stale tab put old runs, bests and stars back over newer ones.
+  current = 'release review: two tabs share one store';
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 780 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true, serviceWorkers: 'block' });
+    const open = async () => { const p = await ctx.newPage(); p.errors = []; p.on('pageerror', e => p.errors.push(e.message)); await p.goto(`${BASE}/index.html`); await p.waitForTimeout(250); return p; };
+    const brief = p => G(p, () => { const s = JSON.parse(localStorage.getItem('pathwarden.v1')); return { best: s.best, saves: Object.fromEntries(Object.entries(s.saves).map(([k, v]) => [k, v.wave])), muted: !!s.muted, stars: s.stars }; });
+    const A = await open();
+    await startMap(A, 1); await G(A, () => window.__pw.build('bolt', 2, 2)); await killWaves(A, 2);
+    await vis(A, true);
+    const s1 = await brief(A);
+    const B = await open();
+    await startMap(B, 2); await G(B, () => window.__pw.build('long', 3, 2)); await killWaves(B, 3);
+    const s2 = await brief(B);
+    await vis(A, false); await A.waitForTimeout(50); await vis(A, true);
+    const s3 = await brief(A);
+    check(s1.saves.meadow === 2 && s2.saves.quarry === 3 && s2.saves.meadow === 2, 'tab A saved Meadow at wave 2, then tab B saved Quarry at wave 3 ' + JSON.stringify([s1, s2]));
+    check(s3.best.quarry === 3 && s3.saves.quarry === 3 && s3.best.meadow === 2 && s3.saves.meadow === 2, "switching back to tab A and away again keeps tab B's Quarry best and run " + JSON.stringify(s3));
+    // A tab left on the menu since before B's next wave only toggles Sound: B's newer run stays, and that tab's menu had followed it.
+    const C = await open();
+    await killWaves(B, 1); await C.waitForTimeout(100);
+    const cMenu = await G(C, () => document.querySelectorAll('.mapbtn .md')[2].textContent);
+    await C.click('#bMute');
+    const s4 = await brief(C);
+    check(cMenu === 'In progress · wave 5', "a tab on the menu follows another tab's save ('In progress · wave 5' on Quarry) " + cMenu);
+    check(s4.muted && s4.best.quarry === 4 && s4.saves.quarry === 4 && s4.saves.meadow === 2, 'that tab toggling Sound keeps every run and best the others saved ' + JSON.stringify(s4));
+    // A win in one tab and a stale tab's later save: stars and bests only go up.
+    await G(B, () => { const W = window.__pw, g = W.G; g.wave = 29; g.cleared = 29; g.lives = 20; W.startWave(); let t = 0; while (document.querySelector('#endOv').hidden && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; } });
+    await vis(A, false); await A.click('#bResume'); await A.waitForTimeout(50);
+    await tapTile(A, 6, 6); await A.click('.tw[data-t="bolt"]'); await A.click('.tw[data-t="bolt"]');
+    const s5 = await brief(A);
+    check(s5.stars.quarry === 3 && s5.best.quarry === 30 && s5.saves.meadow === 2 && s5.saves.quarry === 30, "a save in tab A after tab B won Quarry keeps the win's 3 stars, best and run " + JSON.stringify(s5));
+    const D = await open();
+    const dm = await G(D, () => ({ cont: document.querySelector('#bContinue').textContent, cards: [...document.querySelectorAll('.mapbtn .md')].map(x => x.textContent) }));
+    check(dm.cards[1] === 'In progress · wave 3' && /In progress · wave 31/.test(dm.cards[2]), 'a fresh launch shows both runs ' + JSON.stringify(dm));
+    check([A, B, C, D].every(p => p.errors.length === 0), 'no console errors: ' + [A, B, C, D].map(p => p.errors.join('|')).join(' / '));
+    await ctx.close();
+  }
+
+  // Stored values from a damaged or hand-edited store: a best that is not a whole number blocked every new best on that road and
+  // showed as 'Best wave [object Object]'.
+  current = 'release review: best waves that are not whole numbers are dropped';
+  {
+    const { ctx, page } = await newPage(browser);
+    await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ best: { switch: {}, quarry: true, meadow: '12', nowhere: 5 } })));
+    await page.reload(); await page.waitForTimeout(250);
+    const r = await G(page, () => ({ best: JSON.stringify(window.__pw.S.best), cards: [...document.querySelectorAll('.mapbtn .md')].map(x => x.textContent), stored: JSON.parse(localStorage.getItem('pathwarden.v1')).best }));
+    check(r.best === '{}' && r.cards.every(x => x === 'Not yet played') && JSON.stringify(r.stored) === '{}', 'best {switch:{}, quarry:true, meadow:"12"} loads as no best at all ' + JSON.stringify(r));
+    await startMap(page, 0); await G(page, () => window.__pw.build('bolt', 2, 2)); await killWaves(page, 2);
+    check((await stored(page)).best.switch === 2, 'and that road records its next best (2) ' + JSON.stringify((await stored(page)).best));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // When storage can't be written (site data blocked, or the store is full), the game said nothing and promised saves.
+  current = 'release review: when storage cannot be written, the game says so';
+  for (const mode of ['blocked', 'full']) {
+    const init = mode === 'blocked' ? () => { Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('denied', 'SecurityError'); } }); }
+      : () => { Storage.prototype.setItem = function () { throw new DOMException('full', 'QuotaExceededError'); }; };
+    const { ctx, page } = await newPage(browser, { init });
+    const foot = await text(page, '#saveNote');
+    await startMap(page, 1); await page.waitForTimeout(60);
+    const t = await text(page, '#toast'), shown = await page.$eval('#toast', el => el.classList.contains('show') && el.classList.contains('bad'));
+    await G(page, () => window.__pw.build('bolt', 2, 2)); await killWaves(page, 1);
+    check(foot === "Can't save on this device", `${mode}: the menu says "Can't save on this device" instead of promising saves (${foot})`);
+    check(t === "Can't save on this device: progress ends when you close it" && shown, `${mode}: starting a run says so once, as a warning toast (${t})`);
+    check(page.errors.length === 0, `${mode}: the run plays with no errors ` + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // Chained early calls: the run saves only when the road is clear, so the menu's 'Saves after every wave' was not true, and a
+  // reload after the app was put away mid-wave quietly lost the cleared waves.
+  current = 'release review: a run left mid-wave says which waves restart';
+  {
+    const { ctx, page } = await newPage(browser);
+    check((await text(page, '#saveNote')) === 'Saves when the road is clear', "the menu says 'Saves when the road is clear' (" + (await text(page, '#saveNote')) + ')');
+    await startMap(page, 0);
+    const st = await G(page, () => { const W = window.__pw, g = W.G; g.gold = 2000; W.build('bolt', 2, 2); W.build('bolt', 4, 2); W.build('long', 3, 5);
+      W.startWave(); let t = 0; while ((g.spawnQ.length || g.enemies.length) && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; }
+      // Waves 2 to 6, each called as soon as the one before has spawned. Towers aside, one of each wave is kept alive until the next is
+      // called, so waves 2 and 3 clear while 4, 5 and 6 are on the road and the road is never clear.
+      const towers = g.towers; g.towers = []; let keep = null;
+      for (let w = 2; w <= 6; w++) {
+        W.startWave(); while (g.spawnQ.length) W.step(1 / 30);
+        if (keep && w <= 4) W.hurt(keep, 1e9, true);
+        if (w < 6) { const mine = g.enemies.filter(e => e.w === w); keep = mine[mine.length - 1]; for (const e of mine) if (e !== keep) W.hurt(e, 1e9, true); }
+      }
+      g.towers = towers; return { wave: g.wave, cleared: g.cleared, active: Object.keys(g.W).join(), slot: W.S.saves.switch.wave, lives: g.lives }; });
+    await vis(page, true);
+    const left = (await stored(page)).saves.switch;
+    check(st.wave === 6 && st.cleared === 3 && st.active === '4,5,6' && st.slot === 1 && left.wave === 1 && left.left === 6, 'waves 2-6 on the road with 2 and 3 cleared: the slot is still wave 1, and the app going away marks it left at wave 6 ' + JSON.stringify({ st, left: { wave: left.wave, left: left.left } }));
+    await G(page, () => { window.__pw.G.running = false; });
+    await page.reload(); await page.waitForTimeout(250);
+    await menuReady(page); await page.click('#bContinue'); await page.waitForTimeout(100);
+    const back = { wave: await G(page, () => window.__pw.G.wave), toast: await text(page, '#toast'), slot: (await stored(page)).saves.switch };
+    check(back.wave === 1 && back.toast === 'Waves 2-6 restart: the run saves when the road is clear.', 'Continue resumes at wave 2 and says waves 2-6 restart ' + JSON.stringify({ wave: back.wave, toast: back.toast }));
+    check(back.slot.left === undefined, 'it says so once: the mark is gone from the slot ' + JSON.stringify(back.slot.left));
+    // One wave in progress, left through Pause > Main menu.
+    await G(page, () => { const W = window.__pw; W.startWave(); W.step(1 / 30); });
+    await page.click('#bPause'); await page.click('#bMenu'); await menuReady(page); await page.click('#bContinue'); await page.waitForTimeout(100);
+    check((await text(page, '#toast')) === 'Wave 2 restarts: the run saves when the road is clear.', 'leaving wave 2 by Main menu: Continue says it restarts (' + (await text(page, '#toast')) + ')');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // A quick double tap is the most common slip. On Restart road it wiped the run, and on Sell it sold the tower.
+  current = 'release review: a double tap only arms Restart road and Sell';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await G(page, () => { const W = window.__pw; W.build('bolt', 2, 2); W.build('long', 3, 5); });
+    await killWaves(page, 3);
+    await page.click('#bPause');
+    await doubleTap(page, '#bRestart', 60);
+    const a = await G(page, () => ({ wave: window.__pw.G.wave, towers: window.__pw.G.towers.length, slot: window.__pw.S.saves.meadow && window.__pw.S.saves.meadow.wave, label: document.querySelector('#bRestart').textContent, open: !document.querySelector('#pauseOv').hidden }));
+    check(a.wave === 3 && a.towers === 2 && a.slot === 3 && a.open && a.label === 'Tap again to restart', 'a 60ms double tap on Restart road only arms it: the run and its save stay ' + JSON.stringify(a));
+    await page.waitForTimeout(450); await page.click('#bRestart'); await page.waitForTimeout(60);
+    check((await G(page, () => window.__pw.G.wave)) === 0, 'a separate tap 450ms later restarts the road');
+    await G(page, () => { const W = window.__pw; W.G.gold = 500; W.build('long', 3, 5); W.startWave(); W.step(1 / 30); });
+    await tapTile(page, 3, 5);
+    await doubleTap(page, '#bSell', 90);
+    const b = await G(page, () => ({ towers: window.__pw.G.towers.length, armed: window.__pw.G.sellArm, label: document.querySelector('#bSell').firstChild.textContent }));
+    check(b.towers === 1 && b.armed && b.label === 'Confirm', 'a 90ms double tap on Sell only arms it ' + JSON.stringify(b));
+    await page.waitForTimeout(450); await page.click('#bSell');
+    check((await G(page, () => window.__pw.G.towers.length)) === 0, 'a separate tap 450ms later sells');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // A wave called early that clears before the one still out counted as progress: best, 'New record' and 'You held N waves' went up
+  // while wave 10's Warlord was still walking.
+  current = 'release review: cleared waves count in order';
+  {
+    const { ctx, page } = await newPage(browser);
+    await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ saves: { meadow: { map: 'meadow', wave: 9, gold: 3000, lives: 20, towers: [{ type: 'bolt', c: 2, r: 2 }], prevBest: 10 } }, last: 'meadow', best: { meadow: 10 } })));
+    await page.reload(); await page.waitForTimeout(250);
+    await menuReady(page); await page.click('#bContinue'); await page.waitForTimeout(80);
+    await toastLog(page);
+    const r = await G(page, () => { const W = window.__pw, g = W.G; g.running = false; W.S.seen = Object.keys(W.ED);
+      W.startWave(); while (g.spawnQ.length) W.step(1 / 30); for (const e of g.enemies) if (!e.d.boss) W.hurt(e, 1e9, true);
+      W.startWave(); let t = 0; while ((g.spawnQ.length || g.enemies.some(e => e.w === 11)) && t < 200) { W.step(1 / 30); for (const e of g.enemies) if (e.w === 11) W.hurt(e, 1e9, true); t += 1 / 30; }
+      const mid = { cleared: g.cleared, best: W.S.best.meadow, active: Object.keys(g.W).join() };
+      for (const e of g.enemies) W.hurt(e, 1e9, true); W.step(1 / 30);
+      return { mid, after: { cleared: g.cleared, best: W.S.best.meadow, active: Object.keys(g.W).join() } }; });
+    await page.waitForTimeout(50);
+    const ts = await toasts(page);
+    check(r.mid.active === '10' && r.mid.cleared === 9 && r.mid.best === 10, "wave 11 called early and cleared while wave 10's Warlord walks: cleared stays 9 and the best 10 " + JSON.stringify(r.mid));
+    check(r.after.cleared === 11 && r.after.best === 11 && ts.filter(x => x.startsWith('New record')).length === 1 && ts.includes('New record · wave 11'), 'once wave 10 is over too, both count: cleared 11, best 11, one New record ' + JSON.stringify({ after: r.after, ts }));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // The end card: what got through adds up to the lives lost; the tip fits the build; the hint on a road that already has its stars.
+  current = 'release review: the end card adds up, and its tip and hint fit the run';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const r = await G(page, () => { const W = window.__pw, g = W.G; g.running = false; g.lives = 3; W.spawn('boss', g.map.path.len - 0.3); let n = 0; while (!g.over && n++ < 60) W.step(1 / 30);
+      return { lives: g.lives, leaks: JSON.stringify(g.stats.leaks), text: g.fx.filter(f => f.k === 'text').map(f => f.s).join() }; });
+    await page.waitForTimeout(1000);
+    let c = await endCard(page);
+    check(r.lives === 0 && r.leaks === '{"boss":3}' && r.text === '-3' && c.lines[1] === 'Got through: 1 Warlord (-3)', 'a Warlord leaking with 3 lives left takes 3: the keep shows -3 and the card 1 Warlord (-3) ' + JSON.stringify({ r, line: c.lines[1] }));
+    // A run lost mostly to Wisps, with and without Mortars: the Wisp tip only blames the Mortar where there was one.
+    const loseWith = async dmg => { await G(page, dmg => { const W = window.__pw; document.querySelector('#endOv').hidden = true; W.newGame(1); const g = W.G; g.running = true;
+      g.stats.dmg = dmg; g.stats.leaks = { wisp: 8, scout: 6, grunt: 5 }; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); let n = 0; while (!g.over && n++ < 60) W.step(1 / 30); }, dmg);
+      await page.waitForTimeout(1000); return endCard(page); };
+    c = await loseWith({ bolt: 600, mortar: 400 });
+    check(c.tip === "Wisps fly. Mortars can't hit them, but Bolt, Frost, Arc and Longshot can.", 'with Mortars in the build, the Wisp tip still names their blind spot (' + c.tip + ')');
+    c = await loseWith({ bolt: 1000 });
+    check(c.tip === 'Wisps come in flocks. Arc chains through them, and Frost slows them down.' && c.lines.includes('Bolt 100%'), "a Bolts-only run lost to Wisps gets a tip that doesn't blame Mortars " + JSON.stringify([c.tip, c.lines]));
+    // A 2-star road won again with 1 star: it keeps its 2, and the hint says so before asking for the third.
+    await G(page, () => { const W = window.__pw; document.querySelector('#endOv').hidden = true; W.S.stars.meadow = 2; W.newGame(1); W.G.running = true; });
+    await winAt(page, 5);
+    c = await endCard(page);
+    check(c.on === 1 && c.hint === 'Meadow Bend keeps its 2 stars. Finish with 16 or more lives for the third star.', 'a 1-star win on a 2-star road: ' + c.hint);
+    check(await page.$eval('#endOv', el => el.getAttribute('aria-describedby') === 'endText endStats'), "the end dialog is described by its result and report (aria-describedby 'endText endStats')");
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // The winning kill's effects froze behind the win card and played on the calm board after 'Keep going'.
+  current = 'release review: the winning moment plays out behind the win card';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const r = await G(page, () => { const W = window.__pw, g = W.G; g.wave = 29; g.cleared = 29; W.startWave(); let t = 0;
+      while (document.querySelector('#endOv').hidden && t < 400) { W.step(1 / 30); for (const e of g.enemies) if (!e.d.boss || e.dist > 3) W.hurt(e, 1e9, true, 'long'); t += 1 / 30; }
+      return { fx: g.fx.length, open: !document.querySelector('#endOv').hidden }; });
+    await page.waitForTimeout(1200);
+    const behind = await G(page, () => window.__pw.G.fx.length);
+    await page.click('#bEndMain'); await page.waitForTimeout(50);
+    const after = await G(page, () => ({ fx: window.__pw.G.fx.length, paused: window.__pw.G.paused }));
+    check(r.open && r.fx >= 8 && behind === 0, `the win card opens on the winning kill's effects (${r.fx}), which play out behind it in real time (${behind} left after 1.2s)`);
+    check(after.fx === 0 && !after.paused, "after 'Keep going' nothing from the winning moment plays " + JSON.stringify(after));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // Back on the end card used up the run's history entry and did nothing, so the next Back left the app.
+  current = 'release review: Back on the end card goes to the menu';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 2);
+    await loseNow(page);
+    await page.goBack(); await page.waitForTimeout(100);
+    const hold = await G(page, () => ({ st: history.state, end: !document.querySelector('#endOv').hidden }));
+    await page.waitForTimeout(1000);
+    const card = await G(page, () => ({ st: history.state, end: !document.querySelector('#endOv').hidden }));
+    await page.goBack(); await page.waitForTimeout(100);
+    const menu = await G(page, () => ({ url: location.pathname, menu: !document.querySelector('#menu').hidden, end: !document.querySelector('#endOv').hidden, focus: document.activeElement.closest('#menu') !== null }));
+    check(hold.st && hold.st.pw === 'game' && !hold.end, 'Back in the beat before the loss card keeps the run entry (it is taken back) ' + JSON.stringify(hold));
+    check(card.end && card.st && card.st.pw === 'game', 'then the loss card opens, with the entry still there ' + JSON.stringify(card));
+    check(menu.url === '/index.html' && menu.menu && !menu.end && menu.focus, "Back on the card does what its 'Main menu' does: the menu opens, and the app is still here " + JSON.stringify(menu));
+    // The win card too.
+    await startMap(page, 1); await winAt(page, 20);
+    await page.goBack(); await page.waitForTimeout(100);
+    const win = await G(page, () => ({ url: location.pathname, menu: !document.querySelector('#menu').hidden, end: !document.querySelector('#endOv').hidden, card: document.querySelectorAll('.mapbtn .md')[1].textContent }));
+    check(win.url === '/index.html' && win.menu && !win.end && win.card.includes('In progress · wave 31'), 'Back on the win card goes to the menu, and the won run is kept ' + JSON.stringify(win));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // Overlays kept their scroll offset: a card scrolled down once reopened scrolled down, hiding its title (and the menu its Continue).
+  current = 'release review: the end card and the menu open at their top';
+  {
+    const { ctx, page } = await newPage(browser, { viewport: { width: 667, height: 375 } });
+    await startMap(page, 1);
+    const lose = () => G(page, () => { const W = window.__pw, g = W.G; g.stats.leaks = { wisp: 6, scout: 5, grunt: 4 }; g.stats.dmg = { bolt: 300, mortar: 200, long: 100 }; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); let n = 0; while (!g.over && n++ < 60) W.step(1 / 30); });
+    await lose(); await page.waitForTimeout(1000);
+    const first = await page.$eval('#endOv', el => { el.scrollTop = el.scrollHeight; return { top: el.scrollTop, max: el.scrollHeight - el.clientHeight }; });
+    await G(page, () => document.querySelector('#bEndMain').click()); await page.waitForTimeout(50);
+    await lose(); await page.waitForTimeout(1000);
+    const second = await page.$eval('#endOv', el => ({ top: el.scrollTop, title: document.querySelector('#endTitle').getBoundingClientRect().top }));
+    check(first.max > 20 && first.top > 20 && second.top === 0 && second.title > 0, 'a loss card scrolled down to its buttons; the next one opens at its top, title in view ' + JSON.stringify({ first, second }));
+    await G(page, () => document.querySelector('#bEndAlt').click()); await page.waitForTimeout(100);
+    const m1 = await page.$eval('#menu', el => { el.scrollTop = el.scrollHeight; return el.scrollTop; });
+    await menuReady(page); await G(page, () => document.querySelectorAll('.mapbtn')[2].click()); await page.waitForTimeout(80);
+    await G(page, () => { const W = window.__pw; W.build('bolt', 2, 2); }); await killWaves(page, 1);
+    await page.click('#bPause'); await page.click('#bMenu'); await page.waitForTimeout(100);
+    const m2 = await G(page, () => ({ top: document.querySelector('#menu').scrollTop, title: document.querySelector('#menuTitle').getBoundingClientRect().top, cont: document.querySelector('#bContinue').getBoundingClientRect().top }));
+    check(m1 > 20 && m2.top === 0 && m2.title > 0 && m2.cont > 0, 'the menu scrolled down to a road reopens at its top, its title and Continue in view ' + JSON.stringify({ m1, m2 }));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // The HUD on a 320-340px phone: 4-digit gold beside 'Wave 12/30' pushed Pause past the gutter and off the screen; and Speed and
+  // Pause were 34px tall, under the 40px the rest of the UI keeps.
+  current = 'release review: the HUD fits a 320px phone, with 40px buttons';
+  for (const vp of [{ width: 320, height: 568 }, { width: 340, height: 600 }, { width: 390, height: 780 }]) {
+    const { ctx, page } = await newPage(browser, { viewport: vp });
+    await startMap(page, 1);
+    const r = [];
+    for (const [gold, wave] of [[200, 0], [1250, 12], [9999, 29], [12345, 47], [99999, 100]]) {
+      r.push(await G(page, ([gold, wave]) => new Promise(res => { const W = window.__pw; W.G.gold = gold; W.G.wave = wave; requestAnimationFrame(() => requestAnimationFrame(() => {
+        const h = document.querySelector('#hud'), p = document.querySelector('#bPause').getBoundingClientRect(), s = document.querySelector('#bSpeed').getBoundingClientRect();
+        res({ gold, wave, sw: h.scrollWidth, cw: h.clientWidth, right: p.right, pH: p.height, sH: s.height, hudH: h.getBoundingClientRect().height, text: document.querySelector('#sWave').innerText.replace(/\s/g, ' ') }); })); }), [gold, wave]));
+    }
+    const vw = vp.width, bad = r.filter(x => x.sw > x.cw || x.right > vw - 16 + 0.5 || x.pH !== 40 || x.sH !== 40 || x.hudH !== 48);
+    check(bad.length === 0, `${vw}px: up to 99999 gold and wave 100, Pause ends inside the 16px gutter, nothing overflows, Speed and Pause are 40px tall and the HUD row stays 48px ` + JSON.stringify(bad.slice(0, 2)));
+    const w12 = r.find(x => x.wave === 12).text;
+    check(vw <= 340 ? w12 === 'Wave 12' : w12 === 'Wave 12/30', `${vw}px: the wave reads '${w12}'` + (vw <= 340 ? " ('/30' gives way)" : ''));
+    if (vw === 320) await page.screenshot({ path: path.join(__dirname, 'out', 'hud-320.png'), clip: { x: 0, y: 0, width: 320, height: 60 } });
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // The pinned Warlord bar covered the cave on the roads whose cave is on the top edge, and the Warlord coming out of it.
+  current = 'release review: the Warlord bar leaves the cave in view';
+  for (const vp of [{ width: 320, height: 568 }, { width: 390, height: 780 }, { width: 844, height: 390 }]) {
+    const { ctx, page } = await newPage(browser, { viewport: vp });
+    await startMap(page, 1);
+    const r = await G(page, () => { const W = window.__pw, out = [];
+      for (const mi of [0, 1, 2]) {
+        W.newGame(mi); const g = W.G; g.wave = 10; g.hintTiles = [];
+        const cv = document.querySelector('#cv'), c = cv.getContext('2d'), DPR = cv.width / cv.getBoundingClientRect().width, T = cv.width / DPR / W.COLS, cave = W.cave();
+        // The cave (its ellipse and outline), with no Warlord and with one far down the road, so only its bar could change these pixels.
+        const x0 = Math.max(0, cave.x - 0.4) * T, y0 = Math.max(0, cave.y - 0.35) * T, x1 = (cave.x + 0.4) * T, y1 = (cave.y + 0.33) * T;
+        const box = () => { W.render(0); return c.getImageData(Math.round(x0 * DPR), Math.round(y0 * DPR), Math.round((x1 - x0) * DPR), Math.floor((y1 - y0) * DPR)).data; };
+        const without = box(); W.spawn('boss', 12); g.fx = []; g.banner = null; g.bossBar = { frac: 1, trail: 1, t: 1 }; const withBar = box(); const bb = W.bossBarBox();
+        let diff = 0; for (let i = 0; i < without.length; i++) if (Math.abs(without[i] - withBar[i]) > 2) diff++;
+        out.push({ map: g.map.id, diff, y: bb.y, h: bb.h, caveBottom: +((cave.y + 0.33) * T).toFixed(1) });
+      }
+      return out; });
+    check(r.every(x => x.diff === 0), `${vp.width}x${vp.height}: on every road the cave looks the same with the Warlord bar up ` + JSON.stringify(r));
+    check(r[0].y === 6 && r.slice(1).every(x => x.y > x.caveBottom), `${vp.width}x${vp.height}: Long Switchback's bar is 6px down; on Meadow Bend and Quarry Run it starts below the cave ` + JSON.stringify(r));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // Leaks were never read out, and the end card's report was not part of the dialog's description.
+  current = 'release review: lost lives are read out to screen readers';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await G(page, () => { window.__srLog = []; new MutationObserver(() => window.__srLog.push(document.querySelector('#sr').textContent)).observe(document.querySelector('#sr'), { childList: true, characterData: true, subtree: true }); });
+    const leakN = n => G(page, n => { const W = window.__pw, g = W.G; g.running = false; for (let i = 0; i < n; i++) W.spawn('grunt', g.map.path.len - 0.21 - i * 0.003); W.step(1 / 30); W.step(1 / 30); return g.lives; }, n);
+    const lost = () => G(page, () => window.__srLog.filter(x => x.startsWith('Lost')));
+    await leakN(3); await page.waitForTimeout(100);
+    const a = await lost();
+    await leakN(2); await page.waitForTimeout(500);
+    const b = await lost();
+    await page.waitForTimeout(1700);
+    const c = await lost();
+    await G(page, () => { window.__pw.G.lives = 7; }); await leakN(2); await page.waitForTimeout(2100);
+    const d = await lost();
+    check(a.length === 1 && a[0] === 'Lost 3 lives, 17 left', 'three leaks at once are read as one line: ' + JSON.stringify(a));
+    check(b.length === 1 && c.length === 2 && c[1] === 'Lost 2 lives, 15 left', 'leaks within 2s of the last line wait and are summed: ' + JSON.stringify(c));
+    check(d.length === 3 && d[2] === 'Lost 2 lives, 5 left. Low on lives', "dropping to 5 or fewer adds 'Low on lives' once: " + JSON.stringify(d));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // Keyboard: focus fell to <body> when the menu or the end card closed, and no key could pick a tile, so no tower could be built.
+  current = 'release review: keyboard play, from the menu to a tower';
+  {
+    const { ctx, page } = await newPage(browser, { isMobile: false });
+    await page.keyboard.press('Tab');
+    for (let i = 0; i < 6 && (await G(page, () => !document.activeElement.classList.contains('mapbtn'))); i++) await page.keyboard.press('Tab');
+    await page.keyboard.press('Enter'); await page.waitForTimeout(100);
+    const f1 = await active(page);
+    check(f1.id === 'bWave', 'Enter on a road card: focus lands on the wave button, not <body> (' + f1.id + ')');
+    await page.keyboard.press('1');
+    await page.keyboard.press('Shift+Tab'); if ((await active(page)).id !== 'cv') await page.keyboard.press('Shift+Tab');
+    const onBoard = await G(page, () => ({ id: document.activeElement.id, ring: document.querySelector('#cv').matches(':focus-visible'), sr: document.querySelector('#sr').textContent }));
+    for (const k of ['ArrowLeft', 'ArrowLeft', 'ArrowUp']) await page.keyboard.press(k);
+    const cur = await G(page, () => ({ cur: window.__pw.G.cur, sr: document.querySelector('#sr').textContent, grid: window.__pw.G.grid[6 * 9 + 2] }));
+    await page.keyboard.press('Enter'); await page.waitForTimeout(300); await page.keyboard.press('Enter'); await page.waitForTimeout(50);
+    const built = await G(page, () => window.__pw.G.towers.map(t => `${t.type}@${t.c},${t.r}`).join());
+    check(onBoard.id === 'cv' && onBoard.ring && onBoard.sr === 'Road, column 5, row 8', 'the board takes keyboard focus (with its ring), and reads out the tile under its cursor (the middle one, road on Meadow Bend) ' + JSON.stringify(onBoard));
+    check(cur.cur.c === 2 && cur.cur.r === 6 && cur.sr === 'Grass, column 3, row 7', 'the arrow keys move the cursor and read out each tile ' + JSON.stringify(cur));
+    check(built === 'bolt@2,6', "'1' arms a Bolt; Enter on the tile, then Enter again, builds it there (" + built + ')');
+    // The cursor is drawn on the board while it has focus: the tile's edge is white.
+    const edge = await G(page, () => { const W = window.__pw, cv = document.querySelector('#cv'), DPR = cv.width / cv.getBoundingClientRect().width, T = cv.width / DPR / 9; W.render(0);
+      const d = cv.getContext('2d').getImageData(Math.round((2 * T + 1) * DPR), Math.round((6 * T + 0.2 * T) * DPR), Math.max(1, Math.round(2 * DPR)), Math.round(0.6 * T * DPR)).data; let w = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 230 && d[i + 1] > 230 && d[i + 2] > 230) w++; return w; });
+    check(edge > 0, 'the tile cursor is drawn while the board has keyboard focus (' + edge + ' white pixels on its edge)');
+    // Win, then 'Keep going' by keyboard; lose, then 'Try again'.
+    await winAt(page, 20); await page.waitForTimeout(50);
+    await page.keyboard.press('Enter'); await page.waitForTimeout(100);
+    const f2 = await active(page);
+    await G(page, () => { const W = window.__pw, g = W.G; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); let n = 0; while (!g.over && n++ < 60) W.step(1 / 30); });
+    await page.waitForTimeout(1000);
+    await page.keyboard.press('Enter'); await page.waitForTimeout(100);
+    const f3 = await active(page);
+    check(f2.id === 'bWave' && f3.id === 'bWave', "'Keep going' and 'New run' by keyboard leave focus on the wave button " + JSON.stringify([f2.id, f3.id]));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }

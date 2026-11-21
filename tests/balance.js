@@ -1,6 +1,6 @@
 // Balance check for Pathwarden: a greedy bot plays every road many times and the summary is checked against the release targets.
 // Not part of tests/run.js. Run it by hand from the repo root after changing CFG, MAPS[i].hp, TD, ED or the waves:
-//   node tests/balance.js            every profile: 200 runs, about 70 seconds on 4 cores
+//   node tests/balance.js            every profile: 255 runs, about 80 seconds on 4 cores
 //   node tests/balance.js --profiles=smart,spam --seeds=5 --bruteArmor=5 --boltDmg=10   a quick look while tuning
 // Overrides (applied in the page before each run; without them the game's own values are used):
 //   --hpB --budget --earlyMul --armorGrow --floor      CFG.hpB, CFG.themeBudget, CFG.earlyMul, CFG.armorGrow, CFG.armorFloor
@@ -9,6 +9,7 @@
 //   --boltCost --boltDmg --boltRate --boltRange        TD.bolt (rate is seconds between shots)
 //   --profiles=smart,spam plays only those profiles; --roads=2 (or 0,2) only those roads (0 Easy, 1 Normal, 2 Hard).
 //   --seeds=5 plays at most 5 seeds per profile and road; --seedFrom=21 plays seeds 21, 22, ... (a fresh sample of the same size).
+//   (smart and early play 40 seeds on their endless road, Normal, and 20 elsewhere: see PROFILES.)
 //   --file=path/to/index.html plays another copy (an older build, to compare); --json=out.json saves every run.
 // The bot only uses window.__pw (build, upgrade, startWave, step, buildWave, G), so it plays index.html as shipped. The game's
 // randomness is drawing only, so a seed always plays the same run.
@@ -34,18 +35,22 @@ const range = n => Array.from({ length: SEEDS ? Math.min(SEEDS, n) : n }, (_, i)
 
 // Profiles. Every profile spends the same way (see BOT): between waves and once a second while a wave runs.
 // smart: the plan's profile, the design team's balanced builder with some noise. It does not read the coming waves, so it is a
-// player who ignores the preview. spam: Bolts only, with smart's noise, so its seeds are different runs. mlf: Mortar, Longshot
-// and Frost only. early: smart that also calls the next wave early when it is safe (lives >= 15 and the front of the road is
+// player who ignores the preview. spam: Bolts only, with smart's noise, so its seeds are different runs; it spreads its gold over
+// many Bolts, mostly at level 1 and 2. spamUp: Bolts only too, but it upgrades first, as most people do: once it has 3 Bolts it
+// builds no new one while any it owns is below level 3 (depth: 3). mlf: Mortar, Longshot and Frost only. early: smart that also calls the next wave early when it is safe (lives >= 15 and the front of the road is
 // clear); that call is the only difference between smart and early. reader: smart reading the next 4 waves (look: 4, see BOT),
 // as a player reads the chips and their theme tag. It has no target; it shows what the preview is worth.
-// endless: roads where the bot plays on past wave 30 until it falls (up to wave 100), so 'median cleared' there can tell smart and
-// early apart. Capped at 30, both win nearly every Normal run and the early target would compare 30 with 30.
+// endless: roads where the bot plays on past wave 30 until it falls (up to wave 100), so 'mean cleared' there can tell smart and
+// early apart. Capped at 30, both win nearly every Normal run and the early target would compare 30 with 30. Every endless run
+// falls on a Warlord wave (40, 50, 60), so a median moves in steps of 10; the target compares means instead, over 40 seeds
+// (endlessSeeds), because 20 seeds of either bot can move its mean by 2 or more.
 const SMART = { frostN: 3, div: 0.3, noise: 0.3 };
 const PROFILES = {
-  smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1] },
+  smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40) },
   spam: { opts: { allow: ['bolt'], div: 0, noise: 0.3 }, maps: [0, 1, 2], seeds: range(5) },
+  spamUp: { opts: { allow: ['bolt'], div: 0, noise: 0.3, depth: 3 }, maps: [0, 1, 2], seeds: range(5) },
   mlf: { opts: { allow: ['mortar', 'long', 'frost'] }, maps: [1], seeds: range(5) },
-  early: { opts: { ...SMART, early: true }, maps: [0, 1, 2], seeds: range(20), endless: [1] },
+  early: { opts: { ...SMART, early: true }, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40) },
   reader: { opts: { ...SMART, look: 4 }, maps: [0, 1, 2], seeds: range(20) },
 };
 const want = (arg('profiles') || Object.keys(PROFILES).join(',')).split(',');
@@ -87,7 +92,9 @@ function BOT(o) {
   const reach = () => { const f = {}; for (const k of Object.keys(TD)) { let s = 0; for (let i = 1; i <= (o.look || 0); i++) s += fitW(k, g.wave + i); f[k] = o.look ? s / o.look : 1; } return k => f[k]; };
   function options() {
     const opts = [], nT = g.towers.length, nM = count('mortar'), nF = count('frost'), hit = reach();
-    for (const k of allow) {
+    // o.depth (spamUp): once it has that many towers, no new one while any it owns is below level 3.
+    const upFirst = o.depth && nT >= o.depth && g.towers.some(t => t.level < 3);
+    for (const k of upFirst ? [] : allow) {
       let best = null, bv = 0;
       for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) { if (g.grid[r * C + c]) continue; const v = val(k, 1, c, r); if (v > bv) { bv = v; best = [c, r]; } }
       if (!best) continue;
@@ -151,7 +158,7 @@ function BOT(o) {
   const t0 = Date.now();
   const browser = await chromium.launch();
   const jobs = [];
-  for (const p of want) { const P = PROFILES[p]; if (!P) throw new Error('unknown profile ' + p); for (const m of P.maps) for (const s of P.seeds) jobs.push({ p, m, s, o: { ...P.opts, seed: s, maxWave: (P.endless || []).includes(m) ? MAX_ENDLESS : 30 } }); }
+  for (const p of want) { const P = PROFILES[p]; if (!P) throw new Error('unknown profile ' + p); for (const m of P.maps) for (const s of ((P.endless || []).includes(m) && P.endlessSeeds) || P.seeds) jobs.push({ p, m, s, o: { ...P.opts, seed: s, maxWave: (P.endless || []).includes(m) ? MAX_ENDLESS : 30 } }); }
   // The longest runs first, so the workers finish together.
   jobs.sort((a, b) => b.o.maxWave - a.o.maxWave);
   const out = []; let next = 0, done = 0;
@@ -190,11 +197,15 @@ function BOT(o) {
   // Lives when wave 30 was cleared; a run that fell before it had 0 then.
   const at30 = r => r.won ? r.at30 : 0;
   const stars = rs => [3, 2, 1].map(n => rs.filter(r => r.stars === n).length);
+  const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  // A profile whose seeds all played the very same run (same build, same losses on the same waves) is one sample, not 5; say so.
+  const same = rs => rs.length > 1 && rs.every(r => JSON.stringify([r.cleared, r.loss, r.build, r.towers]) === JSON.stringify([rs[0].cleared, rs[0].loss, rs[0].build, rs[0].towers]));
   for (const p of want) for (const m of PROFILES[p].maps) {
     const rs = runs(p, m); if (!rs.length) continue;
-    const wins = rs.filter(r => r.won), l30 = wins.map(r => r.at30).sort((a, b) => a - b), st = stars(rs);
-    console.log(`${p.padEnd(6)} ${DIFF[m].padEnd(6)} wins ${String(wins.length).padStart(2)}/${rs.length}  median cleared ${String(median(rs.map(r => r.cleared))).padStart(4)}${(PROFILES[p].endless || []).includes(m) ? ' (endless)' : ''}  cleared ${rs.map(r => r.cleared).sort((a, b) => a - b).join(',')}` +
-      `  lives at 30 ${l30.join(',') || '-'}${l30.length ? ` (median ${median(l30)})` : ''}${wins.length ? `  stars 3/2/1: ${st.join('/')}` : ''}  lost on Air raids ${rs.map(r => r.air).join(',')}`);
+    const wins = rs.filter(r => r.won), l30 = wins.map(r => r.at30).sort((a, b) => a - b), st = stars(rs), endless = (PROFILES[p].endless || []).includes(m);
+    console.log(`${p.padEnd(6)} ${DIFF[m].padEnd(6)} wins ${String(wins.length).padStart(2)}/${rs.length}  median cleared ${String(median(rs.map(r => r.cleared))).padStart(4)}${endless ? ` (endless, mean ${mean(rs.map(r => r.cleared)).toFixed(1)})` : ''}  cleared ${rs.map(r => r.cleared).sort((a, b) => a - b).join(',')}` +
+      `  lives at 30 ${l30.join(',') || '-'}${l30.length ? ` (median ${median(l30)})` : ''}${wins.length ? `  stars 3/2/1: ${st.join('/')}` : ''}  lost on Air raids ${rs.map(r => r.air).join(',')}` +
+      `${same(rs) ? `  (all ${rs.length} seeds played the same run)` : ''}`);
   }
 
   const results = [];
@@ -203,7 +214,7 @@ function BOT(o) {
   const wins = (p, m) => runs(p, m).filter(r => r.won).length, n = (p, m) => runs(p, m).length;
   if (want.includes('smart')) {
     if (n('smart', 0)) target('smart wins Easy >= 19/20', wins('smart', 0) >= Math.ceil(19 / 20 * n('smart', 0)), `${wins('smart', 0)}/${n('smart', 0)}`);
-    if (n('smart', 1)) target('smart wins Normal >= 17/20', wins('smart', 1) >= Math.ceil(17 / 20 * n('smart', 1)), `${wins('smart', 1)}/${n('smart', 1)}`);
+    if (n('smart', 1)) target(`smart wins Normal >= 17/20 (${Math.ceil(17 / 20 * n('smart', 1))}/${n('smart', 1)})`, wins('smart', 1) >= Math.ceil(17 / 20 * n('smart', 1)), `${wins('smart', 1)}/${n('smart', 1)}`);
     if (n('smart', 2)) target('smart wins Hard 8-12/20', wins('smart', 2) >= Math.floor(8 / 20 * n('smart', 2)) && wins('smart', 2) <= Math.ceil(12 / 20 * n('smart', 2)), `${wins('smart', 2)}/${n('smart', 2)}`);
     // Stars (STAR3/STAR2): the Normal winners should spread across 1, 2 and 3 stars, and Hard winners should rarely earn 3.
     if (n('smart', 1)) { const s = stars(runs('smart', 1)), k = Math.max(1, Math.round(n('smart', 1) / 10));
@@ -211,12 +222,28 @@ function BOT(o) {
     if (n('smart', 2)) { const s = stars(runs('smart', 2)), k = Math.max(1, Math.round(n('smart', 2) / 10));
       target(`smart's Hard winners rarely earn 3 stars (at most ${k} runs)`, s[0] <= k, `3/2/1 stars: ${s.join('/')}`); }
   }
+  // Bolts only: a fair run, then the Armored and Warlord waves end it. A run dies on wave cleared+1 (no Bolts-only profile calls early).
+  const dies = p => m => runs(p, m).map(r => r.over ? r.cleared + 1 : 'won');
+  const BOLTS = ['spam', 'spamUp'].filter(p => want.includes(p));
+  if (BOLTS.length) {
+    const d = BOLTS.flatMap(p => PROFILES[p].maps.map(m => `${p} ${DIFF[m]} ${dies(p)(m).join(',')}`));
+    target(`no Bolts-only profile (${BOLTS.join(', ')}) wins any road`, BOLTS.every(p => runs(p, 0).concat(runs(p, 1), runs(p, 2)).every(r => r.cleared < 30)), 'dies on waves: ' + d.join('; '));
+  }
   if (want.includes('spam')) {
-    // Bolts only: a fair run, then the Armored and Warlord waves end it. It dies on wave cleared+1 (it never calls early).
+    // spam spreads its gold: the Armored waves are walls for its level-1 and level-2 Bolts.
     const SPAM = [[15, 29], [15, 23], [12, 23]];
     for (const m of PROFILES.spam.maps) {
-      const [lo, hi] = SPAM[m], d = runs('spam', m).map(r => r.over ? r.cleared + 1 : 'won');
+      const [lo, hi] = SPAM[m], d = dies('spam')(m);
       target(`spam reaches wave ${lo} and dies before wave ${hi + 1} on ${DIFF[m]}`, d.length && d.every(x => x !== 'won' && x >= lo && x <= hi), 'dies on waves ' + d.join(','));
+    }
+  }
+  if (want.includes('spamUp')) {
+    // spamUp upgrades first, so its level-3 Bolts keep more of each hit: it gets further, to the final Warlords on Easy (wave 30 is
+    // allowed there, as long as it is not won: the target above), and on Normal and Hard it must fall well short of a win.
+    const UP = [[15, 30], [15, 27], [15, 27]];
+    for (const m of PROFILES.spamUp.maps) {
+      const [lo, hi] = UP[m], d = dies('spamUp')(m);
+      target(`spamUp reaches wave ${lo} and dies before wave ${hi + 1} on ${DIFF[m]}`, d.length && d.every(x => x !== 'won' && x >= lo && x <= hi), 'dies on waves ' + d.join(','));
     }
   }
   if (want.includes('mlf')) {
@@ -224,14 +251,20 @@ function BOT(o) {
     target('mlf on Normal loses at least 1 life on an Air raid wave in every run', a.length && a.every(x => x >= 1), 'lives lost on Air raids per run ' + a.join(','));
   }
   if (want.includes('early') && want.includes('smart')) {
-    // Both play Normal on past wave 30 until they fall, so the first two measure how far each gets and how safely. A median at
-    // the cap (wave 100, or 20 lives) can't tell them apart, so it fails.
-    const ce = median(runs('early', 1).map(r => r.cleared)), cs = median(runs('smart', 1).map(r => r.cleared));
-    target('early vs smart on Normal: median cleared wave within 10, played on until both fall', Math.abs(ce - cs) <= 10 && ce < MAX_ENDLESS && cs < MAX_ENDLESS, `early ${ce}, smart ${cs}`);
-    const le = median(runs('early', 1).map(at30)), ls = median(runs('smart', 1).map(at30));
-    target('early vs smart on Normal: median lives at wave 30 within 3', Math.abs(le - ls) <= 3 && Math.min(le, ls) < 20, `early ${le}, smart ${ls} (0 for a run that fell before wave 30)`);
-    const we = wins('early', 2), ws = wins('smart', 2), k = Math.ceil(3 / 20 * n('smart', 2));
-    target(`early vs smart on Hard: wins within ${k}/${n('smart', 2)}`, Math.abs(we - ws) <= k && Math.min(we, ws) < n('smart', 2), `early ${we}/${n('early', 2)}, smart ${ws}/${n('smart', 2)}`);
+    // Both play Normal on past wave 30 until they fall, so the first two measure how far each gets and how safely. Every endless
+    // run falls on a Warlord wave, so the cleared waves come in steps of 10 (39, 49, 59) and a median can only move by 5 or 10: the
+    // target compares the mean. A run at the cap (wave 100), or a median of 20 lives, can't tell them apart, so it fails.
+    if (n('smart', 1) && n('early', 1)) {
+      const ae = runs('early', 1).map(r => r.cleared), am = runs('smart', 1).map(r => r.cleared), ce = mean(ae), cs = mean(am);
+      target(`early vs smart on Normal: mean cleared wave within 3, played on until both fall (${ae.length} and ${am.length} seeds)`, Math.abs(ce - cs) <= 3 && Math.max(...ae, ...am) < MAX_ENDLESS,
+        `early ${ce.toFixed(1)}, smart ${cs.toFixed(1)}, difference ${Math.abs(ce - cs).toFixed(1)}`);
+      const le = median(runs('early', 1).map(at30)), ls = median(runs('smart', 1).map(at30));
+      target('early vs smart on Normal: median lives at wave 30 within 3', Math.abs(le - ls) <= 3 && Math.min(le, ls) < 20, `early ${le}, smart ${ls} (0 for a run that fell before wave 30)`);
+    }
+    if (n('smart', 2) && n('early', 2)) {
+      const we = wins('early', 2), ws = wins('smart', 2), k = Math.ceil(3 / 20 * n('smart', 2));
+      target(`early vs smart on Hard: wins within ${k}/${n('smart', 2)}`, Math.abs(we - ws) <= k && Math.min(we, ws) < n('smart', 2), `early ${we}/${n('early', 2)}, smart ${ws}/${n('smart', 2)}`);
+    }
   }
   const bad = results.filter(x => !x).length;
   console.log(`\n${results.length - bad}/${results.length} targets met`);

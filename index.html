@@ -48,7 +48,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   max-width:620px;margin:0 auto}
 
 /* HUD */
-#hud{display:flex;align-items:center;gap:8px;padding-block:8px 6px;font-variant-numeric:tabular-nums}
+#hud{display:flex;align-items:center;gap:8px;padding-block:5px 3px;font-variant-numeric:tabular-nums}
 .stat{display:flex;align-items:center;gap:5px;font-weight:700;font-size:16px;font-family:var(--font-display)}
 .stat svg{width:18px;height:18px;flex:none}
 /* Losing a life: the count turns red and the heart jumps for 450ms (hurt). At 5 lives or fewer the heart keeps beating (low). */
@@ -61,7 +61,8 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #sWave{display:block;color:var(--muted);font-size:14px;font-weight:600;white-space:nowrap}
 #sWave b{color:var(--ink)}
 .hud-sp{flex:1}
-.hbtn{height:34px;min-width:40px;padding:0 10px;border-radius:10px;background:var(--panel-2);
+/* Speed and Pause are 40px tall, the touch-target floor the rest of the UI keeps; #hud's padding keeps the row 48px. */
+.hbtn{height:40px;min-width:40px;padding:0 10px;border-radius:10px;background:var(--panel-2);
   border:1px solid var(--line);font-weight:700;font-family:var(--font-display);display:grid;place-items:center}
 .hbtn:active{transform:translateY(1px)}
 .hbtn svg{width:16px;height:16px}
@@ -69,6 +70,9 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 /* Board */
 #stage{flex:1;min-height:0;position:relative;display:grid;place-items:center}
 #cv{display:block;touch-action:none;border-radius:6px;box-shadow:0 0 0 2px #0e140d,0 6px 24px rgba(0,0,0,.45)}
+/* The board takes keyboard focus: arrow keys move a tile cursor (drawn on the canvas), Enter or Space taps that tile. */
+#cv:focus{outline:none}
+#cv:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 /* Bottom of the board: row 13 cols 2-6 is grass on every road, so it hides no enemies. layout() sets bottom and max-width. */
 #toast{position:absolute;left:50%;bottom:10px;transform:translate(-50%,6px);opacity:0;pointer-events:none;
   background:rgba(20,26,18,.92);border:1px solid var(--line);color:var(--ink);padding:6px 12px;border-radius:999px;
@@ -228,6 +232,8 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   #panel{grid-area:panel;justify-content:flex-end}
 }
 @media (max-width:360px){.tw .nm{font-size:10px;letter-spacing:-.02em}.tw{padding-inline:0}}
+/* A 320-340px phone: 4- and 5-digit gold beside 'Wave 12/30' pushed Pause past the gutter. Tighter gaps, and the wave without '/30'. */
+@media (max-width:340px){#hud{gap:5px}.stat{gap:3px}#sWave .of{display:none}}
 @media (min-height:820px){.tw canvas{width:40px;height:40px}#pbody{height:104px}}
 </style>
 </head>
@@ -236,12 +242,12 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   <header id="hud">
     <div class="stat" id="sLives" title="Lives" role="img" aria-label="20 lives"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 17.5S2.5 12.8 2.5 7.4A3.9 3.9 0 0 1 10 5.3a3.9 3.9 0 0 1 7.5 2.1c0 5.4-7.5 10.1-7.5 10.1z" fill="#e3644f" stroke="#2a1410" stroke-width="1.3"/></svg><span>20</span></div>
     <div class="stat" id="sGold" title="Gold" role="img" aria-label="200 gold"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="#e3ad45" stroke="#3a2a0b" stroke-width="1.3"/><circle cx="10" cy="10" r="4" fill="none" stroke="#9b6f1d" stroke-width="1.3"/></svg><span>200</span></div>
-    <div class="stat" id="sWave">Wave&nbsp;<b>0</b>/30</div>
+    <div class="stat" id="sWave">Wave&nbsp;<b>0</b><span class="of">/30</span></div>
     <div class="hud-sp"></div>
     <button class="hbtn" id="bSpeed" aria-label="Game speed 1×">1×</button>
     <button class="hbtn" id="bPause" aria-label="Pause"><svg viewBox="0 0 16 16"><rect x="3" y="2" width="3.6" height="12" rx="1" fill="currentColor"/><rect x="9.4" y="2" width="3.6" height="12" rx="1" fill="currentColor"/></svg></button>
   </header>
-  <div id="stage"><canvas id="cv" role="img" aria-label="Game board"></canvas><div id="toast" role="status" aria-live="polite"></div><div id="sr" class="vh" role="status" aria-live="polite"></div></div>
+  <div id="stage"><canvas id="cv" role="img" tabindex="0" aria-label="Game board. Arrow keys pick a tile, Enter taps it."></canvas><div id="toast" role="status" aria-live="polite"></div><div id="sr" class="vh" role="status" aria-live="polite"></div></div>
   <footer id="panel">
     <div id="phead"><div id="info"><div id="infoMsg"></div><div id="chips" role="button" tabindex="0" hidden></div></div><button id="bWave">Start wave 1</button></div>
     <div id="pbody">
@@ -271,7 +277,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
       <li><b>Tap a tower</b> to upgrade, sell, or change its target.</li>
       <li>Fliers ignore the Mortar. Bosses arrive every 10 waves.</li>
     </ul>
-    <div class="foot"><div class="pills"><button class="pill" id="bMute"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h2.6L8.2 3v10L4.6 10H2z" fill="currentColor"/><path class="i-on" d="M10.6 5.6a3.4 3.4 0 0 1 0 4.8M12.6 3.6a6.2 6.2 0 0 1 0 8.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="i-off" d="M10.8 6l3.6 4M14.4 6l-3.6 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Sound: on</span></button><button class="pill" id="bVibe" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="2" width="6" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path class="i-on" d="M2.4 5.5v5M13.6 5.5v5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="i-off" d="M2.5 2.5l11 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Vibration: on</span></button></div><span>Saves after every wave</span></div>
+    <div class="foot"><div class="pills"><button class="pill" id="bMute"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h2.6L8.2 3v10L4.6 10H2z" fill="currentColor"/><path class="i-on" d="M10.6 5.6a3.4 3.4 0 0 1 0 4.8M12.6 3.6a6.2 6.2 0 0 1 0 8.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="i-off" d="M10.8 6l3.6 4M14.4 6l-3.6 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Sound: on</span></button><button class="pill" id="bVibe" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="2" width="6" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path class="i-on" d="M2.4 5.5v5M13.6 5.5v5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="i-off" d="M2.5 2.5l11 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Vibration: on</span></button></div><span id="saveNote">Saves when the road is clear</span></div>
   </div>
 </div>
 
@@ -284,7 +290,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   </div>
 </div>
 
-<div class="ov" id="endOv" role="dialog" aria-modal="true" aria-labelledby="endTitle" hidden>
+<div class="ov" id="endOv" role="dialog" aria-modal="true" aria-labelledby="endTitle" aria-describedby="endText endStats" hidden>
   <div class="card">
     <h2 class="title" style="font-size:30px" id="endTitle">The keep has fallen</h2>
     <div id="endStars" role="img" hidden></div>
@@ -344,6 +350,8 @@ const MODES=['first','tough','air'];
 const MODE_NAME={first:'First',tough:'Toughest',air:'Fliers'};
 // What #infoMsg says for 4s after a tap on Target.
 const MODE_TIP={first:'First: shoots whoever is closest to the keep.',tough:'Toughest: focuses Brutes and Warlords. Fliers may slip past.',air:'Fliers: shoots fliers first, then the leader.'};
+// A tower that can't hit fliers (the Mortar) has nothing to let slip past, so its Toughest line stops after the first sentence.
+const modeTip=(type,m)=>m==='tough'&&TD[type].air===false?MODE_TIP.tough.split('. ')[0]+'.':MODE_TIP[m];
 // The modes a tower cycles through: one that can't hit fliers (the Mortar) has no 'Fliers'.
 const towerModes=type=>TD[type].air===false?MODES.filter(m=>m!=='air'):MODES;
 // 1.0 saves: 'strong' was the Longshot's untouched default, so it becomes First there and Toughest on any other tower.
@@ -410,17 +418,23 @@ function coverage(c,r,range){
 
 /* ---------- storage ---------- */
 const STORE='pathwarden.v1';
-let S=null;
-try{S=JSON.parse(localStorage.getItem(STORE))}catch(e){S=null}
-if(!S||typeof S!=='object'||Array.isArray(S))S={};
-if(!S.best||typeof S.best!=='object'||Array.isArray(S.best))S.best={};
-// One saved run per road (S.saves[mapId]); S.last is the road saved most recently.
-{
-  const raw=S.saves&&typeof S.saves==='object'&&!Array.isArray(S.saves)?S.saves:{};
+// noSave: storage can't be written (site data blocked, or full); the game says so (saveWarn) instead of promising saves.
+// booted: the page has finished loading, so a toast can show. synced: see persist().
+let noSave=false,booted=false,synced={keys:{},saves:{}};
+// The stored object as parsed, or null: nothing stored, unreadable (site data blocked) or not an object.
+function loadRaw(){let v=null;try{v=JSON.parse(localStorage.getItem(STORE))}catch(e){return null}return v&&typeof v==='object'&&!Array.isArray(v)?v:null}
+// A stored object made safe to play from: whatever this version can't use is dropped or rebuilt. Returns a new object.
+function readStore(raw){
+  const S={...(raw||{})},obj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
+  // Best wave per road, whole numbers only: anything else would show as 'Best wave [object Object]' and block every new best there.
+  const bst=obj(S.best)?S.best:{};S.best={};
+  for(const m of MAPS){const v=bst[m.id];if(Number.isInteger(v)&&v>0)S.best[m.id]=v}
+  // One saved run per road (S.saves[mapId]); S.last is the road saved most recently.
+  const slots=obj(S.saves)?S.saves:{};
   // No empty runs, the same rule as saveRun: 1.0 saved wave 0 with no towers whenever you left for the menu.
   const real=sv=>sv&&!(sv.wave===0&&!sv.towers.length);
   S.saves={};
-  for(const m of MAPS){const sv=validSave(raw[m.id]);if(real(sv)&&sv.map===m.id)S.saves[m.id]=sv}
+  for(const m of MAPS){const sv=validSave(slots[m.id]);if(real(sv)&&sv.map===m.id)S.saves[m.id]=sv}
   // 1.0 kept a single S.save; move it into its road's slot if that slot is free.
   const old=validSave(S.save);
   if(real(old)&&!S.saves[old.map]){S.saves[old.map]=old;S.last=old.map}
@@ -437,8 +451,10 @@ if(!S.best||typeof S.best!=='object'||Array.isArray(S.best))S.best={};
   // done once, for storage from before 1.1 (no S.stars): from then on only a win gives stars, so a count never changes between launches.
   const had=!!S.stars&&typeof S.stars==='object'&&!Array.isArray(S.stars),st=had?S.stars:{};S.stars={};
   for(const m of MAPS){const v=st[m.id],b=S.best[m.id];if([1,2,3].includes(v))S.stars[m.id]=v;else if(!had&&Number.isFinite(b)&&b>=FINAL_WAVE)S.stars[m.id]=1}
-  persist();
+  return S;
 }
+let S=readStore(loadRaw());
+persist();
 // Drop anything in a stored run that this version can't rebuild, rather than failing to start.
 function validSave(sv){
   if(!sv||typeof sv!=='object')return undefined;
@@ -455,6 +471,8 @@ function validSave(sv){
   // that report covers only the waves from here (stats.from), and the end card says so.
   const restart=!statsOk(sv.stats);sv.stats=validStats(sv.stats);if(restart&&sv.wave>0)sv.stats.from=sv.wave+1;
   if(!int(sv.prevBest,0))delete sv.prevBest;
+  // left: the wave the run was on when it was left mid-wave (markLeft); resuming says which waves restart.
+  if(!(Number.isInteger(sv.left)&&sv.left>sv.wave))delete sv.left;
   return sv;
 }
 // A run's report: kills, gold earned (kills, wave bonuses, early calls), lives lost per enemy type (leaks), damage dealt per
@@ -473,7 +491,30 @@ function validStats(s){
   if(Number.isInteger(s.from)&&s.from>1)o.from=s.from;
   return o;
 }
-function persist(){try{localStorage.setItem(STORE,JSON.stringify(S))}catch(e){}}
+// Several tabs share one store, and each read it once at load. So before writing, persist() folds in what other tabs wrote since
+// this one last synced (adopt), rather than writing its own stale copy over it. synced holds that last sync as JSON, per key and per
+// road's saved run, which tells this tab's own changes from theirs. Returns false when storage can't be written.
+function snapshot(o){synced={keys:{},saves:{}};for(const k of Object.keys(o))synced.keys[k]=JSON.stringify(o[k]);for(const id of Object.keys(o.saves))synced.saves[id]=JSON.stringify(o.saves[id])}
+// Best waves and stars only go up, and met types add up. A road's saved run, and each setting, stays this tab's only where this tab
+// changed it since it last synced; anywhere else the stored one (another tab's) wins.
+function adopt(cur){
+  for(const m of MAPS){const id=m.id,b=Math.max(S.best[id]||0,cur.best[id]||0),st=Math.max(S.stars[id]||0,cur.stars[id]||0);
+    if(b)S.best[id]=b;if(st)S.stars[id]=st;
+    if(JSON.stringify(S.saves[id])===synced.saves[id]){if(cur.saves[id])S.saves[id]=cur.saves[id];else delete S.saves[id]}
+  }
+  for(const t of cur.seen)if(!S.seen.includes(t))S.seen.push(t);
+  for(const k of new Set([...Object.keys(S),...Object.keys(cur)])){
+    if(['best','stars','saves','seen'].includes(k)||JSON.stringify(S[k])!==synced.keys[k])continue;
+    if(k in cur)S[k]=cur[k];else delete S[k];
+  }
+}
+// Take in what other tabs wrote, without writing (a 'storage' event, or before marking a slot).
+function syncIn(){const raw=loadRaw();if(!raw)return;const cur=readStore(raw);adopt(cur);snapshot(cur)}
+function persist(){
+  const raw=loadRaw();if(raw)adopt(readStore(raw));
+  try{localStorage.setItem(STORE,JSON.stringify(S));snapshot(S);return true}
+  catch(e){if(!noSave){noSave=true;if(booted)saveWarn()}return false}
+}
 
 /* ---------- audio ---------- */
 // Every voice goes through one master gain and a limiter (AU.master -> AU.comp -> speakers), so a busy wave can't clip.
@@ -554,16 +595,23 @@ function newGame(map,save){
   G={map,grid:map.grid.slice(),wave:0,gold:CFG.startGold,lives:20,towers:[],enemies:[],projs:[],fx:[],spawnQ:[],W:{},time:0,
      speed:speedPref,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,armKept:false,selAt:0,sellArm:false,sellArmAt:0,sendArmAt:0,
      poorWas:{},upWas:null,hintTiles:[],gateFlash:0,hurtT:0,hurtDur:0.45,banner:null,bannerNext:null,bossBar:null,shakeT:0,chipTip:null,modeTip:null,running:true,
-     stats:freshStats(),prevBest:S.best[map.id]||0,starRes:null};
+     stats:freshStats(),prevBest:S.best[map.id]||0,starRes:null,slot:'',srLost:0,srAt:-1e9,srTimer:0,srLow:false,cur:null};
   if(save){
     G.wave=save.wave;G.cleared=save.wave;G.gold=save.gold;G.lives=save.lives;G.won=!!save.won;G.stats=validStats(save.stats);
     if(Number.isInteger(save.prevBest))G.prevBest=save.prevBest;
     for(const t of save.towers)placeTower(t.type,t.c,t.r,t.level,t.spent,t.mode);
   }
+  // slot: this run as it was last saved or loaded (JSON), so saveRun writes only when something changed.
+  if(save)G.slot=JSON.stringify(slotOf());
   // A player's first run: point at two good tiles until the first build.
   if(!S.tutorialDone&&!Object.keys(S.best).length&&!G.towers.length)G.hintTiles=hintTiles(map);
   syncSpeed();
   layout();refreshPanel();updateHud(true);syncInert();
+  // A run left mid-wave restarts from its last calm save. Say so once, rather than lose those waves without a word.
+  if(save&&save.left){
+    const from=save.wave+1;toast(`${save.left>from?`Waves ${from}-${save.left} restart`:`Wave ${from} restarts`}: the run saves when the road is clear.`,false,4000);
+    delete save.left;persist();
+  }
 }
 function placeTower(type,c,r,level,spent,mode){
   // refund: the part of spent that sells back in full. Only builds and upgrades made between waves earn it, and the next wave clears it.
@@ -640,7 +688,15 @@ function newTypes(w){const m=waveCounts(w);return INTRO.filter(t=>m[t]&&!S.seen.
 // A blurb's sentences: "Wisp. Flies. Mortars can't hit it." -> ['Wisp.', 'Flies.', "Mortars can't hit it."].
 const sentences=s=>s.split('. ').map((x,i,a)=>i<a.length-1?x+'.':x);
 const BLURB={grunt:'Grunt. Steady and common.',scout:'Scout. Fast and fragile.',brute:'Brute. Armored, so small hits do less. Longshot ignores armor. Costs 2 lives.',
-  wisp:"Wisp. Flies. Mortars can't hit it.",splitter:'Splitter. Bursts into 2 Scouts.',boss:'Warlord. Heavy armor. Costs 5 lives.'};
+  wisp:"Wisp. Flies. Mortars can't hit it.",splitter:'Splitter. Bursts into 2 Scouts.',boss:'Warlord. Heavy armor. Longshot ignores armor. Costs 5 lives.'};
+// When a line runs out of room, a blurb gives up sentences from the front: its name first (the line names the type already), then
+// the rest in order, keeping the last. An armored type's counter, COUNTER, is the one kept instead: armor decides a run, and that is
+// its answer, so on a 320px phone the Brute reads 'Longshot ignores armor.' rather than 'Costs 2 lives.' (the chips and a leak show
+// the lives). drops(s): the order s's sentences go in, from the first to go; the sentence kept is not in it.
+const COUNTER='Longshot ignores armor.';
+function drops(s){const keep=s.includes(COUNTER)?s.indexOf(COUNTER):s.length-1;return s.map((_,i)=>i).filter(i=>i!==keep)}
+// s with the first 0, 1, 2, ... sentences of order gone, longest first.
+function shorter(s,order){const out=[];for(let k=0;k<=order.length;k++){const gone=order.slice(0,k);out.push(s.filter((_,i)=>!gone.includes(i)).join(' '))}return out}
 // The small line under 'WAVE N', parts joined with ' · ': the theme ('Air raid'; not Mixed), or the Warlord's warning, then what is new.
 // A Warlord's first wave already says it is coming, so it is not 'New' as well.
 function bannerSub(w){
@@ -705,7 +761,9 @@ function waveDone(w){
   const s=G.W[w];if(!s)return false;s.alive--;
   if(s.rem<=0&&s.alive<=0&&!G.over){
     delete G.W[w];
-    const b=CFG.bonusA+CFG.bonusB*w,c0=G.cleared;G.gold+=b;G.stats.gold+=b;G.cleared=Math.max(G.cleared,w);
+    // Cleared means every wave up to it is over: a wave called early that clears first does not count while an earlier one is out.
+    const b=CFG.bonusA+CFG.bonusB*w,c0=G.cleared,low=activeWaves()?Math.min(...Object.keys(G.W).map(Number))-1:Math.max(G.wave,w);
+    G.gold+=b;G.stats.gold+=b;G.cleared=Math.max(G.cleared,low);
     // The run only saves when the road is calm, so record a new best right away: leaving mid-wave must not lose it.
     if(G.cleared>(S.best[G.map.id]||0))recordBest();
     // Once a run, as it first passes the road's best from before it began (not on a first run, which has none).
@@ -766,18 +824,30 @@ function kill(e){
 // The keep, in tiles: the road's last point, pulled onto the board.
 function keepPos(){const P=G.map.path.P,b=P[P.length-1];return {x:clamp(b.x,0.4,COLS-0.4),y:clamp(b.y,0.4,ROWS-0.4)}}
 function leak(e){
-  e.dead=true;G.lives=Math.max(0,G.lives-e.d.lives);G.gateFlash=0.6;
+  // The lives it took: what it costs, or what was left. The report then adds up to the lives lost (never 21 of 20).
+  const lost=Math.min(e.d.lives,G.lives);
+  e.dead=true;G.lives-=lost;G.gateFlash=0.6;
   if(G.W[e.w])G.W[e.w].leaked=(G.W[e.w].leaked||0)+1;
-  G.stats.leaks[e.type]=(G.stats.leaks[e.type]||0)+e.d.lives;
+  G.stats.leaks[e.type]=(G.stats.leaks[e.type]||0)+lost;sayLeak(lost);
   bossGone(e);
   if(S.vibe!==false){try{navigator.vibrate&&navigator.vibrate(e.d.boss?[60,40,60]:30)}catch(x){}}
   // A red vignette (real time, see frame()), the lives lost above the keep, and the HUD heart. A new leak refreshes the vignette; it never stacks.
   G.hurtDur=e.d.boss?0.8:0.45;G.hurtT=Math.max(G.hurtT||0,G.hurtDur);
-  const kp=keepPos();G.fx.push({k:'text',x:kp.x,y:kp.y-0.5,t:0,dur:1.0,s:`-${e.d.lives}`,c:'#ff8a75',sz:1.25});
+  const kp=keepPos();G.fx.push({k:'text',x:kp.x,y:kp.y-0.5,t:0,dur:1.0,s:`-${lost}`,c:'#ff8a75',sz:1.25});
   flashClass($('#sLives'),'hurt',450);updateHud();
   // The leak that ends the run plays only the game-over cue.
   if(G.lives<=0){gameOver();return}
   sfx('leak');waveDone(e.w);
+}
+// Leaks for screen readers (#sr): summed and read at most once every 2s ('Lost 3 lives, 12 left'), and the first time lives drop to
+// 5 or fewer 'Low on lives' too. Not the leak that ends the run: the end card is read out then.
+function sayLeak(n){
+  G.srLost+=n;if(G.srTimer)return;
+  const g=G;g.srTimer=setTimeout(()=>{
+    g.srTimer=0;if(G!==g||g.over||!g.srLost)return;
+    const low=g.lives<=5&&!g.srLow;if(low)g.srLow=true;
+    say(`Lost ${g.srLost} ${g.srLost===1?'life':'lives'}, ${g.lives} left${low?'. Low on lives':''}`);g.srLost=0;g.srAt=performance.now();
+  },Math.max(0,2000-(performance.now()-g.srAt)));
 }
 // n particles of radius r0-r1 tiles (half as many under reduced motion). With c2, every other particle is c2.
 function burst(x,y,color,n,fly,r0=0.04,r1=0.09,c2){
@@ -894,17 +964,33 @@ function tickFx(dt){
 }
 
 /* ---------- save/end ---------- */
+function slotOf(){
+  return {map:G.map.id,wave:G.wave,gold:G.gold,lives:G.lives,won:G.won,
+    towers:G.towers.map(t=>({type:t.type,c:t.c,r:t.r,level:t.level,spent:t.spent,mode:t.mode})),stats:validStats(G.stats),prevBest:G.prevBest};
+}
 function saveRun(){
   if(!G||G.over)return;
   const id=G.map.id;
   // No empty runs. If everything built before wave 1 was sold, the slot would only bring the towers back.
-  if(G.wave===0&&G.towers.length===0){if(S.saves[id]){delete S.saves[id];persist()}return}
-  S.saves[id]={map:id,wave:G.wave,gold:G.gold,lives:G.lives,won:G.won,
-    towers:G.towers.map(t=>({type:t.type,c:t.c,r:t.r,level:t.level,spent:t.spent,mode:t.mode})),stats:validStats(G.stats),prevBest:G.prevBest};
-  S.last=id;
+  if(G.wave===0&&G.towers.length===0){G.slot='';if(S.saves[id]){delete S.saves[id];persist()}return}
+  // Unchanged since this run last saved (a tab hidden and shown again): write nothing, so a tab left open can't put its old run
+  // back over one played since in another tab.
+  const sv=slotOf(),js=JSON.stringify(sv);if(js===G.slot)return;
+  S.saves[id]=sv;S.last=id;G.slot=js;
   if(G.cleared>(S.best[id]||0))S.best[id]=G.cleared;
   persist();
 }
+// Left mid-wave (the app hidden, or Main menu): the run will restart from its slot, the last calm moment. Mark the slot with the
+// wave it was on, so resuming says which waves restart (newGame). Another tab's newer run on this road is never marked.
+function markLeft(){
+  if(!G||!G.running||G.over||isCalm())return;
+  syncIn();const sv=S.saves[G.map.id];
+  if(!sv||G.wave<=sv.wave||sv.left===G.wave)return;
+  sv.left=G.wave;persist();
+}
+// Storage can't be written: say it once, and the menu stops saying it saves.
+let saveWarned=false;
+function saveWarn(){$('#saveNote').textContent="Can't save on this device";if(!saveWarned&&G&&G.running){saveWarned=true;toast("Can't save on this device: progress ends when you close it",true,4000)}}
 function recordBest(){const id=G.map.id;if(G.cleared>(S.best[id]||0)){S.best[id]=G.cleared}persist()}
 function gameOver(){
   G.over=true;G.running=false;recordBest();delete S.saves[G.map.id];persist();
@@ -914,9 +1000,9 @@ function gameOver(){
   G.hurtT=0.9;G.bannerNext=null;if(G.banner)G.banner.cut=0.4;syncInert();
   const g=G;setTimeout(()=>{if(G===g&&G.over&&$('#endOv').hidden)showEnd(false)},900);
 }
-// Stars for winning the campaign, by the lives left: 3 from STAR3, 2 from STAR2, else 1 (the plan's 16 and 10). Checked against the
-// balance bot (tests/balance.js): its smart Normal winners finish with 3-20 lives (median 10) and split 7 / 5 / 7 across 3, 2 and
-// 1 stars; its Hard winners finish with 1-14, so none earns 3.
+// Stars for winning the campaign, by the lives left: 3 from STAR3, 2 from STAR2, else 1 (the plan's 16 and 10). tests/balance.js
+// checks them against its smart bot (its Normal winners must earn all three, its Hard winners rarely 3); README 'Balance' has the
+// numbers it gives.
 const STAR3=16,STAR2=10;
 const starCount=l=>l>=STAR3?3:l>=STAR2?2:1;
 const STAR_D='M12 1.9L15 8.9L22.7 9.6L16.9 14.7L18.6 22.1L12 18.2L5.4 22.1L7.1 14.7L1.3 9.6L9 8.9z';
@@ -933,6 +1019,10 @@ const fmtK=n=>n<1000?String(Math.round(n)):(n/1000).toFixed(1)+'k';
 const END_TIP={wisp:"Wisps fly. Mortars can't hit them, but Bolt, Frost, Arc and Longshot can.",brute:'Armor blunts small hits. Longshot ignores armor.',
   boss:'Armor blunts small hits. Longshot ignores armor.',scout:'Scouts are fast. Frost slows them down.',
   splitter:'Splitters burst into 2 Scouts. Hit them early on the road.',grunt:'Build where the road bends so one tower covers two stretches.'};
+// The Wisp tip names the Mortar's blind spot. A run whose towers dealt damage but none of it by Mortars (a Bolts-only run) had no
+// Mortar to blame, so it says what thins a flock instead.
+const WISP_NO_MORTAR='Wisps come in flocks. Arc chains through them, and Frost slows them down.';
+const endTip=type=>{const d=G.stats.dmg;return type==='wisp'&&TKEYS.some(k=>d[k]>0)&&!(d.mortar>0)?WISP_NO_MORTAR:END_TIP[type]};
 // #endStats: kills and gold; up to 3 types that got through, by lives lost; each tower type's share of the damage as a bar and a
 // line (types at 1% or more), with how often Frost slowed something; and on a loss, the tip.
 // Each part is kept whole on a narrow card, and a separator stays with the part before it, so no line starts with '·'.
@@ -944,7 +1034,8 @@ function endStatsHtml(loss){
   const from=s.from>1?`<span class="nw">From wave ${s.from}:</span> `:'';
   out.push(`<div>${from}${nwJoin([`${en(s.kills)} kill${s.kills===1?'':'s'}`,`${en(s.gold)} gold earned`],' · ')}</div>`);
   const lk=Object.entries(s.leaks).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]||INTRO.indexOf(a[0])-INTRO.indexOf(b[0]));
-  out.push(lk.length?`<div>Got through: ${nwJoin(lk.slice(0,3).map(([t,v])=>{const n=Math.round(v/ED[t].lives);return `${n} ${ED[t].name}${n===1?'':'s'} (-${v})`}),', ')}</div>`
+  // Only the leak that ended the run can cost less than its type does (it took what was left), so rounding up counts it too.
+  out.push(lk.length?`<div>Got through: ${nwJoin(lk.slice(0,3).map(([t,v])=>{const n=Math.ceil(v/ED[t].lives);return `${n} ${ED[t].name}${n===1?'':'s'} (-${v})`}),', ')}</div>`
     :`<div class="ok">${s.from>1?`Nothing got through from wave ${s.from}.`:'Nothing got through.'}</div>`);
   const tot=TKEYS.reduce((a,k)=>a+(s.dmg[k]||0),0);
   if(tot>0){
@@ -954,7 +1045,7 @@ function endStatsHtml(loss){
     if(s.slowed>0)line.push(`Frost slowed ${fmtK(s.slowed)}`);
     out.push(`<div><div class="dbar" aria-hidden="true">${ds.map(([k,p])=>`<i data-t="${k}" style="width:${p.toFixed(3)}%;background:${TD[k].color}"></i>`).join('')}</div><div class="dmg">${nwJoin(line,' · ')}</div></div>`);
   }
-  if(loss&&lk.length)out.push(`<div class="tip">${END_TIP[lk[0][0]]}</div>`);
+  if(loss&&lk.length)out.push(`<div class="tip">${endTip(lk[0][0])}</div>`);
   return out.join('');
 }
 function showEnd(win){
@@ -965,17 +1056,20 @@ function showEnd(win){
     ?`All <b>${FINAL_WAVE}</b> waves cleared on ${G.map.name} with <b>${G.lives}</b> lives left. Keep going for endless waves, or head back to try another road.`
     :endless?`Cleared <b>${G.cleared}</b> waves, ${G.cleared-FINAL_WAVE} past the campaign.${G.cleared>G.prevBest?' <span class="tag rec">New record</span>':''}`
     :`You held <b>${G.cleared}</b> wave${G.cleared===1?'':'s'} on ${G.map.name}. Best here: <b>${S.best[G.map.id]||0}</b>.`;
-  // The win's stars, the ones new to this road popping in, and how to earn the next.
-  const sr=G.starRes||{n:starCount(G.lives),was:3},stars=$('#endStars'),hint=$('#endHint');
+  // The win's stars, the ones new to this road popping in, and how to earn the next. A road that already had more than this run
+  // earned keeps them, and the hint says so instead of asking for a star it has.
+  const sr=G.starRes||{n:starCount(G.lives),was:starCount(G.lives)},stars=$('#endStars'),hint=$('#endHint');
   stars.hidden=hint.hidden=!win;
   if(win){
     stars.innerHTML=starsHtml(sr.n,sr.was);stars.setAttribute('aria-label',`${sr.n} of 3 stars`);
-    hint.textContent=sr.n===1?`Finish with ${STAR2} or more lives for a second star.`:sr.n===2?`Finish with ${STAR3} or more lives for the third star.`:'';
-    hint.hidden=sr.n>=3;
+    const has=Math.max(sr.n,sr.was),next=has===1?`Finish with ${STAR2} or more lives for a second star.`:has===2?`Finish with ${STAR3} or more lives for the third star.`:'';
+    hint.textContent=sr.was>sr.n?`${G.map.name} keeps its ${sr.was} stars.${next?' '+next:''}`:next;
+    hint.hidden=!hint.textContent;
   }
   $('#endStats').innerHTML=endStatsHtml(!win);
   $('#bEndMain').textContent=win?'Keep going':endless?'New run':'Try again';
-  $('#endOv').hidden=false;syncOv();
+  // Opened at its top: a card scrolled down last time (a short landscape screen) must not hide this one's title.
+  const ov=$('#endOv');ov.hidden=false;ov.scrollTop=0;syncOv();
   // A win pauses the run behind the dialog. Banners and the shake from the winning moment would only play after 'Keep going'.
   if(win){G.paused=true;G.banner=G.bannerNext=null;G.shakeT=0}
 }
@@ -1320,6 +1414,11 @@ function render(time){
     else if(f.k==='text'){g.globalAlpha=1-k;g.font=`800 ${Math.round(s*0.34*(f.sz||1))}px ${FONT_DISPLAY}`;const ty=(still?f.y:f.y-k*0.5)*s;
       g.textAlign='center';g.lineWidth=3;g.strokeStyle='rgba(30,24,10,.8)';g.strokeText(f.s,f.x*s,ty);g.fillStyle=f.c||'#f3d27a';g.fillText(f.s,f.x*s,ty);g.globalAlpha=1}
   }
+  // The keyboard's tile cursor (see #cv's keydown): a white dash over a dark edge, on top of the board, while it has keyboard focus.
+  if(G.cur&&document.activeElement===cv&&cv.matches(':focus-visible')){
+    const {c,r}=G.cur;rr(g,c*s+2,r*s+2,s-4,s-4,s*0.14);g.strokeStyle='rgba(20,18,14,.85)';g.lineWidth=Math.max(4,s*0.12);g.stroke();
+    g.setLineDash([s*0.16,s*0.1]);g.strokeStyle='#fff';g.lineWidth=Math.max(2,s*0.06);g.stroke();g.setLineDash([]);
+  }
   // The overlays below sit on the screen, not the board, so they hold still through a shake.
   g.setTransform(DPR,0,0,DPR,0,0);
   // Leak vignette: a = 0.55*hurtT/hurtDur at the edges (the strips carry the 0.55).
@@ -1352,12 +1451,15 @@ function drawBanner(g,s,b,still){
 }
 // The pinned Warlord bar across the top of the board: every living Warlord's HP summed, a white trail easing down behind the fill,
 // and 'WARLORD' (or 'WARLORDS ×N') left and the percentage right, inside the bar. The bar is Math.max(8, 0.2T) tall, or taller
-// to hold the labels, so it covers one band and nothing under it (the cave and the first stretch of road stay clear).
-// It fades in over the first 0.3s after a Warlord leaves the cave.
+// to hold the labels, so it covers one band and nothing under it. Where the cave is on the top edge (Meadow Bend, Quarry Run) the
+// bar sits just below the cave rather than over it, so the cave and the Warlord coming out of it stay in view; elsewhere it is
+// 6px from the top. It fades in over the first 0.3s after a Warlord leaves the cave. bossBarBox: where it was last drawn (tests).
+let bossBarBox=null;
 function drawBossBar(g,s,bi,bar){
   const t=bar?bar.t:bi.walk,trail=bar?Math.max(bar.trail,bi.frac):bi.frac;
   const fs=Math.max(9,Math.round(0.28*s)); // 0.28T, at least 9px so it stays legible on small boards
-  const x=6,y=6,w=COLS*s-12,h=Math.max(8,0.2*s,fs+4);
+  // The cave is an ellipse 0.3 tile tall either side of its centre, outlined 0.06 tile wide.
+  const cv=cavePos(),x=6,y=cv.y<1?Math.ceil((cv.y+0.33)*s)+2:6,w=COLS*s-12,h=Math.max(8,0.2*s,fs+4);bossBarBox={x,y,w,h};
   g.save();g.globalAlpha=0.9*clamp(t/0.3,0,1);
   rr(g,x,y,w,h,4);g.fillStyle='rgba(20,18,14,.85)';g.fill();
   g.save();rr(g,x+1,y+1,w-2,h-2,3);g.clip();
@@ -1469,31 +1571,39 @@ function syncChips(){
   }
 }
 // A tapped chip: the type in the next wave, with its numbers and what to know about it. Where that is too long for 3 lines
-// (the Brute on a phone), the blurb drops sentences from the front: first its name (the line already starts with it), then
-// 'Armored, so small hits do less.' (the line says 'Armor 9'), so 'Longshot ignores armor. Costs 2 lives.' still shows.
+// (the Brute or the Warlord on a phone), the blurb gives up sentences in drops() order: its name (the line already starts with it),
+// then 'Armored, so small hits do less.' (the line says 'Armor 9'), then 'Costs 2 lives.', so 'Longshot ignores armor.' always shows.
+// If even the kept sentence doesn't fit (a late wave's Warlords on a 320px phone), the head gives up its speed, then shows the HP
+// in thousands ('23.3k HP'), and at last (endless wave 100) leaves the HP out.
 function chipDetail(type){
   const w=G.wave+1,d=ED[type],n=waveCounts(w)[type]||0,hp=Math.round(d.hp*hpScale(w)*G.map.hp);
   const speed=d.spd<0.8?'Slow':d.spd>1.3?'Fast':'Normal';
-  const head=`<b>${d.name}</b> ×${n} · ${hp} HP · ${speed}${d.armor?` · Armor ${armorAt(d,w).toFixed(0)}`:''}. `;
-  const sent=sentences(BLURB[type]);
-  return sent.map((x,i)=>head+sent.slice(i).join(' '));
+  const head=(h,sp)=>`<b>${d.name}</b> ×${n}${h?` · ${h} HP`:''}${sp?` · ${speed}`:''}${d.armor?` · Armor ${armorAt(d,w).toFixed(0)}`:''}. `;
+  const sent=sentences(BLURB[type]),tails=shorter(sent,drops(sent)),kept=tails[tails.length-1];
+  return [...tails.map(x=>head(hp,true)+x),head(hp,false)+kept,head(fmtK(hp),false)+kept,head('',false)+kept];
 }
-// The 'New' intro on its 2 lines, longest first. Where the blurb runs past them (the Brute's, on nearly every phone), the sentences
-// after the name go first, so the name and the last sentence still show: 'New: Brute. Longshot ignores armor. Costs 2 lives.', then
-// 'New: Brute. Costs 2 lives.'
+// The 'New' intro on its 2 lines, longest first. It always names the type; where the blurb runs past the 2 lines (the Brute's and
+// the Warlord's on a phone), the other sentences go in drops() order, so an armored type keeps its counter to the end:
+// 'New: Brute. Longshot ignores armor. Costs 2 lives.', then 'New: Brute. Longshot ignores armor.'
 function newLines(type){
-  const s=sentences(BLURB[type]),out=[];
-  for(let k=1;k<s.length;k++)out.push(`<b>New:</b> ${[s[0],...s.slice(k)].join(' ')}`);
-  return out.length?out:[`<b>New:</b> ${BLURB[type]}`];
+  const s=sentences(BLURB[type]);
+  return shorter(s,drops(s).filter(i=>i>0)).map(x=>`<b>New:</b> ${x}`);
 }
 // A chip shows its type in #info for 4s, then the chips come back. The detail is read out too (#sr).
 // Enter or Space on #chips picks the first chip; pressed again while a detail shows, the next one.
+// The detail takes the row's place, so the row's spots (spots: each chip's and tag's box, relative to #info, from when the row
+// last showed) are kept: a tap where another chip was shows that one, and a tap where this one was closes the detail.
 const TIP_MS=4000;
 function showTip(type){
-  if(!G||G.over||!BLURB[type])return;G.modeTip=null;G.chipTip={type,key:chipKey,until:performance.now()+TIP_MS};refreshPanel();
+  if(!G||G.over||!BLURB[type])return;
+  const chips=$('#chips'),ib=$('#info').getBoundingClientRect(),open=G.chipTip&&G.chipTip.key===chipKey;
+  const spots=(open&&G.chipTip.spots)||[...chips.querySelectorAll('.chip,.theme[data-t]')].map(c=>{const r=c.getBoundingClientRect();
+    return {t:c.dataset.t,l:r.left-ib.left,r:r.right-ib.left,top:r.top-ib.top,b:r.bottom-ib.top}}).filter(x=>x.r>x.l);
+  G.modeTip=null;G.chipTip={type,key:chipKey,until:performance.now()+TIP_MS,spots};refreshPanel();
   say(chipDetail(type)[0].replace(/<[^>]+>/g,''));
 }
-const modeTipHtml=m=>{const [a,b]=MODE_TIP[m].split(/:(.*)/s);return `<b>${a}:</b>${b}`};
+function closeTip(){if(G&&G.chipTip){G.chipTip=null;refreshPanel()}}
+const modeTipHtml=(type,m)=>{const [a,b]=modeTip(type,m).split(/:(.*)/s);return `<b>${a}:</b>${b}`};
 const NARROW=window.matchMedia?matchMedia('(max-width:360px)'):{matches:false};
 function refreshPanel(){
   if(!G)return;
@@ -1533,7 +1643,7 @@ function refreshPanel(){
   // A tap on Target says what the new mode does, over 3 lines, for 4s (the chips make way, as for a chip's detail).
   const mtip=!tip&&t&&G.modeTip&&G.modeTip.t===t?G.modeTip:null;
   if(tip){lines=3;tipLines=chipDetail(tip.type);msg.innerHTML=tipLines[0]}
-  else if(mtip){lines=3;msg.innerHTML=modeTipHtml(t.mode)}
+  else if(mtip){lines=3;msg.innerHTML=modeTipHtml(t.type,t.mode)}
   else if(t)next=t; // written by fitNext, on one line
   else if(G.sel&&G.pending){
     // How much road this spot covers, then what a second tap does. fitFirst drops that instruction first, then shortens the trait.
@@ -1620,7 +1730,8 @@ function updateHud(force){
   $('#sLives span').textContent=G.lives;$('#sGold span').textContent=G.gold;
   $('#sLives').setAttribute('aria-label',`${G.lives} ${G.lives===1?'life':'lives'}`);$('#sGold').setAttribute('aria-label',`${G.gold} gold`);
   $('#sLives').classList.toggle('low',G.lives<=5);
-  $('#sWave').innerHTML=G.wave>FINAL_WAVE?`Wave&nbsp;<b>${G.wave}</b>`:`Wave&nbsp;<b>${G.wave}</b>/${FINAL_WAVE}`;
+  // '/30' is its own span: a 320-340px phone hides it (see the CSS) so the HUD fits.
+  $('#sWave').innerHTML=G.wave>FINAL_WAVE?`Wave&nbsp;<b>${G.wave}</b>`:`Wave&nbsp;<b>${G.wave}</b><span class="of">/${FINAL_WAVE}</span>`;
   if(goldChanged||force)refreshPanel();
 }
 function deselect(){G.sel=null;G.selTower=null;G.pending=null;G.armKept=false;G.sellArm=false}
@@ -1668,16 +1779,34 @@ cv.addEventListener('pointerdown',ev=>{
   onBoardTap(Math.floor((ev.clientX-b.left)/T),Math.floor((ev.clientY-b.top)/T));
   ev.preventDefault();
 });
+// The keyboard's way onto the board: with #cv focused, the arrow keys move a tile cursor (G.cur, drawn in render while the board
+// shows its focus ring) and Enter or Space taps that tile, so a keyboard player can build, select and upgrade as a tap does.
+// Each move reads out what is on the tile.
+const curTile=()=>{if(!G.cur){const t=G.selTower||G.sel;G.cur=t?{c:t.c,r:t.r}:{c:4,r:7}}return G.cur};
+function tileSay(c,r){const t=towerAt(c,r);return `${t?`${TD[t.type].name} level ${t.level}`:G.grid[r*COLS+c]===1?'Road':'Grass'}, column ${c+1}, row ${r+1}`}
+cv.addEventListener('keydown',e=>{
+  if(!G||e.ctrlKey||e.metaKey||e.altKey)return;
+  const mv={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
+  if(mv){e.preventDefault();const p=curTile();p.c=clamp(p.c+mv[0],0,COLS-1);p.r=clamp(p.r+mv[1],0,ROWS-1);say(tileSay(p.c,p.r));return}
+  if(e.key==='Enter'||e.key===' '){e.preventDefault();e.stopPropagation();if(e.repeat)return;const p=curTile();onBoardTap(p.c,p.r)}
+});
+cv.addEventListener('focus',()=>{if(G){const p=curTile();if(cv.matches(':focus-visible'))say(tileSay(p.c,p.r))}});
 // A tap beside the board (where #stage is bigger than it) clears the selection and disarms, like a tap off the grid.
 $('#stage').addEventListener('pointerdown',ev=>{if(ev.target!==cv)onBoardTap(-1,-1)});
 // A tap on a chip picks it, and a tap on the theme tag the type the theme is built on (its data-t, see syncChips). A tap elsewhere
-// on the row picks the one nearest the finger: the chips are only 16px tall.
-$('#chips').addEventListener('click',ev=>{
-  const hit=ev.target.closest&&ev.target.closest('.chip,.theme');if(hit){if(hit.dataset.t)showTip(hit.dataset.t);return}
-  let best=null,bd=1e9;
-  for(const c of $('#chips').querySelectorAll('.chip,.theme[data-t]')){const r=c.getBoundingClientRect();if(!r.width)continue;
-    const dx=Math.max(r.left-ev.clientX,0,ev.clientX-r.right),dy=Math.max(r.top-ev.clientY,0,ev.clientY-r.bottom),d=dx*dx+dy*dy;if(d<bd){bd=d;best=c}}
-  if(best)showTip(best.dataset.t);
+// on the row picks the one nearest the finger: the chips are only 16px tall. While a detail shows (the row folded away under it),
+// a tap anywhere on #info goes to the chip that was nearest there: another chip shows its detail, the same one closes it.
+const nearest=(list,x,y)=>{let best=null,bd=1e9;
+  for(const b of list){const dx=Math.max(b.l-x,0,x-b.r),dy=Math.max(b.top-y,0,y-b.b),d=dx*dx+dy*dy;if(d<bd){bd=d;best=b}}return best};
+$('#info').addEventListener('click',ev=>{
+  if(!G)return;
+  const hit=ev.target.closest&&ev.target.closest('#chips .chip,#chips .theme');if(hit){if(hit.dataset.t)showTip(hit.dataset.t);return}
+  const ib=$('#info').getBoundingClientRect(),x=ev.clientX-ib.left,y=ev.clientY-ib.top,tip=G.chipTip&&G.chipTip.key===chipKey?G.chipTip:null;
+  if(tip&&!$('#chips').hidden){const b=nearest(tip.spots||[],x,y);if(!b||b.t===tip.type)closeTip();else showTip(b.t);return}
+  if(!ev.target.closest||!ev.target.closest('#chips'))return;
+  const b=nearest([...$('#chips').querySelectorAll('.chip,.theme[data-t]')].map(c=>{const r=c.getBoundingClientRect();
+    return {t:c.dataset.t,l:r.left-ib.left,r:r.right-ib.left,top:r.top-ib.top,b:r.bottom-ib.top}}).filter(x=>x.r>x.l),x,y);
+  if(b)showTip(b.t);
 });
 $('#chips').addEventListener('keydown',ev=>{
   if(ev.key!=='Enter'&&ev.key!==' ')return;ev.preventDefault();if(ev.repeat||!G)return;
@@ -1698,11 +1827,13 @@ $('#bUp').addEventListener('click',()=>{
 $('#bMode').addEventListener('click',()=>{
   const t=G.selTower;if(!t||G.over)return;const ms=towerModes(t.type);
   t.mode=ms[(ms.indexOf(t.mode)+1)%ms.length];G.sellArm=false;G.chipTip=null;G.modeTip={t,until:performance.now()+TIP_MS};
-  refreshPanel();say(MODE_TIP[t.mode]);saveRunIfCalm();
+  refreshPanel();say(modeTip(t.type,t.mode));saveRunIfCalm();
 });
+// Sell takes two taps, and like the wave-1 guard the confirming one has to be its own tap: a quick double tap only arms it.
 $('#bSell').addEventListener('click',()=>{
   const t=G.selTower;if(!t||G.over)return;G.modeTip=null;
   if(!G.sellArm){G.sellArm=true;G.sellArmAt=performance.now();refreshPanel();return}
+  if(performance.now()-G.sellArmAt<SEND_GAP)return;
   G.gold+=sellValue(t);G.towers=G.towers.filter(x=>x!==t);G.grid[t.r*COLS+t.c]=0;burst(t.x,t.y,'#8a7a5a',8,false);sfx('sell');
   deselect();refreshPanel();updateHud(true);saveRunIfCalm();
 });
@@ -1720,6 +1851,7 @@ function syncSpeed(){const b=$('#bSpeed');b.textContent=G.speed+'×';b.setAttrib
 function setPause(p){
   if(!G||G.over)return;G.paused=p;$('#pauseOv').hidden=!p;disarmRestart();
   if(p){
+    $('#pauseOv').scrollTop=0;
     $('#pauseInfo').textContent=`${G.map.name} · wave ${G.wave}`;
     // Leaving mid-wave resumes from the road's saved run, which is the last calm moment. After early calls that can be several waves back.
     $('#bMenu').innerHTML=activeWaves()||G.spawnQ.length?`Main menu<small>${restartNote()}</small>`:'Main menu';
@@ -1733,20 +1865,22 @@ function restartNote(){
 }
 $('#bPause').addEventListener('click',()=>setPause(true));
 $('#bResume').addEventListener('click',()=>setPause(false));
-// Restart road wipes the run, so it takes two taps. The arm lapses after 3.5s.
-let restartTimer=0;
+// Restart road wipes the run, so it takes two taps, the second at least SEND_GAP after the first (a double tap only arms it).
+// The arm lapses after 3.5s.
+let restartTimer=0,restartArmAt=0;
 function disarmRestart(){clearTimeout(restartTimer);const b=$('#bRestart');b.classList.remove('armed');b.textContent='Restart road'}
 $('#bRestart').addEventListener('click',()=>{
   const b=$('#bRestart');
-  if(!b.classList.contains('armed')){disarmRestart();b.classList.add('armed');b.textContent='Tap again to restart';restartTimer=setTimeout(disarmRestart,3500);return}
+  if(!b.classList.contains('armed')){disarmRestart();b.classList.add('armed');b.textContent='Tap again to restart';restartArmAt=performance.now();restartTimer=setTimeout(disarmRestart,3500);return}
+  if(performance.now()-restartArmAt<SEND_GAP)return;
   disarmRestart();const m=G.map;delete S.saves[m.id];persist();$('#pauseOv').hidden=true;newGame(m);syncOv();focusEl($('#bPause'));
 });
-$('#bMenu').addEventListener('click',()=>{saveRunIfCalm();disarmRestart();$('#pauseOv').hidden=true;guardMenu();showMenu()});
+$('#bMenu').addEventListener('click',()=>{saveRunIfCalm();markLeft();disarmRestart();$('#pauseOv').hidden=true;guardMenu();showMenu()});
 function saveRunIfCalm(){if(G&&G.running&&!G.over&&isCalm())saveRun()}
 $('#bEndMain').addEventListener('click',()=>{
   $('#endOv').hidden=true;syncOv();pushGame();
-  if(G.won&&!G.over){G.paused=false;refreshPanel();return}
-  newGame(G.map);
+  if(G.won&&!G.over){G.paused=false;refreshPanel();toGame();return}
+  newGame(G.map);toGame();
 });
 $('#bEndAlt').addEventListener('click',()=>{$('#endOv').hidden=true;guardMenu();showMenu()});
 // Main menu sits where a road card opens. For 350ms after it is tapped, the cards and Continue ignore taps, so a double tap stays on the menu.
@@ -1765,6 +1899,9 @@ let keyNav=false;
 document.addEventListener('keydown',()=>{keyNav=true},true);
 document.addEventListener('pointerdown',()=>{keyNav=false},true);
 function focusEl(el){el.focus({preventScroll:true,focusVisible:keyNav})}
+// A dialog that closes into the game (a road card, Continue, Keep going, Try again) leaves focus on its button, which is gone.
+// Keyboard players get it on the wave button instead, so the next Tab stays in the game.
+function toGame(){if(keyNav&&!document.querySelector('.ov:not([hidden])'))focusEl($('#bWave'))}
 // The game is inert under an open dialog, and through the beat between a loss and its end screen (the run is over).
 function syncInert(){$('#app').inert=!!document.querySelector('.ov:not([hidden])')||!!(G&&G.over)}
 function syncOv(){
@@ -1788,23 +1925,42 @@ document.addEventListener('keydown',e=>{
 });
 
 // Back gesture: a run owns one history entry {pw:'game'}. Back pauses (or resumes) instead of leaving.
+// On the end card Back does what the card's Main menu does. In the beat before the loss card it takes the entry back, so the
+// Back after it still lands on the card rather than leaving the app.
 let skipPop=false;
 function pushGame(){if(history.state?.pw!=='game'){try{history.pushState({pw:'game'},'')}catch(e){}}}
 window.addEventListener('popstate',()=>{
   const live=G&&$('#menu').hidden&&$('#endOv').hidden&&G.running&&!G.over;
   // Our own history.back() from showMenu. If a run started before it landed, take the entry back.
   if(skipPop){skipPop=false;if(live)pushGame();return}
+  if(G&&!$('#endOv').hidden){$('#endOv').hidden=true;guardMenu();showMenu();return}
+  if(G&&G.over&&$('#menu').hidden){pushGame();return}
   if(!live)return;
   setPause(!G.paused);pushGame();
 });
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden||!G||!G.running||G.over||!$('#menu').hidden)return;
-  saveRunIfCalm();if(!G.paused)setPause(true);
+  saveRunIfCalm();markLeft();if(!G.paused)setPause(true);
+});
+// Another tab wrote the store: take it in (persist() would anyway, before this tab's next write), and show it if the menu is up.
+window.addEventListener('storage',e=>{
+  if(e.key!==STORE)return;
+  syncIn();AU.on=S.muted!==true;syncMute();syncVibe();
+  if(!$('#menu').hidden)renderMenu();
 });
 
 function showMenu(){
   if(G){G.running=false}
-  const box=$('#maps');box.textContent='';
+  renderMenu();
+  // Opened at its top, with its title and Continue in view, even if it was scrolled down to reach a road last time.
+  const mn=$('#menu');mn.hidden=false;mn.scrollTop=0;syncOv();
+  // Leave the run's history entry. Once: a second back before the first lands would leave the page.
+  if(history.state?.pw==='game'&&!skipPop){skipPop=true;try{history.back()}catch(e){skipPop=false}}
+}
+// The menu's contents from S: the road cards, the star count, Continue, the save note and the pills. Also run when another tab
+// writes the store while the menu is up (the 'storage' listener), which must not touch history or focus.
+function renderMenu(){
+  const box=$('#maps'),had=box.contains(document.activeElement)?[...box.children].indexOf(document.activeElement):-1;box.textContent='';
   for(const m of MAPS){
     const b=document.createElement('button');b.className='mapbtn';
     const c=document.createElement('canvas');const txt=document.createElement('div');
@@ -1816,7 +1972,7 @@ function showMenu(){
     txt.innerHTML=`<div class="mn">${m.name}<span class="tag ${m.diff}">${m.diff}</span></div>${md}`;
     b.append(c,txt);box.append(b);
     // A road with a saved run resumes it. Starting over is Pause > Restart road.
-    b.addEventListener('click',()=>{if(menuGuardLeft())return;audioInit();$('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true;pushGame();syncOv()});
+    b.addEventListener('click',()=>{if(menuGuardLeft())return;audioInit();$('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true;pushGame();syncOv();toGame();if(noSave)saveWarn()});
     requestAnimationFrame(()=>{const dpr=Math.min(3,window.devicePixelRatio||1),ts=5;const img=buildBG(m,ts,dpr);
       c.width=img.width;c.height=img.height;c.getContext('2d').drawImage(img,0,0)});
   }
@@ -1824,18 +1980,19 @@ function showMenu(){
   const sm=continueMap(),cont=$('#bContinue');
   cont.hidden=!sm;
   if(sm)cont.textContent=`Continue · ${sm.name}, wave ${S.saves[sm.id].wave+1}`;
-  syncMute();syncVibe();$('#menu').hidden=false;syncOv();
-  if(history.state?.pw==='game'){skipPop=true;try{history.back()}catch(e){skipPop=false}}
+  $('#saveNote').textContent=noSave?"Can't save on this device":'Saves when the road is clear';
+  syncMute();syncVibe();
+  if(had>=0&&box.children[had])focusEl(box.children[had]);
 }
 // The road Continue resumes: the one saved most recently, else the first road with a save.
 function continueMap(){return MAPS.find(m=>m.id===S.last&&S.saves[m.id])||MAPS.find(m=>S.saves[m.id])}
 $('#bContinue').addEventListener('click',()=>{
   if(menuGuardLeft())return;audioInit();const m=continueMap();if(!m)return;
-  $('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true;pushGame();syncOv();
+  $('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true;pushGame();syncOv();toGame();if(noSave)saveWarn();
 });
 
 /* ---------- loop ---------- */
-let last=performance.now();
+let last=performance.now();const endOv=$('#endOv');
 function frame(now){
   const dt=Math.min(0.05,(now-last)/1000);last=now;
   if(G&&G.running&&!G.paused&&!G.over){for(let i=0;i<G.speed;i++){step(dt);if(G.over)break}}
@@ -1847,8 +2004,9 @@ function frame(now){
   if(G&&G.hurtT>0)G.hurtT=Math.max(0,G.hurtT-dt);
   // So does the Warlord shake, so it settles even if the run pauses (a wave-30 win) right after.
   if(G&&G.shakeT>0)G.shakeT=Math.max(0,G.shakeT-dt);
-  // After a loss the run no longer steps, but the keep flash, effects and banner still play out (real time).
-  if(G&&G.over){if(G.gateFlash>0)G.gateFlash-=dt;tickFx(dt)}
+  // After a loss, and behind the win card, the run no longer steps, but the keep flash, effects and banner still play out (real
+  // time), so the winning kill's burst is over by 'Keep going' instead of waiting behind the card.
+  if(G&&(G.over||!endOv.hidden)){if(G.gateFlash>0)G.gateFlash-=dt;tickFx(dt)}
   if(G){render(now/1000);updateHud(false)}
   requestAnimationFrame(frame);
 }
@@ -1862,13 +2020,13 @@ window.addEventListener('orientationchange',onResize);
 newGame(MAPS[1]);G.running=false;
 [['bolt',2,2],['frost',4,4],['mortar',6,6],['arc',3,8],['long',5,12],['bolt',8,10]].forEach(([k,c,r])=>placeTower(k,c,r));
 G.gold=200;G.hintTiles=[];
-paintIcons();showMenu();requestAnimationFrame(frame);
+paintIcons();showMenu();requestAnimationFrame(frame);booted=true;
 
 window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,mixedWave,waveTheme,waveSummary:w=>waveSummary(w),refreshPanel,bannerSub:w=>bannerSub(w),newTypes:w=>newTypes(w),BLURB,TIP_MS,starCount,STAR3,STAR2,fmtK,END_TIP,sellValue,hintTiles:i=>hintTiles(MAPS[i]),step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
   CFG,tstats,coverage,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
   hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},hurt:(e,d,p,src)=>hurt(e,d,p,src),LIFT,
-  drawEnemy:(g,e,s,t)=>drawEnemy(g,e,s,t||0,rm()),drawR:e=>e.r*T*enemyScale(T),bars:()=>hpBars.map(b=>({...b})),render:t=>render(t??performance.now()/1000),keep:()=>keepPos(),cave:()=>cavePos(),bossInfo:()=>bossInfo(),rm,syncOv,toast,menuGuardLeft,spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
+  drawEnemy:(g,e,s,t)=>drawEnemy(g,e,s,t||0,rm()),drawR:e=>e.r*T*enemyScale(T),bars:()=>hpBars.map(b=>({...b})),render:t=>render(t??performance.now()/1000),keep:()=>keepPos(),cave:()=>cavePos(),bossInfo:()=>bossInfo(),rm,syncOv,toast,menuGuardLeft,bossBarBox:()=>bossBarBox,modeTip:(t,m)=>modeTip(t,m),newLines:t=>newLines(t),chipDetail:t=>chipDetail(t),spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
 
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
   window.addEventListener('load',()=>{try{navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){}});
