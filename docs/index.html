@@ -19,7 +19,7 @@
 <style>
 /* Layout: a circular brightfield microscope view sits in a dark stage; readouts live in the surround, the evolution tray along the bottom. */
 :root{
-  --stage:#0c1215; --panel:rgba(16,24,28,.86); --panel-solid:#121b1f; --line:#2a3a41;
+  --stage:#0c1215; --panel:rgba(16,24,28,.9); --panel-solid:#121b1f; --line:#2a3a41;
   --ink:#d6e1e3; --ink-dim:#8b9ea4;
   --brass:#c9a35a; --brass-ink:#1b1408;
   --field:#e6eef0; --field-edge:#a7bcc2; --field-ink:#1c2c33;
@@ -39,7 +39,7 @@ button{touch-action:manipulation}
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
   padding-block:calc(env(safe-area-inset-top,0px) + 14px) calc(env(safe-area-inset-bottom,0px) + 14px)}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
-.panel{width:232px;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:grid;gap:7px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.panel{width:232px;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:grid;gap:7px}
 .eyebrow{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-dim)}
 .binomial{font-size:17px;font-style:italic;font-weight:600;line-height:1.2;overflow-wrap:anywhere}
 .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -48,7 +48,7 @@ button{touch-action:manipulation}
 .small{font-size:11.5px;color:var(--ink-dim);line-height:1.35}
 .bar{display:grid;grid-template-columns:64px 1fr;align-items:center;gap:8px;font-size:11.5px;color:var(--ink-dim)}
 .track{height:7px;border-radius:4px;background:#1f2b31;overflow:hidden}
-.fill{height:100%;width:50%;border-radius:4px;transition:width .15s linear}
+.fill{height:100%;width:100%;border-radius:4px;transform:translateX(-50%);transition:transform .15s linear} /* set by setBar(): no layout */
 .fill.en{background:var(--algae)}
 .fill.hp{background:var(--hud-kin)}
 .fill.low{background:var(--danger)}
@@ -171,7 +171,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
       <div class="row"><span class="chip" id="stage">Protocell</span><span class="mono small" id="gen">Generation 1</span><span class="dna-sm" id="dna2">DNA 0</span></div>
       <div class="bar"><span>Energy</span><div class="track"><div class="fill en" id="enBar"></div></div></div>
       <div class="bar"><span>Membrane</span><div class="track"><div class="fill hp" id="hpBar"></div></div></div>
-      <div class="mono small" id="meta">Kills 0 · 0:00</div>
+      <div class="mono small" id="meta"><span id="metaK">Kills 0</span> · <span id="metaT">0:00</span><span class="hide-sm" id="metaF"></span></div>
     </section>
     <section class="panel" aria-label="Population census">
       <div class="panel-head"><span class="eyebrow">Census</span><button id="pauseBtn" type="button" aria-label="Pause">Pause</button></div>
@@ -716,8 +716,12 @@ function sample(){
 let bokeh=[];
 for(let i=0;i<26;i++)bokeh.push({x:rand(-1,1),y:rand(-1,1),r:rand(.04,.13),a:rand(.018,.045)});
 function resize(){
-  DPR=Math.min(maxDPR,window.devicePixelRatio||1);W=innerWidth;H=innerHeight;
-  cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);cv.style.width=W+'px';cv.style.height=H+'px';
+  const w=innerWidth,h=innerHeight;
+  if(w!==W||h!==H){joy.on=false;joy.id=null} // rotated or resized: the joystick origin is in stale screen coordinates
+  DPR=Math.min(maxDPR,window.devicePixelRatio||1);W=w;H=h;
+  // only reallocate the canvas when its size changes (a HUD-height refit keeps it)
+  const cw=Math.round(W*DPR),ch=Math.round(H*DPR);if(cv.width!==cw||cv.height!==ch){cv.width=cw;cv.height=ch}
+  cv.style.width=W+'px';cv.style.height=H+'px';
   const topB=$('top').getBoundingClientRect().bottom,trayT=$('tray').getBoundingClientRect().top;
   const insetT=parseFloat(getComputedStyle($('top').parentElement).paddingTop)||14;
   const pw=$('top').firstElementChild.getBoundingClientRect().width;
@@ -734,6 +738,11 @@ function resize(){
   $('toasts').style.width=side?Math.min(FR*1.6,420)+'px':'';
   buildLayers();
   drawSpark();
+  still=0;
+  aqN=aqT=aqF=aqS=0; // frames around a resize (new canvas, new layers) say nothing about the device: start afresh
+  // draw the new layout now: a resized canvas is blank, and the next drawn frame can be a few vsyncs away
+  // (30 fps behind cards, none while paused)
+  if(booted)paint();
 }
 function drawReticle(g){
   g.save();g.strokeStyle=COL.dim;g.globalAlpha=.4;g.lineWidth=1;g.beginPath();
@@ -741,15 +750,23 @@ function drawReticle(g){
     g.moveTo(CX+c*(FR+5),CY+s*(FR+5));g.lineTo(CX+c*(FR+5+len),CY+s*(FR+5+len))}
   g.stroke();g.restore();
 }
-let bgLayer=null,vigLayer=null,maxDPR=2,lowFx=false,slowFrames=0;
-function layer(){const c=document.createElement('canvas');c.width=cv.width;c.height=cv.height;const g=c.getContext('2d');g.setTransform(DPR,0,0,DPR,0,0);return[c,g]}
+let bgLayer=null,vigLayer=null,maxDPR=2,lowFx=false,aqN=0,aqT=0,aqF=0,aqS=0; // adaptive quality: frames, clamped s and fast frames in this window; slow windows in a row
+let still=0,wakeUntil=0; // still: frames drawn since the game paused (2 are drawn, then none); wakeUntil: see wake()
+// the two offscreen layers are reused across resizes (a resize used to allocate two new full-screen canvases)
+function layer(c){
+  if(!c){c=document.createElement('canvas');c.addEventListener('contextrestored',()=>queueResize())} // GPU reset: rebuild
+  c.width=cv.width;c.height=cv.height;const g=c.getContext('2d');g.setTransform(DPR,0,0,DPR,0,0);return[c,g]}
 function buildLayers(){
   let g;
-  [bgLayer,g]=layer();
-  g.fillStyle=COL.stage;g.fillRect(0,0,W,H);drawReticle(g);
+  // bgLayer: the stage and the lit field, drawn first each frame
+  [bgLayer,g]=layer(bgLayer);
+  g.fillStyle=COL.stage;g.fillRect(0,0,W,H);
   const gr=g.createRadialGradient(CX,CY-FR*.15,FR*.05,CX,CY,FR);gr.addColorStop(0,COL.field);gr.addColorStop(1,COL.edge);
   g.fillStyle=gr;g.beginPath();g.arc(CX,CY,FR,0,TAU);g.fill();
-  [vigLayer,g]=layer();
+  // vigLayer: the microscope frame, drawn over the world. Opaque stage and reticle outside the field hide anything the
+  // (unclipped) world drew past the rim; vignette and brass ring inside.
+  [vigLayer,g]=layer(vigLayer);
+  g.fillStyle=COL.stage;g.beginPath();g.rect(0,0,W,H);g.moveTo(CX+FR,CY);g.arc(CX,CY,FR,0,TAU,true);g.fill('evenodd');drawReticle(g);
   const vg=g.createRadialGradient(CX,CY,FR*.6,CX,CY,FR);vg.addColorStop(0,'rgba(8,14,17,0)');vg.addColorStop(1,'rgba(8,14,17,.55)');
   g.fillStyle=vg;g.beginPath();g.arc(CX,CY,FR,0,TAU);g.fill();
   g.strokeStyle=COL.brass;g.globalAlpha=.35;g.lineWidth=1.5;g.beginPath();g.arc(CX,CY,FR+1,0,TAU);g.stroke();
@@ -880,7 +897,9 @@ function render(){
   ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(bgLayer,0,0);
   ctx.setTransform(DPR,0,0,DPR,0,0);
   const s=FR/cam.v,px=1/s;
-  ctx.save();ctx.beginPath();ctx.arc(CX,CY,FR,0,TAU);ctx.clip();
+  // no clip path (it made every draw below take the slow, masked path): the world is drawn unclipped and the
+  // opaque frame layer blitted after it hides whatever spilled past the rim
+  ctx.save();
   if(!lowFx){
     // out-of-focus debris, slow parallax
     ctx.fillStyle=COL.fink;
@@ -893,14 +912,16 @@ function render(){
   ctx.restore();
   ctx.restore();
   ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(vigLayer,0,0);ctx.setTransform(DPR,0,0,DPR,0,0);
-  ctx.save();ctx.beginPath();ctx.arc(CX,CY,FR,0,TAU);ctx.clip();
+  // screen-space drawing after the frame blit is not clipped: it must stay inside radius FR (the joystick excepted)
   drawEdgeArrows();drawScaleBar(s);
-  ctx.restore();
   drawJoy();
 }
+// render() outside the loop (after a resize), unwinding the save()s a throw skipped like frame() does
+function paint(){try{render()}catch(e){for(let i=0;i<12;i++)ctx.restore();onErr(e)}}
 function drawSpark(){
   const sc=$('spark');if(!sc)return;const w=sc.clientWidth,h=sc.clientHeight;if(!w)return;
-  sc.width=Math.round(w*DPR);sc.height=Math.round(h*DPR);const sx=sc.getContext('2d');sx.setTransform(DPR,0,0,DPR,0,0);sx.clearRect(0,0,w,h);
+  const cw=Math.round(w*DPR),ch=Math.round(h*DPR);if(sc.width!==cw||sc.height!==ch){sc.width=cw;sc.height=ch}
+  const sx=sc.getContext('2d');sx.setTransform(DPR,0,0,DPR,0,0);sx.clearRect(0,0,w,h);
   sx.strokeStyle=COL.line;sx.lineWidth=1;sx.beginPath();sx.moveTo(0,h-.5);sx.lineTo(w,h-.5);sx.moveTo(0,h/2);sx.lineTo(w,h/2);sx.stroke();
   if(hist.length<2)return;
   const mx=Math.max(10,...hist.map(p=>Math.max(p.g,p.h,p.k)));
@@ -935,38 +956,50 @@ function buy(i){
   if(player.lv.size>=9&&!won){won=true;paused=true;$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));showOnly('ovWin');$('contBtn').focus()}
   refreshHud(true);
 }
+// HUD writes go through a cache: an unchanged value touches no DOM (no style or layout work), so refreshing 10 times
+// a second costs nothing between real changes. Write HUD text only through setT(). refreshHud(true) clears the cache.
+const hudC={},hudEl={};
+const hEl=id=>hudEl[id]||(hudEl[id]=$(id));
+const setT=(id,v)=>{v=String(v);if(hudC[id]!==v){hudC[id]=v;hEl(id).textContent=v}};
+// a bar: fraction f quantised to 0.5%, moved with a transform; .low toggled only when it flips
+const setBar=(id,f,low)=>{f=Math.round(clamp(f,0,1)*200)/200;
+  if(hudC[id]!==f){hudC[id]=f;hEl(id).style.transform='translateX('+((f-1)*100).toFixed(1)+'%)'}
+  if(hudC[id+'.low']!==low){hudC[id+'.low']=low;hEl(id).classList.toggle('low',low)}};
 function refreshHud(force){
+  if(force)for(const k in hudC)delete hudC[k];
   if(player){
-    $('name').textContent=binomial(player.g,player.r);
-    $('stage').textContent=stageName(player);
-    $('gen').textContent='Generation '+gen;
+    setT('name',binomial(player.g,player.r));
+    setT('stage',stageName(player));
+    setT('gen','Generation '+gen);
     const ef=player.en/player.maxEn,hf=player.hp/player.maxHp;
-    $('enBar').style.width=(ef*100).toFixed(1)+'%';$('enBar').classList.toggle('low',ef<.15);
-    $('hpBar').style.width=(hf*100).toFixed(1)+'%';$('hpBar').classList.toggle('low',hf<.3);
-    $('meta').innerHTML=`Kills ${kills} · ${fmt(lineT)}<span class="hide-sm"> · field ⌀ ${Math.round(cam.v*2)} µm</span>`;
-    UP.forEach((u,i)=>{const b=upBtns[i],lv=player.lv[u.k],mx=lv>=MAX[u.k],c=mx?0:cost(u);
-      b.disabled=mx;b.classList.toggle('can',!mx&&dna>=c);
+    setBar('enBar',ef,ef<.15);setBar('hpBar',hf,hf<.3);
+    setT('metaK','Kills '+kills);setT('metaT',fmt(lineT));setT('metaF',' · field ⌀ '+Math.round(cam.v*2)+' µm');
+    delete hudC.noPlayer;
+    UP.forEach((u,i)=>{const b=upBtns[i],lv=player.lv[u.k],mx=lv>=MAX[u.k],c=mx?0:cost(u),can=!mx&&dna>=c;
+      const key=lv+'|'+can+'|'+mx;if(hudC['up'+i]===key)return;hudC['up'+i]=key; // rewrite a trait only when this changes
+      b.disabled=mx;b.classList.toggle('can',can);
       b.querySelectorAll('.pips i').forEach((p,j)=>p.classList.toggle('on',j<lv));
       b.querySelector('.cost').textContent=mx?'max':c+' DNA';
       b.setAttribute('aria-label',`${u.name.replace('&shy;','')}, level ${lv} of ${MAX[u.k]}, ${mx?'maxed':'costs '+c+' DNA'}. ${u.fx}`)});
-    $('burst').classList.toggle('cool',player.burstCd>0||player.en<8);
-  }else{
-    UP.forEach((u,i)=>{const b=upBtns[i];b.disabled=true;b.classList.remove('can');b.querySelector('.cost').textContent=(u.base)+' DNA'});
+    const cool=player.burstCd>0||player.en<8;if(hudC.cool!==cool){hudC.cool=cool;hEl('burst').classList.toggle('cool',cool)}
+  }else if(!hudC.noPlayer){
+    hudC.noPlayer=true;
+    UP.forEach((u,i)=>{delete hudC['up'+i];const b=upBtns[i];b.disabled=true;b.classList.remove('can');b.querySelector('.cost').textContent=(u.base)+' DNA'});
   }
-  $('dna').textContent=dna;$('dna2').textContent='DNA '+dna;
-  const c=lastCensus;$('nG').textContent=c.g;$('nH').textContent=c.h;$('nK').textContent=c.k;
-  $('dominant').textContent=c.dom?`Most common rival: ${c.dom} (${c.dn})`:'Most common rival: none yet';
+  setT('dna',dna);setT('dna2','DNA '+dna);
+  const c=lastCensus;setT('nG',c.g);setT('nH',c.h);setT('nK',c.k);
+  setT('dominant',c.dom?`Most common rival: ${c.dom} (${c.dn})`:'Most common rival: none yet');
 }
 let toastQ=0;
 function toast(msg){
   const box=$('toasts'),el=document.createElement('div');el.className='toast';el.textContent=msg;box.appendChild(el);
   while(box.children.length>3)box.firstChild.remove();setTimeout(()=>el.remove(),3400);
 }
-function showOnly(id){for(const o of['ovTitle','ovOver','ovWin','ovPause'])$(o).hidden=o!==id;$('hud').inert=!!id}
+function showOnly(id){for(const o of['ovTitle','ovOver','ovWin','ovPause'])$(o).hidden=o!==id;$('hud').inert=!!id;still=0}
 function togglePause(){
   if(mode!=='play')return;
   if(!$('ovWin').hidden)return;
-  paused=!paused;showOnly(paused?'ovPause':null);if(paused)$('resumeBtn').focus();
+  paused=!paused;still=0;showOnly(paused?'ovPause':null);if(paused)$('resumeBtn').focus();
 }
 // Starting over when that would discard a lineage takes two taps: the first only arms the button for 4 s and says
 // what it would discard; a second tap within 4 s starts over. need() gives that label, or '' when nothing is lost.
@@ -985,7 +1018,8 @@ $('againBtn').addEventListener('click',startLineage);
 $('contBtn').addEventListener('click',()=>{paused=false;showOnly(null)});
 $('resumeBtn').addEventListener('click',togglePause);
 $('pauseBtn').addEventListener('click',e=>{togglePause();if(e.detail>0)e.currentTarget.blur()});
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='play'){saveGame();if(!paused)togglePause()}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='play'){saveGame();if(!paused)togglePause()}
+  if(!document.hidden)still=0}); // redraw a frozen (paused) frame on return, in case the canvas was dropped while hidden
 try{const b=JSON.parse(localStorage.getItem('coverslip-best')||'null');if(b&&b.gen)$('best').textContent=`Your longest lineage on this device: ${b.gen} generations in ${fmt(b.time||0)}.`}catch(e){}
 
 /* ---------- boot ---------- */
@@ -1008,23 +1042,47 @@ try{window.claude?.hot?.snapshot?.(()=>({save:snapshot()}))}catch(e){}
 const hot=window.claude?.hot;
 if(hot&&hot.ready)hot.ready(boot);else boot((hot&&hot.data)||{});
 addEventListener('pagehide',saveGame);
-addEventListener('resize',resize);
+// Resizes are coalesced to one per frame (a Split View drag fires dozens). iOS reports the new size late after a
+// rotation, hence the second look 350 ms on. The HUD rows are watched too: when they grow or shrink, the field refits.
+let rzq=0;
+const queueResize=()=>{if(rzq)return;rzq=1;requestAnimationFrame(()=>{rzq=0;resize()})};
+addEventListener('resize',queueResize);
+addEventListener('orientationchange',()=>{queueResize();setTimeout(queueResize,350)});
+try{if(window.visualViewport)visualViewport.addEventListener('resize',queueResize)}catch(e){}
+try{const ro=new ResizeObserver(queueResize);ro.observe($('top'));ro.observe($('tray'))}catch(e){}
+try{cv.addEventListener('contextrestored',queueResize)}catch(e){}
 resize();
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(resize);
 let last=performance.now();
+// keep drawing for ms of real time even while paused, for an effect that must play out behind a card
+const wake=ms=>{wakeUntil=Math.max(wakeUntil,performance.now()+ms)};
 // The first error is rethrown outside the loop so it still reaches the console; a persistent one is reported once.
 function onErr(e){if(++errN===1)setTimeout(()=>{throw e});if(errN===60)toast('Something went wrong. Your last autosave is kept.')}
 function frame(now){
   requestAnimationFrame(frame); // re-arm first: an exception below can never stop the loop
-  const raw=(now-last)/1000,dt=Math.min(.05,Math.max(0,raw));last=now;
-  // drop resolution, then effects, if this device can't keep up
-  if(!document.hidden&&raw<.5){slowFrames=raw>.045?slowFrames+1:Math.max(0,slowFrames-2);
-    if(slowFrames>90){slowFrames=0;if(DPR>1){maxDPR=1;resize()}else lowFx=true}}
   if(!booted)return;
+  const gap=now-last;
+  // Play: skip a vsync that comes <10 ms after the last frame, so 120/144 Hz screens draw 60/72 fps (60 and 90 Hz
+  // unchanged; the sim is dt-based). Behind the title and game-over cards the drifting dish only needs ~30 fps.
+  if(gap<(mode==='play'?10:30))return;
+  // Paused (and behind the win card) the scene is frozen: draw two frames, then leave it on screen (see wake()).
+  if(paused&&still>1&&now>=wakeUntil){last=now;return}
+  still=paused?still+1:0;
+  const raw=gap/1000,dt=Math.min(.05,Math.max(0,raw));last=now;
+  // Adaptive quality, judged per window of 45 play frames on the average frame interval (each frame clamped to 50 ms,
+  // so a one-off hitch can't sink a window). Two slow windows in a row drop the resolution half a step, then the
+  // effects; a resize starts afresh. A window is slow when it averages over 35 ms (under ~28.5 fps), or over 27.5 ms
+  // (under ~36 fps) with 3+ frames under 20 ms, which shows the display can go faster than 30 fps. So a display capped
+  // at 30 fps (iOS Low Power Mode, a throttled iframe), whose frames are never under 33 ms, keeps full quality, and so
+  // does the moment that cap switches on or off. A per-frame threshold can't make this call: vsync turns 26-28 fps
+  // into a mix of 33 and 50 ms frames, so it either counts a healthy 30 fps cap as slow or never sees 26-28 fps.
+  if(mode==='play'&&!paused&&!document.hidden&&raw<.5){aqT+=Math.min(raw,.05);if(raw<.02)aqF++;
+    if(++aqN>=45){const a=aqT/aqN;aqS=a>.035||(a>.0275&&aqF>=3)?aqS+1:0;aqN=aqT=aqF=0;
+      if(aqS>=2){aqS=0;if(DPR>1){maxDPR=Math.max(1,DPR-.5);resize()}else lowFx=true}}}
   // a throwing update() skips the autosave, so the last good save is kept
   try{
     if(!paused){update(dt);updErr=false}
-    if(mode==='play'){saveT-=dt;if(saveT<=0){saveT=8;saveGame()}}
+    if(mode==='play'&&!paused){saveT-=dt;if(saveT<=0){saveT=8;saveGame()}}
   }catch(e){updErr=true;onErr(e)}
   try{
     render();
