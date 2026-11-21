@@ -119,6 +119,9 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 .btn{border:1px solid var(--brass);border-radius:8px;padding:10px 16px;font-weight:600;font-size:14px;cursor:pointer;background:transparent;color:var(--brass)}
 .btn.primary{background:var(--brass);color:var(--brass-ink)}
 .btn.armed{border-color:var(--danger);color:var(--danger)}
+/* a newer build of the installed app is downloaded: a quiet, secondary button with a brass status dot */
+.btn.upd{font-size:13px;padding:10px 14px;border-color:var(--line);display:inline-flex;align-items:center;gap:8px} /* smaller type: 38 px tall on a row of its own, 40 px beside a full-size button */
+.btn.upd::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--brass);flex:none}
 .btn:hover{filter:brightness(1.08)}
 @media (max-width:560px),(max-height:520px){
   .tray{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
@@ -205,7 +208,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
       <dt>Survive</dt><dd>Cells with jaws eat anything 12% smaller. If you die, you carry on as one of your offspring. It keeps your traits but is one size smaller.</dd>
     </dl>
     <p class="small" id="best"></p>
-    <div class="actions"><button class="btn primary" id="resumeSaveBtn" type="button" hidden>Continue lineage</button><button class="btn primary" id="startBtn" type="button">Begin lineage</button></div>
+    <div class="actions"><button class="btn primary" id="resumeSaveBtn" type="button" hidden>Continue lineage</button><button class="btn primary" id="startBtn" type="button">Begin lineage</button><button class="btn upd" id="updBtn" type="button" hidden>Update ready · Reload</button></div>
   </div>
 </div>
 
@@ -214,7 +217,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
     <div class="eyebrow">Lineage extinct</div>
     <h2 id="overHead">Your line has ended</h2>
     <dl class="stats" id="overStats"></dl>
-    <div class="actions"><button class="btn primary" id="againBtn" type="button">Start a new lineage</button></div>
+    <div class="actions"><button class="btn primary" id="againBtn" type="button">Start a new lineage</button><button class="btn upd" id="updBtn2" type="button" hidden>Update ready · Reload</button></div>
   </div>
 </div>
 
@@ -448,6 +451,7 @@ function divide(){
   const gain=3+Math.floor(p.lv.size/3);dna+=gain;
   if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5}
   floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);
+  askPersist();
   if(!(hints&2)){hints|=2;toast('You divided. Spend DNA in the tray to evolve.')}
 }
 function kill(c,killer){
@@ -995,7 +999,48 @@ function toast(msg){
   const box=$('toasts'),el=document.createElement('div');el.className='toast';el.textContent=msg;box.appendChild(el);
   while(box.children.length>3)box.firstChild.remove();setTimeout(()=>el.remove(),3400);
 }
-function showOnly(id){for(const o of['ovTitle','ovOver','ovWin','ovPause'])$(o).hidden=o!==id;$('hud').inert=!!id;still=0}
+/* ---------- installed app: Back pauses, the screen stays awake, the save is kept ---------- */
+// Installed to the home screen. Never in a frame: display-mode is the top window's (F11 fullscreen counts), so without
+// that test the claude.ai Artifact iframe could match, and Back there must be left alone.
+const STANDALONE=(()=>{try{return window.top===window.self&&(matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches||navigator.standalone===true)}catch(e){return false}})();
+// Back (Android gesture, iOS edge swipe) pauses instead of closing the app: closing an overlay in play pushes one
+// history entry; Back pops it and pauses, and a second Back (from the pause card) leaves as usual.
+// A card opened any other way (Pause button, a hidden page, the win or game-over card) steps back off that entry
+// itself (dropBack), so Back on any card leaves at once rather than first using up the entry with nothing to show.
+// While that step is under way (backSkip: when it began) no entry is pushed; its popstate re-arms if play went on.
+let backArmed=false,backSkip=0;
+function armBack(){if(!STANDALONE||backArmed)return;
+  if(backSkip){if(performance.now()-backSkip<1500)return;backSkip=0; // its popstate never came: still on the entry?
+    try{if(history.state&&history.state.coverslip){backArmed=true;return}}catch(e){}}
+  try{history.pushState({coverslip:1},'');backArmed=true}catch(e){}}
+function dropBack(){if(!backArmed)return;backArmed=false;try{backSkip=performance.now()||1;history.back()}catch(e){backSkip=0}}
+addEventListener('popstate',()=>{if(!STANDALONE)return;backArmed=false;
+  if(backSkip){backSkip=0;if(mode==='play'&&!paused)armBack();return} // our own step back, not the player's Back
+  if(mode==='play'&&!paused)togglePause()});
+// Screen wake lock while playing (a cell steered by a held finger lets the screen dim). Any card or a hidden page
+// releases it. Older browsers have none. A frame whose permissions policy blocks it (the sandboxed claude.ai Artifact
+// iframe) is never asked: Chrome logs a console error for every blocked request, even one whose rejection is caught.
+const WAKE_OK=(()=>{try{if(!navigator.wakeLock)return false;const fp=document.permissionsPolicy||document.featurePolicy;
+  return !(fp&&fp.allowsFeature&&(!fp.features||fp.features().includes('screen-wake-lock'))&&!fp.allowsFeature('screen-wake-lock'))}catch(e){return false}})();
+let wakeLk=null,wakeAsk=false;
+const wakeWanted=()=>mode==='play'&&!paused&&!document.hidden;
+function wakeOn(){
+  try{if(!WAKE_OK||wakeLk||wakeAsk||!wakeWanted())return;wakeAsk=true;
+    navigator.wakeLock.request('screen').then(l=>{wakeAsk=false;
+      if(!wakeWanted()){wakeRel(l);return} // a card opened or the page hid while asking
+      wakeLk=l;l.addEventListener('release',()=>{if(wakeLk===l)wakeLk=null})}).catch(()=>{wakeAsk=false})
+  }catch(e){wakeAsk=false}
+}
+function wakeRel(l){try{const r=l.release();if(r&&r.catch)r.catch(()=>{})}catch(e){}}
+function wakeOff(){const l=wakeLk;wakeLk=null;if(l)wakeRel(l)}
+let askedPersist=false; // installed app: ask once a session (after the first divide) that the browser never evicts the save
+function askPersist(){if(!STANDALONE||askedPersist)return;askedPersist=true;try{const s=navigator.storage;if(s&&s.persist)s.persist().catch(()=>{})}catch(e){}}
+const UPD_MSG='Update downloaded. It loads next time you open the game.';
+let updShown=false,updToast=false;
+function showOnly(id){for(const o of['ovTitle','ovOver','ovWin','ovPause'])$(o).hidden=o!==id;$('hud').inert=!!id;still=0;
+  if(id){wakeOff();dropBack()}
+  else if(mode==='play'){wakeOn();armBack();if(updToast){updToast=false;toast(UPD_MSG)}}
+}
 function togglePause(){
   if(mode!=='play')return;
   if(!$('ovWin').hidden)return;
@@ -1019,7 +1064,26 @@ $('contBtn').addEventListener('click',()=>{paused=false;showOnly(null)});
 $('resumeBtn').addEventListener('click',togglePause);
 $('pauseBtn').addEventListener('click',e=>{togglePause();if(e.detail>0)e.currentTarget.blur()});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='play'){saveGame();if(!paused)togglePause()}
+  if(document.hidden)wakeOff();else wakeOn(); // wakeOn() only takes the lock when playing and not paused
   if(!document.hidden)still=0}); // redraw a frozen (paused) frame on return, in case the canvas was dropped while hidden
+/* ---------- updates of the installed app ---------- */
+// sw.js tells open pages when it has stored a newer game file. Never reload mid-game: on the title or game-over card
+// offer a reload; in play say it loads next time (held until the card closes if the game is paused).
+function onUpdateReady(){
+  if(updShown)return;updShown=true;
+  for(const id of['updBtn','updBtn2'])$(id).hidden=false; // ready on the title and game-over cards for later, too
+  if(mode==='play'){if(paused)updToast=true;else toast(UPD_MSG)}
+}
+for(const id of['updBtn','updBtn2'])$(id).addEventListener('click',()=>{saveGame();location.reload()});
+// Reading navigator.serviceWorker throws a SecurityError in the sandboxed claude.ai iframe; tests run from file://.
+if(location.protocol!=='file:')try{
+  const sw=navigator.serviceWorker;
+  if(sw){
+    sw.addEventListener('message',e=>{if(e.data&&e.data.type==='update-ready')onUpdateReady()});
+    // an app brought back from the background never navigates, so ask the worker to look for a newer file
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)return;try{const c=navigator.serviceWorker.controller;if(c)c.postMessage('check')}catch(e){}});
+  }
+}catch(e){}
 try{const b=JSON.parse(localStorage.getItem('coverslip-best')||'null');if(b&&b.gen)$('best').textContent=`Your longest lineage on this device: ${b.gen} generations in ${fmt(b.time||0)}.`}catch(e){}
 
 /* ---------- boot ---------- */
