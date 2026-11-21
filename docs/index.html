@@ -54,6 +54,8 @@ button{touch-action:manipulation}
 .fill.low{background:var(--danger)}
 .panel-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
 #pauseBtn{pointer-events:auto;cursor:pointer;background:transparent;border:1px solid var(--line);border-radius:6px;font-size:11px;padding:2px 8px;color:var(--ink-dim)}
+#pauseBtn{position:relative}
+#pauseBtn::after{content:"";position:absolute;inset:-12px -10px}
 #pauseBtn:hover{color:var(--ink)}
 #pauseBtn:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .dna-sm{display:none;font-family:var(--f-mono);font-weight:500;font-size:12px;color:var(--brass);font-variant-numeric:tabular-nums}
@@ -78,7 +80,7 @@ button{font:inherit;color:inherit}
 .up:disabled{cursor:default;opacity:.55}
 .up:focus-visible,.btn:focus-visible,#burst:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .up-top{display:flex;justify-content:space-between;align-items:center;gap:4px}
-.up-name{font-weight:600;font-size:13px;hyphens:manual;overflow-wrap:anywhere}
+.up-name{font-weight:600;font-size:13px;hyphens:manual}
 kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px solid var(--line);border-radius:3px;padding:0 4px}
 .up-fx{font-size:11px;color:var(--ink-dim);line-height:1.25;min-height:2.5em}
 .up-foot{display:flex;justify-content:space-between;align-items:center;gap:4px}
@@ -107,7 +109,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 .stats dd{margin:0;font-family:var(--f-mono);font-size:18px;font-variant-numeric:tabular-nums}
 .stats .wide{grid-column:1/-1}
 .stats .wide dd{font-family:var(--f-body);font-style:italic;font-weight:600;font-size:16px}
-.actions{display:flex;gap:8px;flex-wrap:wrap}
+.actions{display:flex;gap:8px;flex-wrap:wrap;position:sticky;bottom:-22px;margin-bottom:-22px;padding-block:12px 22px;background:var(--panel-solid);border-top:1px solid var(--line)}
 .btn{border:1px solid var(--brass);border-radius:8px;padding:10px 16px;font-weight:600;font-size:14px;cursor:pointer;background:transparent;color:var(--brass)}
 .btn.primary{background:var(--brass);color:var(--brass-ink)}
 .btn:hover{filter:brightness(1.08)}
@@ -126,13 +128,25 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .panel{width:calc(50% - 4px);padding:9px 10px;gap:5px}
   .binomial{font-size:14px}
   .bar{grid-template-columns:1fr;gap:3px}
-  .card{padding:20px 18px 18px}
+  .card{padding:20px 18px 18px;gap:12px}
+  .actions{bottom:-18px;margin-bottom:-18px;padding-bottom:18px}
+  .card p{font-size:14px}
+  .how{font-size:13px}
 }
 @media (max-height:520px) and (min-width:561px){
-  .tray{grid-template-columns:repeat(8,minmax(0,1fr))}
-  .panel{width:200px;padding:9px 10px;gap:5px}
+  .hud{padding-block:calc(env(safe-area-inset-top,0px) + 8px) calc(env(safe-area-inset-bottom,0px) + 8px)}
+  .tray{grid-template-columns:repeat(8,minmax(0,1fr));gap:5px}
+  .up{padding:5px 6px;gap:3px}
+  .up-name{font-size:11.5px}
+  .pips i{width:4px;height:5px}
+  .pips{gap:1px}
+  #burst{min-height:0}
+  .panel{width:150px;padding:8px 9px;gap:4px}
+  .binomial{font-size:13px}
   .bar{grid-template-columns:1fr;gap:3px}
-  #spark{height:26px}
+  .counts{font-size:11.5px}
+  #spark{display:none}
+  .small{font-size:10.5px}
 }
 @media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}}
 </style>
@@ -142,7 +156,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 
 <canvas id="dish" aria-label="Microscope view of the dish. Steer your cell with the mouse, a finger, or WASD."></canvas>
 
-<div class="hud">
+<div class="hud" id="hud" inert>
   <div class="top" id="top">
     <section class="panel" aria-label="Your organism">
       <div class="eyebrow">Specimen</div>
@@ -172,24 +186,24 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <div class="overlay" id="ovTitle">
-  <div class="card">
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="titleHead">
     <div class="eyebrow">A drop of pond water · 40× objective</div>
-    <h1>Under the Coverslip</h1>
+    <h1 id="titleHead">Under the Coverslip</h1>
     <p>You begin as a single cell. Eat algae, divide, and spend the DNA you earn to evolve new traits. Every other organism in the dish is evolving too, by mutation and selection.</p>
     <dl class="how">
       <dt>Steer</dt><dd>Point the mouse, or use WASD. On a phone, touch anywhere and drag like a joystick.</dd>
       <dt>Burst</dt><dd>Space or the Burst button gives a short dash for 6 energy.</dd>
       <dt>Divide</dt><dd>When your energy bar fills, you split. You earn DNA and an offspring swims off.</dd>
       <dt>Evolve</dt><dd>Spend DNA in the tray, or press 1 to 7. Gold-edged traits are affordable.</dd>
-      <dt>Survive</dt><dd>Cells with jaws eat anything 12% smaller. If you die, you carry on as one of your offspring, keeping your traits.</dd>
+      <dt>Survive</dt><dd>Cells with jaws eat anything 12% smaller. If you die, you carry on as one of your offspring. It keeps your traits but is one size smaller.</dd>
     </dl>
     <p class="small" id="best"></p>
-    <div class="actions"><button class="btn primary" id="startBtn" type="button">Begin lineage</button></div>
+    <div class="actions"><button class="btn primary" id="resumeSaveBtn" type="button" hidden>Continue lineage</button><button class="btn primary" id="startBtn" type="button">Begin lineage</button></div>
   </div>
 </div>
 
 <div class="overlay" id="ovOver" hidden>
-  <div class="card">
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="overHead">
     <div class="eyebrow">Lineage extinct</div>
     <h2 id="overHead">Your line has ended</h2>
     <dl class="stats" id="overStats"></dl>
@@ -198,19 +212,19 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 </div>
 
 <div class="overlay" id="ovWin" hidden>
-  <div class="card">
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="winHead">
     <div class="eyebrow">Stage reached · Leviathan</div>
-    <h2>Nothing in the dish can swallow you</h2>
-    <p>Your lineage has grown into the largest organism on the slide. Keep evolving, or start again with a fresh cell.</p>
+    <h2 id="winHead">Your lineage reached Leviathan size</h2>
+    <p>You have outgrown everything that lives in the dish. Larger hunters still drift in from outside, so keep evolving, or start again with a fresh cell.</p>
     <dl class="stats" id="winStats"></dl>
     <div class="actions"><button class="btn primary" id="contBtn" type="button">Keep evolving</button><button class="btn" id="newBtn" type="button">New lineage</button></div>
   </div>
 </div>
 
 <div class="overlay" id="ovPause" hidden>
-  <div class="card">
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="pauseHead">
     <div class="eyebrow">Stage locked</div>
-    <h2>Paused</h2>
+    <h2 id="pauseHead">Paused</h2>
     <div class="actions"><button class="btn primary" id="resumeBtn" type="button">Resume</button></div>
   </div>
 </div>
@@ -253,7 +267,7 @@ const hsl=(h,s,l,a)=>`hsla(${h},${s}%,${l}%,${a})`;
 let W=0,H=0,DPR=1,FR=200,CX=0,CY=0;
 let algae=[],meat=[],cells=[],parts=[],blooms=[],player=null,mode='title',t=0,algaeAcc=0;
 const cam={x:0,y:0,v:430,ang:0};
-let dna=0,gen=1,kills=0,lineT=0,heirs=0,maxSeen={},won=false,paused=false,hints=0;
+let dna=0,gen=1,kills=0,lineT=0,heirs=0,maxSeen={},won=false,paused=false,hints=0,migrantT=45,saveT=8,booted=false;
 let hist=[],histT=0,hudT=0,nextId=1;
 
 function binomial(g,r){
@@ -313,8 +327,11 @@ function applyLv(p){
   recompute(p);p.hp=Math.max(1,f*p.maxHp);
 }
 function startLineage(){
+  if(mode==='play'&&player)recordBest(gen,lineT);
+  else{const sv=loadSave();if(sv&&sv.v===1)recordBest(sv.gen||0,sv.lineT||0)}
   initWorld();
-  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=0;
+  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=0;migrantT=45;clearSave();
+  lastCensus=census();histT=1.5;
   let x=0,y=0;
   for(let i=0;i<80;i++){const b=blooms[i%blooms.length];x=b.x+rand(-60,60);y=b.y+rand(-60,60);if(i>40)[x,y]=randInDish(150);if(cells.every(c=>!c.g.jaws||Math.hypot(c.x-x,c.y-y)>380))break}
   player=makeCell(x,y,10,{speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0},338,{isPlayer:true,life:Infinity,lv:{size:0,speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0}});
@@ -327,6 +344,52 @@ function startLineage(){
   refreshHud(true);
 }
 function viewR(){return player?150+player.r*6+player.g.eye*45:430}
+function spawnMigrant(){
+  const a=rand(TAU),d=cam.v*1.35+40;
+  let x=player.x+Math.cos(a)*d,y=player.y+Math.sin(a)*d;const dd=Math.hypot(x,y);
+  if(dd>DISH-60){x*=(DISH-60)/dd;y*=(DISH-60)/dd}
+  const r=clamp(player.r*rand(1.18,1.38),12,44);
+  const g={speed:clamp(player.g.speed-(Math.random()<.5?1:0),0,MAX.speed),jaws:r>25?2:1,spikes:Math.random()<.3?1:0,armor:clamp(Math.floor(r/14),0,3),photo:0,eye:1};
+  const c=makeCell(x,y,r,g,rand(285,315),{announce:5,stalk:30});
+  c.en=c.maxEn*.4;cells.push(c);
+  toast('A larger hunter has drifted into the dish.');
+}
+
+/* ---------- save & resume ---------- */
+const SAVE_KEY='coverslip-save';
+const r1=v=>Math.round(v*10)/10;
+function snapshot(){
+  if(mode!=='play'||!player||player.dead)return null;
+  return{v:1,dna,gen,kills,lineT:r1(lineT),heirs,won,hints,maxSeen,migrantT:r1(migrantT),
+    cells:cells.filter(c=>!c.dead).map(c=>({x:r1(c.x),y:r1(c.y),a:r1(c.a),r:r1(c.r),g:c.g,hue:r1(c.hue),age:r1(c.age),life:c.isPlayer?0:r1(c.life),hp:r1(c.hp),en:r1(c.en),kin:c.kin,p:c.isPlayer,lv:c.lv||null})),
+    algae:algae.map(f=>[r1(f.x),r1(f.y),r1(f.r),r1(f.a)]),
+    meat:meat.map(m=>[r1(m.x),r1(m.y),r1(m.r),r1(m.v),r1(m.life),r1(m.rot)]),
+    blooms:blooms.map(b=>({x:r1(b.x),y:r1(b.y),s:r1(b.s),vx:r1(b.vx),vy:r1(b.vy)})),hist:hist.slice(-80)};
+}
+function restore(sv){
+  if(!sv||sv.v!==1||!Array.isArray(sv.cells))return false;
+  try{
+    const nc=[];let np=null;
+    for(const d of sv.cells){
+      const c=makeCell(d.x,d.y,d.r,d.g,d.hue,{kin:!!d.kin,isPlayer:!!d.p,a:d.a,age:d.age,life:d.p?Infinity:d.life});
+      if(d.p){c.lv={size:0,speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0,...d.lv};applyLv(c);np=c}else recompute(c);
+      c.hp=clamp(d.hp,1,c.maxHp);c.en=clamp(d.en,0,c.maxEn);nc.push(c);
+    }
+    if(!np)return false;
+    const na=sv.algae.map(([x,y,r,a])=>({x,y,r,a,dead:false}));
+    const nm=sv.meat.map(([x,y,r,v,life,rot])=>({x,y,r,v,life,rot,dead:false}));
+    const nb=Array.isArray(sv.blooms)&&sv.blooms.length?sv.blooms:blooms;
+    if(!Number.isFinite(sv.dna)||!Number.isFinite(sv.gen))return false;
+    cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=Array.isArray(sv.hist)?sv.hist:[];
+    ({dna,gen,kills,lineT,heirs,won,hints,maxSeen,migrantT}=sv);
+    player.shield=2;cam.x=player.x;cam.y=player.y;cam.v=viewR();
+    mode='play';paused=false;lastCensus=census();
+    return true;
+  }catch(e){return false}
+}
+function saveGame(){const sv=snapshot();if(!sv)return;try{localStorage.setItem(SAVE_KEY,JSON.stringify(sv))}catch(e){}}
+function clearSave(){try{localStorage.removeItem(SAVE_KEY)}catch(e){}}
+function loadSave(){try{return JSON.parse(localStorage.getItem(SAVE_KEY)||'null')}catch(e){return null}}
 
 /* ---------- offspring & death ---------- */
 function offspring(p){
@@ -357,7 +420,7 @@ function divide(){
   const gain=3+Math.floor(p.lv.size/3);dna+=gain;
   if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5}
   floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass);
-  if(hints<2){hints=2;toast('You divided. Spend DNA in the tray to evolve.')}
+  if(!(hints&2)){hints|=2;toast('You divided. Spend DNA in the tray to evolve.')}
 }
 function kill(c,killer){
   if(c.dead)return;c.dead=true;
@@ -371,16 +434,19 @@ function kill(c,killer){
   }
   if(c.isPlayer)onPlayerDeath();
 }
+function recordBest(g,tm){
+  let rec={gen:0};try{rec=JSON.parse(localStorage.getItem('coverslip-best')||'{"gen":0}')||{gen:0}}catch(e){}
+  if(g>(rec.gen||0)){try{localStorage.setItem('coverslip-best',JSON.stringify({gen:g,time:tm}))}catch(e){}return true}
+  return false;
+}
 function onPlayerDeath(){
   let best=null,bd=Infinity;
   for(const k of cells) if(k.kin&&!k.dead){const d=Math.hypot(k.x-player.x,k.y-player.y);if(d<bd){bd=d;best=k}}
   if(best){const shrank=player.lv.size>0;takeover(best);heirs++;toast(shrank?'Your lineage lives on in your offspring. Membrane −1.':'Your lineage lives on in your offspring.')}
   else{
     const final=binomial(player.g,player.r);
-    player=null;mode='over';
-    let bestRec={gen:0};try{bestRec=JSON.parse(localStorage.getItem('coverslip-best')||'{"gen":0}')}catch(e){}
-    const isBest=gen>(bestRec.gen||0);
-    if(isBest){try{localStorage.setItem('coverslip-best',JSON.stringify({gen,time:lineT}))}catch(e){}}
+    player=null;mode='over';clearSave();
+    const isBest=recordBest(gen,lineT);
     $('overHead').textContent=isBest?'A new record for this slide':'Your line has ended';
     $('overStats').innerHTML=statsHTML(final);
     showOnly('ovOver');$('againBtn').focus();
@@ -427,6 +493,13 @@ function think(c){
 }
 const steer={x:0,y:0,m:0};
 function aiSteer(c,dt){
+  if(c.stalk>0){
+    c.stalk-=dt;
+    if(player&&!player.dead&&canEat(c,player)&&player.shield<=0&&c.mode!=='flee'){
+      const dx=player.x-c.x,dy=player.y-c.y,d=Math.hypot(dx,dy)||1;
+      if(d>c.sense*.8){steer.x=dx/d;steer.y=dy/d;steer.m=.6;return}
+    }
+  }
   c.think-=dt;if(c.ignoreT>0)c.ignoreT-=dt;
   if(c.think<=0){c.think=rand(.18,.34);think(c)}
   let tg=c.tgt;if(tg&&tg.dead){c.tgt=tg=null;c.mode='wander'}
@@ -455,19 +528,25 @@ const keys=new Set();
 const ptr={x:0,y:0,on:false};
 const joy={on:false,id:null,ox:0,oy:0,x:0,y:0};
 cv.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'){ptr.x=e.clientX;ptr.y=e.clientY;ptr.on=true}else if(joy.on&&e.pointerId===joy.id){joy.x=e.clientX;joy.y=e.clientY}});
-cv.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'){ptr.x=e.clientX;ptr.y=e.clientY;ptr.on=true}else if(!joy.on){joy.on=true;joy.id=e.pointerId;joy.ox=joy.x=e.clientX;joy.oy=joy.y=e.clientY}try{cv.setPointerCapture(e.pointerId)}catch(_){}});
+cv.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'){ptr.x=e.clientX;ptr.y=e.clientY;ptr.on=true}else{joy.on=true;joy.id=e.pointerId;joy.ox=joy.x=e.clientX;joy.oy=joy.y=e.clientY}try{cv.setPointerCapture(e.pointerId)}catch(_){}});
 const pUp=e=>{if(e.pointerId===joy.id){joy.on=false;joy.id=null}};
 cv.addEventListener('pointerup',pUp);cv.addEventListener('pointercancel',pUp);
 cv.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')ptr.on=false});
 const KEYMAP={ArrowLeft:'l',KeyA:'l',ArrowRight:'r',KeyD:'r',ArrowUp:'u',KeyW:'u',ArrowDown:'d',KeyS:'d'};
+const onButton=e=>!!(e.target&&e.target.closest&&e.target.closest('button'));
 addEventListener('keydown',e=>{
-  if(KEYMAP[e.code]){keys.add(KEYMAP[e.code]);if(mode==='play')e.preventDefault();return}
-  if(e.code==='Space'&&mode==='play'){e.preventDefault();if(!e.repeat)burst();return}
+  if(e.metaKey||e.ctrlKey||e.altKey)return;
+  if(KEYMAP[e.code]){keys.add(KEYMAP[e.code]);if(mode==='play'&&!paused)e.preventDefault();return}
+  if(e.code==='Space'&&mode==='play'&&!paused&&!onButton(e)){e.preventDefault();if(!e.repeat)burst();return}
+  if(e.code==='Escape'&&!$('ovWin').hidden){$('contBtn').click();return}
   if((e.code==='KeyP'||e.code==='Escape')&&mode==='play'){togglePause();return}
   if(mode==='play'&&!paused&&/^Digit[1-7]$/.test(e.code)){buy(+e.code.slice(5)-1)}
 });
-addEventListener('keyup',e=>{if(KEYMAP[e.code])keys.delete(KEYMAP[e.code]);if(e.code==='Space'&&mode==='play')e.preventDefault()});
-addEventListener('blur',()=>keys.clear());
+addEventListener('keyup',e=>{if(e.key==='Meta'){keys.clear();return}if(KEYMAP[e.code])keys.delete(KEYMAP[e.code]);if(e.code==='Space'&&mode==='play'&&!paused&&!onButton(e))e.preventDefault()});
+const resetInput=()=>{keys.clear();joy.on=false;joy.id=null;ptr.on=false};
+addEventListener('blur',resetInput);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)resetInput()});
+cv.addEventListener('lostpointercapture',e=>{if(e.pointerId===joy.id){joy.on=false;joy.id=null}});
 function playerInput(){
   let kx=0,ky=0;
   if(keys.has('l'))kx--;if(keys.has('r'))kx++;if(keys.has('u'))ky--;if(keys.has('d'))ky++;
@@ -512,6 +591,7 @@ function updateCell(c,dt){
   if(d>lim){const nx=c.x/d,ny=c.y/d;c.x=nx*lim;c.y=ny*lim;const vn=c.vx*nx+c.vy*ny;if(vn>0){c.vx-=1.6*vn*nx;c.vy-=1.6*vn*ny}}
   const move=Math.min(1,v/c.maxSpd);
   c.en+=(c.g.photo*.5-c.drain*(.45+.55*move))*dt;
+  if(c.announce>0)c.announce-=dt;
   if(c.burst>0)c.burst-=dt;if(c.burstCd>0)c.burstCd-=dt;if(c.shield>0)c.shield-=dt;if(c.flash>0)c.flash-=dt;
   if(c.en<=0){c.en=0;c.hp-=4*dt;c.lastHit=t;if(c.hp<=0){kill(c,null);return}}
   else if(c.en>c.maxEn*.3&&c.hp<c.maxHp&&t-c.lastHit>2)c.hp=Math.min(c.maxHp,c.hp+(1+c.r*.05)*dt);
@@ -586,7 +666,8 @@ function update(dt){
     cam.x+=(tx-cam.x)*Math.min(1,dt*.5);cam.y+=(ty-cam.y)*Math.min(1,dt*.5);cam.v+=(430-cam.v)*Math.min(1,dt);
   }
   if(mode==='play'&&player){const lo=player.en<player.maxEn*.15;if(lo&&!player.warned){player.warned=true;toast(player.g.jaws?'Starving. Hunt something or eat algae.':'Starving. Find algae soon.')}else if(player.en>player.maxEn*.4)player.warned=false}
-  if(mode==='play'&&player&&hints===0&&lineT>9){hints=1;toast('Violet cells are hunters. Big ones can eat you.')}
+  if(mode==='play'&&player){migrantT-=dt;if(migrantT<=0){migrantT=rand(70,110);spawnMigrant()}}
+  if(mode==='play'&&player&&!(hints&1)&&lineT>9){hints|=1;toast('Violet cells are hunters. Big ones can eat you.')}
   histT-=dt;
   if(histT<=0){histT=1.5;sample()}
 }
@@ -607,7 +688,7 @@ function sample(){
 let bokeh=[];
 for(let i=0;i<26;i++)bokeh.push({x:rand(-1,1),y:rand(-1,1),r:rand(.04,.13),a:rand(.018,.045)});
 function resize(){
-  DPR=Math.min(2,window.devicePixelRatio||1);W=innerWidth;H=innerHeight;
+  DPR=Math.min(maxDPR,window.devicePixelRatio||1);W=innerWidth;H=innerHeight;
   cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);cv.style.width=W+'px';cv.style.height=H+'px';
   const topB=$('top').getBoundingClientRect().bottom,trayT=$('tray').getBoundingClientRect().top;
   const insetT=parseFloat(getComputedStyle($('top').parentElement).paddingTop)||14;
@@ -617,18 +698,33 @@ function resize(){
   // option B: field beside the side panels
   const rB=Math.min(W/2-pw-24,(trayT-insetT-10)/2);
   let side=false;
-  if(rB>=rA&&rB>120){FR=rB;CY=insetT+(trayT-insetT)/2;side=true}
-  else{FR=Math.max(90,rA);CY=(topB+trayT)/2}
+  if(rB>rA){FR=rB;CY=insetT+(trayT-insetT)/2;side=true}
+  else{FR=rA;CY=(topB+trayT)/2}
+  if(FR<90){FR=90;CY=Math.max(CY,insetT+FR)}
   CX=W/2;
   $('toasts').style.top=(side?CY-FR+16:Math.max(topB+6,CY-FR+16))+'px';
   $('toasts').style.width=side?Math.min(FR*1.6,420)+'px':'';
+  buildLayers();
   drawSpark();
 }
-function drawReticle(){
-  ctx.save();ctx.strokeStyle=COL.dim;ctx.globalAlpha=.4;ctx.lineWidth=1;ctx.beginPath();
+function drawReticle(g){
+  g.save();g.strokeStyle=COL.dim;g.globalAlpha=.4;g.lineWidth=1;g.beginPath();
   for(let i=0;i<120;i++){const a=i/120*TAU,len=i%10===0?12:i%5===0?7:3.5,c=Math.cos(a),s=Math.sin(a);
-    ctx.moveTo(CX+c*(FR+5),CY+s*(FR+5));ctx.lineTo(CX+c*(FR+5+len),CY+s*(FR+5+len))}
-  ctx.stroke();ctx.restore();
+    g.moveTo(CX+c*(FR+5),CY+s*(FR+5));g.lineTo(CX+c*(FR+5+len),CY+s*(FR+5+len))}
+  g.stroke();g.restore();
+}
+let bgLayer=null,vigLayer=null,maxDPR=2,lowFx=false,slowFrames=0;
+function layer(){const c=document.createElement('canvas');c.width=cv.width;c.height=cv.height;const g=c.getContext('2d');g.setTransform(DPR,0,0,DPR,0,0);return[c,g]}
+function buildLayers(){
+  let g;
+  [bgLayer,g]=layer();
+  g.fillStyle=COL.stage;g.fillRect(0,0,W,H);drawReticle(g);
+  const gr=g.createRadialGradient(CX,CY-FR*.15,FR*.05,CX,CY,FR);gr.addColorStop(0,COL.field);gr.addColorStop(1,COL.edge);
+  g.fillStyle=gr;g.beginPath();g.arc(CX,CY,FR,0,TAU);g.fill();
+  [vigLayer,g]=layer();
+  const vg=g.createRadialGradient(CX,CY,FR*.6,CX,CY,FR);vg.addColorStop(0,'rgba(8,14,17,0)');vg.addColorStop(1,'rgba(8,14,17,.55)');
+  g.fillStyle=vg;g.beginPath();g.arc(CX,CY,FR,0,TAU);g.fill();
+  g.strokeStyle=COL.brass;g.globalAlpha=.35;g.lineWidth=1.5;g.beginPath();g.arc(CX,CY,FR+1,0,TAU);g.stroke();
 }
 function drawGrid(px){
   const v=cam.v*1.05,x0=Math.floor((cam.x-v)/50)*50,x1=cam.x+v,y0=Math.floor((cam.y-v)/50)*50,y1=cam.y+v;
@@ -683,7 +779,7 @@ function drawCell(c,px){
   }
   // membrane
   ctx.beginPath();
-  for(let k=0;k<=28;k++){const a=k/28*TAU,rr=r*(1+(.045*Math.sin(a*3+c.wob*1.7)+.03*Math.sin(a*5-c.wob*2.3))*wa);k?ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr):ctx.moveTo(rr,0)}
+  const NP=lowFx?16:28;for(let k=0;k<=NP;k++){const a=k/NP*TAU,rr=r*(1+(.045*Math.sin(a*3+c.wob*1.7)+.03*Math.sin(a*5-c.wob*2.3))*wa);k?ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr):ctx.moveTo(rr,0)}
   ctx.closePath();
   ctx.fillStyle=hsl(h,58,60,.3);ctx.fill();
   ctx.strokeStyle=hsl(h,55,32,.95);ctx.lineWidth=Math.max(px*1.2,r*.07);ctx.stroke();
@@ -739,9 +835,9 @@ function drawScaleBar(s){
   ctx.font='500 11px "IBM Plex Mono",ui-monospace,monospace';ctx.textAlign='left';ctx.fillText(L+' µm',x,y-7);ctx.globalAlpha=1;
 }
 function drawEdgeArrows(){
-  if(!player||player.g.eye<2)return;
+  if(!player)return;
   for(const c of cells){
-    if(!canEat(c,player))continue;
+    if(!canEat(c,player)||(player.g.eye<2&&!(c.announce>0)))continue;
     const dx=c.x-player.x,dy=c.y-player.y,d=Math.hypot(dx,dy);
     if(d<cam.v*.95||d>cam.v*2.4)continue;
     const a=Math.atan2(dy,dx),x=CX+Math.cos(a)*(FR-16),y=CY+Math.sin(a)*(FR-16);
@@ -750,26 +846,25 @@ function drawEdgeArrows(){
   }
 }
 function render(){
+  ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(bgLayer,0,0);
   ctx.setTransform(DPR,0,0,DPR,0,0);
-  ctx.fillStyle=COL.stage;ctx.fillRect(0,0,W,H);
-  drawReticle();
   const s=FR/cam.v,px=1/s;
   ctx.save();ctx.beginPath();ctx.arc(CX,CY,FR,0,TAU);ctx.clip();
-  const gr=ctx.createRadialGradient(CX,CY-FR*.15,FR*.05,CX,CY,FR);gr.addColorStop(0,COL.field);gr.addColorStop(1,COL.edge);
-  ctx.fillStyle=gr;ctx.fillRect(CX-FR,CY-FR,FR*2,FR*2);
-  // out-of-focus debris, slow parallax
-  ctx.fillStyle=COL.fink;
-  for(const b of bokeh){let bx=((b.x*900-cam.x*.35)%1800+2700)%1800-900,by=((b.y*900-cam.y*.35)%1800+2700)%1800-900;
-    const sx=CX+bx*FR/700,sy=CY+by*FR/700;ctx.globalAlpha=b.a;ctx.beginPath();ctx.arc(sx,sy,b.r*FR,0,TAU);ctx.fill()}
-  ctx.globalAlpha=1;
+  if(!lowFx){
+    // out-of-focus debris, slow parallax
+    ctx.fillStyle=COL.fink;
+    for(const b of bokeh){let bx=((b.x*900-cam.x*.35)%1800+2700)%1800-900,by=((b.y*900-cam.y*.35)%1800+2700)%1800-900;
+      const sx=CX+bx*FR/700,sy=CY+by*FR/700;ctx.globalAlpha=b.a;ctx.beginPath();ctx.arc(sx,sy,b.r*FR,0,TAU);ctx.fill()}
+    ctx.globalAlpha=1;
+  }
   ctx.save();ctx.translate(CX,CY);ctx.scale(s,s);ctx.translate(-cam.x,-cam.y);
   drawGrid(px);drawRim(px);drawFood();drawCells(px);drawParts(px);
   ctx.restore();
-  const vg=ctx.createRadialGradient(CX,CY,FR*.6,CX,CY,FR);vg.addColorStop(0,'rgba(8,14,17,0)');vg.addColorStop(1,'rgba(8,14,17,.55)');
-  ctx.fillStyle=vg;ctx.fillRect(CX-FR,CY-FR,FR*2,FR*2);
+  ctx.restore();
+  ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(vigLayer,0,0);ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.save();ctx.beginPath();ctx.arc(CX,CY,FR,0,TAU);ctx.clip();
   drawEdgeArrows();drawScaleBar(s);
   ctx.restore();
-  ctx.strokeStyle=COL.brass;ctx.globalAlpha=.35;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(CX,CY,FR+1,0,TAU);ctx.stroke();ctx.globalAlpha=1;
   drawJoy();
 }
 function drawSpark(){
@@ -834,7 +929,7 @@ function toast(msg){
   const box=$('toasts'),el=document.createElement('div');el.className='toast';el.textContent=msg;box.appendChild(el);
   while(box.children.length>3)box.firstChild.remove();setTimeout(()=>el.remove(),3400);
 }
-function showOnly(id){for(const o of['ovTitle','ovOver','ovWin','ovPause'])$(o).hidden=o!==id}
+function showOnly(id){for(const o of['ovTitle','ovOver','ovWin','ovPause'])$(o).hidden=o!==id;$('hud').inert=!!id}
 function togglePause(){
   if(mode!=='play')return;
   if(!$('ovWin').hidden)return;
@@ -846,21 +941,42 @@ $('newBtn').addEventListener('click',startLineage);
 $('contBtn').addEventListener('click',()=>{paused=false;showOnly(null)});
 $('resumeBtn').addEventListener('click',togglePause);
 $('pauseBtn').addEventListener('click',e=>{togglePause();if(e.detail>0)e.currentTarget.blur()});
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='play'&&!paused)togglePause()});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='play'){saveGame();if(!paused)togglePause()}});
 try{const b=JSON.parse(localStorage.getItem('coverslip-best')||'null');if(b&&b.gen)$('best').textContent=`Your longest lineage on this device: ${b.gen} generations in ${fmt(b.time||0)}.`}catch(e){}
 
 /* ---------- boot ---------- */
-initWorld();
-for(let i=0;i<40;i++)update(.05); // let the ecosystem settle before the first frame
-sample();refreshHud(true);
+function boot(data){
+  initWorld();
+  for(let i=0;i<40;i++)update(.05); // let the ecosystem settle before the first frame
+  sample();
+  if(data&&data.save&&restore(data.save)){showOnly(null)}
+  else{
+    const sv=loadSave();
+    if(sv&&sv.v===1){
+      const b=$('resumeSaveBtn');b.hidden=false;b.textContent=`Continue lineage · generation ${sv.gen}`;
+      $('startBtn').classList.remove('primary');$('startBtn').textContent='Begin a new lineage';
+      b.addEventListener('click',()=>{if(restore(loadSave())){showOnly(null);toast('Welcome back. Your lineage picks up where it left off.')}else{clearSave();startLineage()}refreshHud(true)});
+    }
+  }
+  booted=true;refreshHud(true);
+}
+try{window.claude?.hot?.snapshot?.(()=>({save:snapshot()}))}catch(e){}
+const hot=window.claude?.hot;
+if(hot&&hot.ready)hot.ready(boot);else boot((hot&&hot.data)||{});
+addEventListener('pagehide',saveGame);
 addEventListener('resize',resize);
 resize();
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(resize);
 let last=performance.now();
 function frame(now){
-  const dt=Math.min(.05,(now-last)/1000);last=now;
+  const raw=(now-last)/1000,dt=Math.min(.05,raw);last=now;
+  // drop resolution, then effects, if this device can't keep up
+  if(!document.hidden&&raw<.5){slowFrames=raw>.045?slowFrames+1:Math.max(0,slowFrames-2);
+    if(slowFrames>90){slowFrames=0;if(DPR>1){maxDPR=1;resize()}else lowFx=true}}
+  if(!booted){requestAnimationFrame(frame);return}
   if(!paused)update(dt);
   render();
+  if(mode==='play'){saveT-=dt;if(saveT<=0){saveT=8;saveGame()}}
   hudT-=dt;if(hudT<=0){hudT=.1;refreshHud()}
   requestAnimationFrame(frame);
 }

@@ -1,6 +1,6 @@
 // Offline cache for Under the Coverslip. Serves the cached copy first and refreshes it in the background,
 // so the game opens with no connection and picks up updates on the next launch.
-const CACHE = 'coverslip-v2';
+const CACHE = 'coverslip-v3';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-180.png'];
 
 self.addEventListener('install', e => {
