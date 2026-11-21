@@ -18,9 +18,10 @@ An original tower defense game for phones. It is one HTML file with no outside d
 
 ## How to play
 - Tap a grass tile, pick a tower, then tap it again to build. Or pick the tower first, then tap a grass tile twice. It stays picked, so the next one takes two taps.
-- Tap a tower to upgrade it (up to level 3), sell it (tap twice), or change who it targets. Selling gives a full refund until the next wave starts, then 70%.
+- Tap a tower to upgrade it (up to level 3), sell it (tap twice), or change who it targets: **First** (closest to the keep), **Toughest** (Brutes and Warlords first) or **Fliers** (Wisps first). Selling gives a full refund until the next wave starts, then 70%.
+- The icons beside Start wave show the next wave's enemies and how many. Tap one for its HP, speed and armor.
 - **Start wave** sends the next wave. Once a wave has fully arrived you can call the next one early for bonus gold. Wave 30 is the exception: the run is won when it is over, so wave 31 can't be called during it.
-- Survive 30 waves to win, then keep going in endless mode.
+- Survive 30 waves to win, then keep going in endless mode. A win earns stars for that road: 3 for finishing with 16 or more lives, 2 for 10 or more, otherwise 1. The end card shows what got through and which towers did the damage.
 - Each road keeps its own saved run, saved whenever the road is clear: after a wave, once nothing is left on the road. While waves called early overlap, nothing is saved, so leaving then (or the phone closing the app) restarts from the last clear road, and Continue says which waves restart. Tap a road to pick up its run. To start a road over, use Pause > Restart road (tap twice, the second tap on its own).
 - Keyboard: Escape or P pauses, Space or Enter sends the next wave, 1-5 pick a tower. Tab to the board, then the arrow keys move a tile cursor and Enter taps that tile.
 

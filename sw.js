@@ -1,7 +1,7 @@
 // Caches the whole game so it runs with no connection.
 // Strategy: answer from the cache immediately, then refresh the cache in the
 // background when online, so a new version shows up on the next launch.
-const CACHE = 'pathwarden-v2';
+const CACHE = 'pathwarden-v3';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icons/icon.svg', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', e => {
