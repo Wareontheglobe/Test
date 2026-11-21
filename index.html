@@ -75,6 +75,8 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity .2s,transform .2s}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 #toast.bad{color:#ffd2c9;border-color:#7a3a30}
+/* Read out by screen readers only (the board's banners are drawn on the canvas). */
+.vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 /* A toast too long for one line wraps to two instead of being cut off. toast() adds .wrap after measuring. */
 #toast.wrap{white-space:normal;width:max-content;text-align:center;text-wrap:balance;border-radius:14px;line-height:1.3}
 /* With enemies on the board the toast keeps to the grass block at cols 2-6, rows 12-13 (toast() narrows it), so it never hides the road near the keep.
@@ -193,7 +195,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     <button class="hbtn" id="bSpeed" aria-label="Game speed 1×">1×</button>
     <button class="hbtn" id="bPause" aria-label="Pause"><svg viewBox="0 0 16 16"><rect x="3" y="2" width="3.6" height="12" rx="1" fill="currentColor"/><rect x="9.4" y="2" width="3.6" height="12" rx="1" fill="currentColor"/></svg></button>
   </header>
-  <div id="stage"><canvas id="cv" role="img" aria-label="Game board"></canvas><div id="toast" role="status" aria-live="polite"></div></div>
+  <div id="stage"><canvas id="cv" role="img" aria-label="Game board"></canvas><div id="toast" role="status" aria-live="polite"></div><div id="sr" class="vh" role="status" aria-live="polite"></div></div>
   <footer id="panel">
     <div id="phead"><div id="info"></div><button id="bWave">Start wave 1</button></div>
     <div id="pbody">
@@ -451,7 +453,7 @@ function newGame(map,save){
   // A player's first run: point at two good tiles until the first build.
   if(!S.tutorialDone&&!Object.keys(S.best).length&&!G.towers.length)G.hintTiles=hintTiles(map);
   syncSpeed();
-  layout();refreshPanel();updateHud(true);
+  layout();refreshPanel();updateHud(true);syncInert();
 }
 function placeTower(type,c,r,level,spent,mode){
   // refund: the part of spent that sells back in full. Only builds and upgrades made between waves earn it, and the next wave clears it.
@@ -494,7 +496,10 @@ const bossWave=w=>buildWave(w).some(([t])=>ED[t].boss);
 // The small line under 'WAVE N'. Later items add more (new enemy types, wave themes).
 function bannerSub(w){return bossWave(w)?'A Warlord is coming':''}
 // One banner at a time: a newer one replaces it (and anything waiting behind it).
-function setBanner(b){G.banner={sub:'',...b,t:0};G.bannerNext=null}
+// b.say is its line for screen readers (the banner is only drawn), read out when the banner shows.
+function setBanner(b){G.banner={sub:'',...b,t:0};G.bannerNext=null;say(b.say)}
+// The #sr live region. The same line twice in a row gets a trailing no-break space, so the region changes and it is read again.
+function say(msg){if(!msg)return;const el=$('#sr');el.textContent=el.textContent===msg?msg+'\u00a0':msg}
 const goldGain=()=>flashClass($('#sGold'),'gain',250);
 
 function startWave(){
@@ -507,7 +512,8 @@ function startWave(){
   for(const [type,cnt,iv,delay] of buildWave(w)){t+=delay;for(let i=0;i<cnt;i++){G.spawnQ.push({at:t,type,w});t+=iv;count++}}
   G.W[w]={rem:count,alive:0,leaked:0};
   if(early){const b=10+w;G.gold+=b;toast(`Called early · +${b} gold`);goldGain()}
-  setBanner({s:`WAVE ${w}`,sub:bannerSub(w),c:bossWave(w)?'#a487ff':'#f0e9d2',dur:1.3});
+  const sub=bannerSub(w);
+  setBanner({s:`WAVE ${w}`,sub,c:bossWave(w)?'#a487ff':'#f0e9d2',dur:1.3,say:`Wave ${w}${sub?'. '+sub:''}`});
   sfx('wave');refreshPanel();
 }
 // Where the road comes out of the cave, pulled onto the board.
@@ -521,7 +527,7 @@ function spawnEnemy(type,w,dist,frac){
   // The Warlord's entrance: dark rings out of the cave, its banner and a horn.
   if(d.boss){
     const c=cavePos();G.fx.push({k:'bossin',x:c.x,y:c.y,t:0,dur:0.6});
-    setBanner({s:'THE WARLORD',sub:'Costs 5 lives if it gets through',c:'#a487ff',dur:1.4});
+    setBanner({s:'THE WARLORD',sub:'Costs 5 lives if it gets through',c:'#a487ff',dur:1.4,say:'The Warlord. Costs 5 lives if it gets through'});
     sfx('horn');
   }
 }
@@ -536,8 +542,9 @@ function bossInfo(){
   for(const w of ws){const s=G.W[w];if(s&&s.bossN){max+=s.bossMax;n+=s.bossN}}
   return {frac:clamp(hp/max,0,1),n,walk};
 }
+// Returns true when this clear won the run (the victory screen is up).
 function waveDone(w){
-  const s=G.W[w];if(!s)return;s.alive--;
+  const s=G.W[w];if(!s)return false;s.alive--;
   if(s.rem<=0&&s.alive<=0&&!G.over){
     delete G.W[w];
     const b=CFG.bonusA+CFG.bonusB*w;G.gold+=b;G.cleared=Math.max(G.cleared,w);
@@ -545,7 +552,7 @@ function waveDone(w){
     if(G.cleared>(S.best[G.map.id]||0))recordBest();
     const calm=!activeWaves()&&!G.spawnQ.length,victory=calm&&G.cleared>=FINAL_WAVE&&!G.won,flawless=calm&&!s.leaked;
     // Overlapping waves get no banner: the next one is already on the road.
-    if(calm)setBanner({s:`CLEARED +${b}`,sub:flawless?'FLAWLESS':'',c:'#e3ad45',dur:1.0});
+    if(calm)setBanner({s:`CLEARED +${b}`,sub:flawless?'FLAWLESS':'',c:'#e3ad45',dur:1.0,say:`Wave ${w} cleared. +${b} gold${flawless?'. Flawless':''}`});
     goldGain();
     sfx(victory?'win':flawless?'flawless':'clear');
     if(calm){
@@ -553,7 +560,9 @@ function waveDone(w){
       if(victory){G.won=true;recordBest();saveRun();showEnd(true)}
     }
     refreshPanel();
+    return victory;
   }
+  return false;
 }
 // src is the attacking tower's type. A Longshot (pierce) hit flashes a red rim. A hit whose damage armor cut by 40% or more
 // sparks off the armor with a tink instead of the white flash (not Frost, whose small hits would tink all the time).
@@ -586,9 +595,10 @@ function kill(e){
     sfx('die');
   }
   const before=G.banner;
-  waveDone(e.w);
+  const won=waveDone(e.w);
   // 'WARLORD DOWN' wins over the 'CLEARED' banner this same kill may have raised; that one shows right after it.
-  if(boss){const cl=G.banner!==before?G.banner:null;setBanner({s:'WARLORD DOWN',c:'#e3ad45',dur:1.2});G.bannerNext=cl}
+  // Not when this kill won the run: the victory screen is the celebration, and nothing waits behind it.
+  if(boss&&!won){const cl=G.banner!==before?G.banner:null;setBanner({s:'WARLORD DOWN',c:'#e3ad45',dur:1.2,say:'Warlord down'});G.bannerNext=cl}
 }
 // The keep, in tiles: the road's last point, pulled onto the board.
 function keepPos(){const P=G.map.path.P,b=P[P.length-1];return {x:clamp(b.x,0.4,COLS-0.4),y:clamp(b.y,0.4,ROWS-0.4)}}
@@ -700,15 +710,23 @@ function step(dt){
     }else{p.x+=dx/d*mv;p.y+=dy/d*mv}
   }
   G.projs=G.projs.filter(p=>!p.done);
-  for(const f of G.fx){f.t+=dt;if(f.k==='p'){f.x+=f.vx*dt;f.y+=f.vy*dt;f.vx*=0.9;f.vy*=0.9}}
-  G.fx=G.fx.filter(f=>f.t<f.dur);
   G.enemies=G.enemies.filter(e=>!e.dead);
-  if(G.banner){G.banner.t+=dt;if(G.banner.t>=G.banner.dur){G.banner=G.bannerNext;G.bannerNext=null;if(G.banner)G.banner.t=0}}
+  tickFx(dt);
   // Pinned Warlord bar: the white trail eases down to the fill. Its fade-in clock starts when a Warlord leaves the cave.
   const bi=bossInfo();
   if(!bi)G.bossBar=null;
   else if(!G.bossBar)G.bossBar={frac:bi.frac,trail:bi.frac,t:bi.walk};
   else{const b=G.bossBar;b.frac=bi.frac;b.t+=dt;b.trail+=(bi.frac-b.trail)*Math.min(1,dt*3)}
+}
+
+// Effects and the banner. step() runs this with the run. After a loss frame() keeps it going in real time, so what was on the
+// board at the fatal leak plays out instead of freezing. b.cut (seconds) fades a banner out early, ahead of its dur.
+function tickFx(dt){
+  for(const f of G.fx){f.t+=dt;if(f.k==='p'){f.x+=f.vx*dt;f.y+=f.vy*dt;f.vx*=0.9;f.vy*=0.9}}
+  G.fx=G.fx.filter(f=>f.t<f.dur);
+  const b=G.banner;
+  if(b){b.t+=dt;if(b.cut!=null)b.cut-=dt;
+    if(b.t>=b.dur||b.cut<=0){G.banner=G.bannerNext;G.bannerNext=null;if(G.banner){G.banner.t=0;say(G.banner.say)}}}
 }
 
 /* ---------- save/end ---------- */
@@ -728,7 +746,9 @@ function gameOver(){
   G.over=true;G.running=false;recordBest();delete S.saves[G.map.id];persist();
   sfx('lose');
   // A 900ms beat before the end screen. The frame loop keeps rendering, so the vignette and the keep flash play out first.
-  G.hurtT=0.9;const g=G;setTimeout(()=>{if(G===g&&G.over&&$('#endOv').hidden)showEnd(false)},900);
+  // The run is over, so the game takes no input from here (syncInert), and a banner on the board fades out within 0.4s.
+  G.hurtT=0.9;G.bannerNext=null;if(G.banner)G.banner.cut=0.4;syncInert();
+  const g=G;setTimeout(()=>{if(G===g&&G.over&&$('#endOv').hidden)showEnd(false)},900);
 }
 function showEnd(win){
   $('#endTitle').textContent=win?'The road holds':'The keep has fallen';
@@ -737,7 +757,8 @@ function showEnd(win){
     :`You held <b>${G.cleared}</b> wave${G.cleared===1?'':'s'} on ${G.map.name}. Best here: <b>${S.best[G.map.id]||0}</b>.`;
   $('#bEndMain').textContent=win?'Keep going':'Try again';
   $('#endOv').hidden=false;syncOv();
-  if(win){G.paused=true}
+  // A win pauses the run behind the dialog. Banners and the shake from the winning moment would only play after 'Keep going'.
+  if(win){G.paused=true;G.banner=G.bannerNext=null;G.shakeT=0}
 }
 
 /* ---------- rendering ---------- */
@@ -1020,15 +1041,17 @@ function render(time){
   drawCave(g,s);
   // Enemies fade out over the last 0.9 tile before they leak (drawing only; the leak distance is unchanged).
   // Each one hurt below 98% (not a Warlord: its bar is pinned at the top) queues an HP bar just above its sprite, at the same fade.
+  // A fading ground enemy is walking in under the keep, so its bar (under) is drawn before the keep too; the rest after the fliers.
   const end=G.map.path.len-0.2;hpBars=[];
   const drawE=e=>{
     if(e.dead)return;const a=clamp((end-e.dist)/0.9,0,1);if(a<=0)return;
     g.globalAlpha=a;const top=drawEnemy(g,e,s,time,still);g.globalAlpha=1;
     if(e.d.boss||!(e.hp<0.98*e.max))return;
     const w=Math.max(16,e.r>=0.3?s*0.6:s*0.45),h=Math.round(Math.max(4,s*0.09));
-    hpBars.push({x:e.x*s-w/2,y:Math.round(top-Math.max(3,s*0.08))-h,w,h,f:clamp(e.hp/e.max,0,1),a});
+    hpBars.push({x:e.x*s-w/2,y:Math.round(top-Math.max(3,s*0.08))-h,w,h,f:clamp(e.hp/e.max,0,1),a,under:!e.fly&&a<1});
   };
   for(const e of G.enemies)if(!e.fly)drawE(e);
+  drawBars(g,hpBars.filter(b=>b.under));
   drawKeep(g,s,time);
   for(const p of G.projs){
     if(p.k==='bolt'){g.save();g.translate(p.x*s,p.y*s);g.rotate(p.ang||0);g.fillStyle='#f4e8c8';g.strokeStyle=INK;g.lineWidth=Math.max(1,s*0.025);
@@ -1041,7 +1064,7 @@ function render(time){
     }
   }
   for(const e of G.enemies)if(e.fly)drawE(e);
-  drawBars(g,hpBars);
+  drawBars(g,hpBars.filter(b=>!b.under));
   for(const f of G.fx){
     const k=f.t/f.dur;
     if(f.k==='p'){g.globalAlpha=1-k;g.fillStyle=f.c;circle(g,f.x*s,f.y*s,f.r*s*(1-k*0.5));g.fill();g.globalAlpha=1}
@@ -1090,8 +1113,9 @@ function render(time){
 }
 // The banner: text only, centred at 38% of the board's height. It fades in over 0.15s, holds, fades out over the last 0.4s,
 // and rises 0.3 tile over its life (not under reduced motion). A line too wide for 8.6 tiles drops from 0.9T to 0.7T.
+// A banner cut short (b.cut, after a loss) fades out over the time it has left.
 function drawBanner(g,s,b,still){
-  const a=clamp(Math.min(b.t/0.15,(b.dur-b.t)/0.4),0,1);if(a<=0)return;
+  const a=clamp(Math.min(b.t/0.15,(b.dur-b.t)/0.4,b.cut==null?1:b.cut/0.4),0,1);if(a<=0)return;
   const cx=COLS*s/2,cy=ROWS*s*0.38-(still?0:0.3*s*clamp(b.t/b.dur,0,1));
   g.save();g.globalAlpha=a;g.textAlign='center';g.textBaseline='middle';g.lineJoin='round';g.strokeStyle=INK;
   let fs=0.9*s;g.font=`900 ${fs}px ${FONT_DISPLAY}`;
@@ -1107,21 +1131,24 @@ function drawBanner(g,s,b,still){
   g.restore();
 }
 // The pinned Warlord bar across the top of the board: every living Warlord's HP summed, a white trail easing down behind the fill,
-// 'WARLORD' (or 'WARLORDS ×N') and the percentage just below it. It fades in over the first 0.3s after a Warlord leaves the cave.
+// and 'WARLORD' (or 'WARLORDS ×N') left and the percentage right, inside the bar. The bar is Math.max(8, 0.2T) tall, or taller
+// to hold the labels, so it covers one band and nothing under it (the cave and the first stretch of road stay clear).
+// It fades in over the first 0.3s after a Warlord leaves the cave.
 function drawBossBar(g,s,bi,bar){
   const t=bar?bar.t:bi.walk,trail=bar?Math.max(bar.trail,bi.frac):bi.frac;
-  const x=6,y=6,w=COLS*s-12,h=Math.max(8,0.2*s);
+  const fs=Math.max(9,Math.round(0.28*s)); // 0.28T, at least 9px so it stays legible on small boards
+  const x=6,y=6,w=COLS*s-12,h=Math.max(8,0.2*s,fs+4);
   g.save();g.globalAlpha=0.9*clamp(t/0.3,0,1);
   rr(g,x,y,w,h,4);g.fillStyle='rgba(20,18,14,.85)';g.fill();
   g.save();rr(g,x+1,y+1,w-2,h-2,3);g.clip();
   g.fillStyle='#ffffff';g.fillRect(x+1,y+1,(w-2)*trail,h-2);
   g.fillStyle='#a487ff';g.fillRect(x+1,y+1,(w-2)*bi.frac,h-2);
   g.restore();
-  const fs=Math.max(9,Math.round(0.28*s)),ly=y+h+2+fs/2; // 0.28T, at least 9px so it stays legible on small boards
+  const ly=y+h/2+0.5; // half a pixel down: capitals on a 'middle' baseline sit a little high
   g.font=`800 ${fs}px ${FONT_DISPLAY}`;g.textBaseline='middle';g.lineJoin='round';g.lineWidth=3;g.strokeStyle='rgba(20,18,14,.85)';g.fillStyle='#f0e9d2';
   const name=bi.n>=2?`WARLORDS ×${bi.n}`:'WARLORD',pct=`${Math.max(1,Math.round(bi.frac*100))}%`;
-  g.textAlign='left';g.strokeText(name,x+2,ly);g.fillText(name,x+2,ly);
-  g.textAlign='right';g.strokeText(pct,x+w-2,ly);g.fillText(pct,x+w-2,ly);
+  g.textAlign='left';g.strokeText(name,x+6,ly);g.fillText(name,x+6,ly);
+  g.textAlign='right';g.strokeText(pct,x+w-6,ly);g.fillText(pct,x+w-6,ly);
   g.restore();
 }
 
@@ -1271,7 +1298,7 @@ function updateHud(force){
 function deselect(){G.sel=null;G.selTower=null;G.pending=null;G.armKept=false;G.sellArm=false}
 // A tower can be armed before or after picking a tile. With no tile, tapping the armed tower again disarms it.
 function onPalette(k){
-  audioInit();if(!G)return;
+  audioInit();if(!G||G.over)return;
   if(!G.sel){
     if(G.pending===k)G.pending=null;else{G.selTower=null;G.sellArm=false;G.pending=k}
     G.armKept=false;refreshPanel();return;
@@ -1313,23 +1340,24 @@ cv.addEventListener('pointerdown',ev=>{
 });
 // A tap beside the board (where #stage is bigger than it) clears the selection and disarms, like a tap off the grid.
 $('#stage').addEventListener('pointerdown',ev=>{if(ev.target!==cv)onBoardTap(-1,-1)});
+// The panel's handlers check G.over as well as #app.inert: a key or a script click still reaches a button in an inert tree.
 $('#bUp').addEventListener('click',()=>{
-  const t=G.selTower;if(!t||t.level>=3)return;const c=upCost(t);
+  const t=G.selTower;if(!t||t.level>=3||G.over)return;const c=upCost(t);
   if(G.gold<c){toast(`Need ${c-G.gold} more gold`,true);sfx('no');goldShort();return}
   G.gold-=c;t.spent+=c;if(isCalm())t.refund+=c;t.level++;
   // The punch: the tower swells and settles (upT, see render), and a brass ring grows out to the new range.
   t.upT=0.22;const nr=tstats(t.type,t.level).range;G.fx.push({k:'ring',x:t.x,y:t.y,t:0,dur:0.45,r:nr,r0:nr*0.4,c:'#e3ad45',a:0.8});
   sfx(t.level===3?'up3':'up2');burst(t.x,t.y,'#e3ad45',8,false);G.sellArm=false;refreshPanel();updateHud(true);saveRunIfCalm();
 });
-$('#bMode').addEventListener('click',()=>{const t=G.selTower;if(!t)return;t.mode=MODES[(MODES.indexOf(t.mode)+1)%MODES.length];G.sellArm=false;refreshPanel();saveRunIfCalm()});
+$('#bMode').addEventListener('click',()=>{const t=G.selTower;if(!t||G.over)return;t.mode=MODES[(MODES.indexOf(t.mode)+1)%MODES.length];G.sellArm=false;refreshPanel();saveRunIfCalm()});
 $('#bSell').addEventListener('click',()=>{
-  const t=G.selTower;if(!t)return;
+  const t=G.selTower;if(!t||G.over)return;
   if(!G.sellArm){G.sellArm=true;G.sellArmAt=performance.now();refreshPanel();return}
   G.gold+=sellValue(t);G.towers=G.towers.filter(x=>x!==t);G.grid[t.r*COLS+t.c]=0;burst(t.x,t.y,'#8a7a5a',8,false);sfx('sell');
   deselect();refreshPanel();updateHud(true);saveRunIfCalm();
 });
 $('#bWave').addEventListener('click',()=>{
-  audioInit();if(!G)return;
+  audioInit();if(!G||G.over)return;
   if(G.wave===0&&!G.towers.length&&!sendArmed()){
     G.sendArmAt=performance.now();toast(NO_TOWERS,true,3000);sfx('no');refreshPanel();return;
   }
@@ -1387,9 +1415,11 @@ let keyNav=false;
 document.addEventListener('keydown',()=>{keyNav=true},true);
 document.addEventListener('pointerdown',()=>{keyNav=false},true);
 function focusEl(el){el.focus({preventScroll:true,focusVisible:keyNav})}
+// The game is inert under an open dialog, and through the beat between a loss and its end screen (the run is over).
+function syncInert(){$('#app').inert=!!document.querySelector('.ov:not([hidden])')||!!(G&&G.over)}
 function syncOv(){
   const open=document.querySelector('.ov:not([hidden])');
-  $('#app').inert=!!open;
+  syncInert();
   if(open&&!open.contains(document.activeElement)){
     const b=[...open.querySelectorAll('button')].find(x=>x.getClientRects().length);
     if(b)focusEl(b);
@@ -1462,11 +1492,14 @@ function frame(now){
   if(G&&G.hurtT>0)G.hurtT=Math.max(0,G.hurtT-dt);
   // So does the Warlord shake, so it settles even if the run pauses (a wave-30 win) right after.
   if(G&&G.shakeT>0)G.shakeT=Math.max(0,G.shakeT-dt);
+  // After a loss the run no longer steps, but the keep flash, effects and banner still play out (real time).
+  if(G&&G.over){if(G.gateFlash>0)G.gateFlash-=dt;tickFx(dt)}
   if(G){render(now/1000);updateHud(false)}
   requestAnimationFrame(frame);
 }
 let rz=0;
-function onResize(){clearTimeout(rz);rz=setTimeout(()=>{layout();paintIcons()},60)}
+// refreshPanel refits the placing and ready lines to #info's new width (a rotation changes it).
+function onResize(){clearTimeout(rz);rz=setTimeout(()=>{layout();paintIcons();refreshPanel()},60)}
 window.addEventListener('resize',onResize);
 window.addEventListener('orientationchange',onResize);
 

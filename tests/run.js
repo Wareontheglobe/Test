@@ -1565,7 +1565,7 @@ let BASE;
     await page.waitForTimeout(100);
     const hold = await G(page, () => ({ el: performance.now() - window.__overAt, hidden: document.querySelector('#endOv').hidden, inert: document.querySelector('#app').inert, hurtT: window.__pw.G.hurtT }));
     check(hold.hidden && hold.el < 900, `#endOv is still hidden after 100ms (${Math.round(hold.el)}ms)`);
-    check(hold.hurtT > 0 && hold.hurtT < 0.9 && !hold.inert, 'during the hold the vignette keeps fading after game over, and the board is not covered ' + JSON.stringify(hold));
+    check(hold.hurtT > 0 && hold.hurtT < 0.9 && hold.inert, 'during the hold the vignette keeps fading after game over, and the run takes no input (#app is inert) ' + JSON.stringify(hold));
     await tapTile(page, 4, 2);
     await G(page, () => document.querySelector('#bPause').click());
     check((await G(page, () => window.__pw.G.sel)) === null && (await hidden(page, '#pauseOv')), 'board taps and Pause do nothing during the hold');
@@ -1579,6 +1579,45 @@ let BASE;
     await G(page, () => { const W = window.__pw, g = W.G; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.21); W.step(1 / 30); W.newGame(1); window.__pw.G.running = true; });
     await page.waitForTimeout(1000);
     check((await hidden(page, '#endOv')) && (await G(page, () => !window.__pw.G.over)), 'a new run started during the hold does not show the old loss screen');
+    check((await G(page, () => document.querySelector('#app').inert)) === false, 'and that new run takes input again (#app is not inert)');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'leak-feedback: the lost run takes no input during the beat, and what was on the board plays out';
+  {
+    const { ctx, page } = await newPage(browser, { init: audioSpy });
+    await startMap(page, 1);
+    await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    await tapTile(page, 2, 2);
+    check(!(await hidden(page, '#tview')), 'the bolt is selected and its panel is open');
+    // Where the panel buttons and the first palette tile are, measured before the loss (the palette is hidden behind the panel).
+    const spots = await G(page, () => Object.fromEntries(['#bUp', '#bSell', '#bMode', '#bSpeed', '#bWave'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return [s, { x: r.left + r.width / 2, y: r.top + r.height / 2 }]; })));
+    // The fatal leak lands while a WAVE banner is up and a CLEARED banner waits behind it.
+    const o = await G(page, () => { const W = window.__pw, g = W.G; g.gold = 500; g.lives = 1; g.enemies = []; g.fx = []; g.gateFlash = 0;
+      g.banner = { s: 'WAVE 4', sub: '', c: '#f0e9d2', t: 0.3, dur: 1.3 }; g.bannerNext = { s: 'CLEARED +23', sub: '', c: '#e3ad45', t: 0, dur: 1 };
+      W.spawn('grunt', g.map.path.len - 0.21); W.step(1 / 30); window.__overAt = performance.now();
+      return { over: g.over, inert: document.querySelector('#app').inert, banner: g.banner && g.banner.s, cut: g.banner && g.banner.cut, next: g.bannerNext, text: g.fx.find(f => f.k === 'text' && f.s === '-1'), gate: g.gateFlash, speed: g.speed }; });
+    check(o.over && o.inert, 'the fatal leak makes #app inert at once ' + JSON.stringify(o));
+    check(o.banner === 'WAVE 4' && o.cut === 0.4 && o.next === null, 'the WAVE banner on the board starts a 0.4s fade-out and nothing waits behind it ' + JSON.stringify(o));
+    await clearRec(page, 50);
+    for (const s of ['#bUp', '#bSell', '#bSell', '#bMode', '#bSpeed']) { await page.mouse.click(spots[s].x, spots[s].y); await page.waitForTimeout(30); }
+    await page.keyboard.press('1'); await page.keyboard.press('Space');
+    // A script click still reaches a button in an inert tree, so the handlers check G.over themselves.
+    await G(page, () => { for (const s of ['#bUp', '#bMode', '#bSell', '#bSell', '#bWave']) document.querySelector(s).click(); document.querySelector('.tw[data-t="frost"]').click(); });
+    const h = await G(page, () => { const g = window.__pw.G, t = g.towers[0]; return { towers: g.towers.length, level: t && t.level, mode: t && t.mode, gold: g.gold, rings: g.fx.filter(f => f.k === 'ring').length, pending: g.pending, speed: g.speed, wave: g.wave, sel: !!g.selTower, banner: g.banner && { a: g.banner.cut, t: g.banner.t } }; });
+    check(h.towers === 1 && h.level === 1 && h.mode === 'first' && h.gold === 500 && h.rings === 0, 'Upgrade, Sell and Target do nothing to the lost run during the beat (tapped, then clicked by script) ' + JSON.stringify(h));
+    check(h.pending === null && h.speed === o.speed && h.wave === 0, 'neither do the palette (tap, key 1), Speed or the wave button (Space, script) ' + JSON.stringify(h));
+    const cues = await G(page, () => window.__rec.length);
+    check(cues === 0, 'and no cue plays over the game-over jingle (' + cues + ' tones)');
+    await page.waitForTimeout(450);
+    const mid = await G(page, () => { const g = window.__pw.G, f = g.fx.find(f => f.k === 'text' && f.s === '-1'); return { banner: g.banner, el: performance.now() - window.__overAt, gate: g.gateFlash, textT: f ? f.t : null, endHidden: document.querySelector('#endOv').hidden }; });
+    check(mid.banner === null && mid.endHidden, `the banner is gone by ${Math.round(mid.el)}ms, before the end screen ` + JSON.stringify(mid));
+    check(mid.textT > 0.3 && mid.gate < o.gate, "the '-1' over the keep and the keep flash keep playing out in real time instead of freezing " + JSON.stringify({ mid, gate0: o.gate }));
+    const left = await G(page, () => 1050 - (performance.now() - window.__overAt));
+    if (left > 0) await page.waitForTimeout(left);
+    const end = await G(page, () => { const g = window.__pw.G; return { shown: !document.querySelector('#endOv').hidden, banner: g.banner, next: g.bannerNext, fx: g.fx.length }; });
+    check(end.shown && end.banner === null && end.next === null, 'the end screen shows with no banner behind it ' + JSON.stringify(end));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -1677,18 +1716,29 @@ let BASE;
     check(fadeIn.t0 < 0.05 && !(fadeIn.p0[2] > fadeIn.p0[1] + 40), 'as the Warlord leaves the cave the pinned bar is still faint ' + JSON.stringify(fadeIn));
     check(fadeIn.t1 >= 0.3 && fadeIn.p1[2] > fadeIn.p1[1] + 40, 'and 0.3s later it is fully in ' + JSON.stringify(fadeIn));
 
-    // The acceptance pixel, then the bar's extent: x 6 to board-6, top 6px, Math.max(8, 0.2T) tall.
+    // The acceptance pixel, then the bar's extent: x 6 to board-6, top 6px, Math.max(8, 0.2T) tall, or taller to hold its 0.28T labels.
     const pix = await G(page, () => { const W = window.__pw; W.newGame(1); const g = W.G; g.running = true; g.wave = 10;
       const cv = document.querySelector('#cv'), c = cv.getContext('2d'), DPR = cv.width / cv.getBoundingClientRect().width, T = cv.width / DPR / W.COLS, at = (x, y) => [...c.getImageData(Math.round(x * DPR), Math.round(y * DPR), 1, 1).data].slice(0, 3);
       W.render(); const before = at(cv.width / DPR / 2, 9);
       W.spawn('boss', 3); W.step(1 / 30); W.render();
-      const after = at(cv.width / DPR / 2, 9), h = Math.max(8, 0.2 * T), Wd = cv.width / DPR;
+      const after = at(cv.width / DPR / 2, 9), h = Math.max(8, 0.2 * T, Math.max(9, Math.round(0.28 * T)) + 4), Wd = cv.width / DPR;
       const r = { before, after, DPR, left: at(8, 9), right: at(Wd - 8, 9), outL: at(3, 9), top: at(Wd / 2, 4), bottom: at(Wd / 2, 6 + h - 2), below: at(Wd / 2, 6 + h + 1.5) };
       g.running = false; return r; });
     const purple = p => p[2] > p[1] + 40;
     check(purple(pix.after), `newGame(1); G.running=true; G.wave=10; spawn('boss',3); step(1/30); render(): canvas pixel (cv.width/2, 9*DPR) is purple-ish ${JSON.stringify(pix.after)}`);
     check(pix.before[1] > pix.before[2], 'with no Warlord that pixel is grass ' + JSON.stringify(pix.before));
-    check(purple(pix.left) && purple(pix.right) && purple(pix.bottom) && !purple(pix.outL) && !purple(pix.top) && !purple(pix.below), 'the bar runs from x 6 to board-6, from y 6 down Math.max(8, 0.2T) ' + JSON.stringify(pix));
+    check(purple(pix.left) && purple(pix.right) && purple(pix.bottom) && !purple(pix.outL) && !purple(pix.top) && !purple(pix.below), 'the bar runs from x 6 to board-6, from y 6 down Math.max(8, 0.2T, label size + 4) ' + JSON.stringify(pix));
+    // Its labels sit inside it: the band under the bar (where the cave and the first stretch of road are) is the same with the bar
+    // as without it, and 'WARLORD' is drawn in cream inside the bar.
+    const lab = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), DPR = cv.width / cv.getBoundingClientRect().width, T = cv.width / DPR / W.COLS;
+      const fs = Math.max(9, Math.round(0.28 * T)), h = Math.max(8, 0.2 * T, fs + 4), b = g.enemies.find(e => e.d.boss); g.fx = []; g.banner = null;
+      const strip = () => { W.render(0); return c.getImageData(0, Math.round((6 + h + 1) * DPR), cv.width, Math.round((fs + 6) * DPR)).data; };
+      const on = strip(); b.dead = true; const off = strip(); b.dead = false;
+      let diff = 0; for (let i = 0; i < on.length; i++) if (Math.abs(on[i] - off[i]) > 2) diff++;
+      W.render(0); const d = c.getImageData(Math.round(6 * DPR), Math.round(6 * DPR), Math.round(2.5 * T * DPR), Math.round(h * DPR)).data; let cream = 0;
+      for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - 240) < 25 && Math.abs(d[i + 1] - 233) < 25 && Math.abs(d[i + 2] - 210) < 25) cream++;
+      return { diff, cream, fs, h, T }; });
+    check(lab.diff === 0 && lab.cream > 15, "the Warlord bar's labels are drawn inside it, and nothing under the bar changes " + JSON.stringify(lab));
 
     // The white trail lags the fill.
     const tr = await G(page, () => { const W = window.__pw, g = W.G, b = g.enemies.find(e => e.d.boss); const t0 = g.bossBar.trail; b.hp = b.max * 0.5; W.step(1 / 30); const t1 = g.bossBar.trail;
@@ -1755,6 +1805,58 @@ let BASE;
     await page.emulateMedia({ reducedMotion: 'reduce' });
     check(!(await shaken()), 'reduced motion: no shake');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'wave-banners-warlord: the winning moment leaves nothing to play after Keep going';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const w = await G(page, () => { const W = window.__pw, g = W.G; g.running = false; g.wave = 30; g.cleared = 29; g.W = {}; g.spawnQ = []; g.enemies = []; g.fx = [];
+      W.spawn('boss', 3); W.step(1 / 30); g.banner = null; W.hurtAll(1e9);
+      return { end: !document.querySelector('#endOv').hidden, title: document.querySelector('#endTitle').textContent, won: g.won, paused: g.paused, banner: g.banner, next: g.bannerNext, shakeT: g.shakeT }; });
+    check(w.end && w.title === 'The road holds' && w.won && w.paused, 'killing the last Warlord of wave 30 wins the run ' + JSON.stringify(w));
+    check(w.banner === null && w.next === null && w.shakeT === 0, 'no WARLORD DOWN or CLEARED banner waits behind the victory screen, and the board does not shake behind it ' + JSON.stringify(w));
+    await page.waitForTimeout(200);
+    await page.click('#bEndMain');
+    const seen = () => G(page, () => new Promise(res => { const out = [], t0 = performance.now(); (function f() { const g = window.__pw.G; if (g.banner && !out.includes(g.banner.s)) out.push(g.banner.s); if (performance.now() - t0 < 500) requestAnimationFrame(f); else res({ out, paused: g.paused }); })(); }));
+    const kg = await seen();
+    check(!kg.paused && kg.out.length === 0, "after 'Keep going' no banner from the winning kill plays " + JSON.stringify(kg));
+    // A leak that ends wave 30 wins it too: its CLEARED banner does not wait behind the victory screen either.
+    const lk = await G(page, () => { const W = window.__pw; W.newGame(1); const g = W.G; g.running = false; g.wave = 30; g.cleared = 29; g.lives = 10;
+      W.spawn('grunt', g.map.path.len - 0.21); W.step(1 / 30); return { end: !document.querySelector('#endOv').hidden, lives: g.lives, won: g.won, banner: g.banner, next: g.bannerNext }; });
+    check(lk.end && lk.won && lk.lives === 9 && lk.banner === null && lk.next === null, 'a leak that ends wave 30: the victory screen, with no CLEARED banner behind it ' + JSON.stringify(lk));
+    // In endless waves a Warlord kill still gets its banner.
+    await page.click('#bEndMain');
+    const en = await G(page, () => { const W = window.__pw, g = W.G; g.W = {}; g.enemies = []; g.wave = 40; W.spawn('boss', 3); W.step(1 / 30); W.hurtAll(1e9); return { banner: g.banner && g.banner.s, next: g.bannerNext && g.bannerNext.s, end: !document.querySelector('#endOv').hidden }; });
+    check(!en.end && en.banner === 'WARLORD DOWN' && en.next === 'CLEARED +95', 'after the win, an endless Warlord kill still shows WARLORD DOWN, then CLEARED ' + JSON.stringify(en));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'wave-banners-warlord: banners are read out to screen readers';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const sr = () => page.$eval('#sr', el => el.textContent);
+    check(await page.$eval('#sr', el => { const r = el.getBoundingClientRect(); return el.getAttribute('role') === 'status' && el.getAttribute('aria-live') === 'polite' && r.width <= 1 && r.height <= 1 && !el.closest('[aria-hidden]'); }), '#sr is a polite status region, visually hidden');
+    await G(page, () => { const W = window.__pw; W.G.running = false; W.build('bolt', 2, 2); });
+    await page.click('#bWave');
+    check((await sr()) === 'Wave 1', "starting wave 1 reads 'Wave 1' (" + (await sr()) + ')');
+    await clearAll(page);
+    check((await sr()) === 'Wave 1 cleared. +17 gold. Flawless', "a flawless clear reads 'Wave 1 cleared. +17 gold. Flawless' (" + (await sr()) + ')');
+    await G(page, () => { const W = window.__pw, g = W.G; g.wave = 9; W.startWave(); });
+    check((await sr()) === 'Wave 10. A Warlord is coming', "a boss wave reads 'Wave 10. A Warlord is coming' (" + (await sr()) + ')');
+    await G(page, () => { const W = window.__pw, g = W.G; let n = 0; while (!g.enemies.some(e => e.d.boss) && n++ < 1000) W.step(1 / 30); });
+    check((await sr()) === 'The Warlord. Costs 5 lives if it gets through', 'its arrival reads the banner and its warning (' + (await sr()) + ')');
+    const k = await G(page, () => { const W = window.__pw, g = W.G; for (const e of g.enemies.filter(e => !e.d.boss)) W.hurt(e, 1e9, true); W.hurtAll(1e9);
+      const down = document.querySelector('#sr').textContent; for (let i = 0; i < 40; i++) W.step(1 / 30); return { down, after: document.querySelector('#sr').textContent, q: g.spawnQ.length }; });
+    check(k.down === 'Warlord down', "the kill reads 'Warlord down' " + JSON.stringify(k));
+    check(/^Wave 10 cleared\. \+35 gold/.test(k.after), 'and the CLEARED banner waiting behind it is read when it shows ' + JSON.stringify(k));
+    // The same line twice in a row still changes the region, so it is read again.
+    const two = await G(page, () => { const W = window.__pw, g = W.G, el = document.querySelector('#sr'); g.wave = 20; W.spawn('boss', 1); const a = el.textContent; W.spawn('boss', 0.5); return [a, el.textContent]; });
+    check(two[0] !== two[1] && two[0].trim() === two[1].trim(), 'a second Warlord changes the region text, so it is read again ' + JSON.stringify(two));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -1962,6 +2064,17 @@ let BASE;
       for (const d of [L - 1.2, L - 0.65, L - 0.2]) { g.enemies = []; W.spawn('grunt', d); g.enemies[0].hp = g.enemies[0].max * 0.5; W.render(0); out.push(W.bars().map(b => +b.a.toFixed(3)).join()); }
       g.enemies = []; return out; });
     check(fade[0] === '1' && fade[1] === '0.5' && fade[2] === '', 'bars use the fade alpha: 1, then 0.5 halfway through the last 0.9 tile, then no bar at the leak line ' + JSON.stringify(fade));
+    // A fading ground enemy walks in under the keep, and its bar goes under with it: where a hurt brute's bar overlaps the keep's
+    // wall, the wall looks the same as with that brute at full HP (no bar).
+    const under = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, kp = W.keep();
+      g.enemies = []; g.fx = []; g.wave = 4; W.spawn('brute', g.map.path.len - 0.45); const e = g.enemies[0]; e.hp = e.max * 0.5; W.render(0); const b = W.bars()[0];
+      const x0 = Math.ceil(Math.max(b.x - 1, (kp.x - 0.38) * T + 2)), x1 = Math.floor(Math.min(b.x + b.w + 1, (kp.x + 0.38) * T - 2));
+      const y0 = Math.ceil(Math.max(b.y - 1, (kp.y - 0.22) * T + 2)), y1 = Math.floor(Math.min(b.y + b.h + 1, (kp.y + 0.3) * T - 2));
+      const box = () => { W.render(0); return [...c.getImageData(x0, y0, x1 - x0, y1 - y0).data]; };
+      const hurt = box(); e.hp = e.max; const full = box(); g.enemies = [];
+      let worst = 0; for (let i = 0; i < hurt.length; i++) worst = Math.max(worst, Math.abs(hurt[i] - full[i]));
+      return { a: +b.a.toFixed(3), under: b.under, w: x1 - x0, h: y1 - y0, worst }; });
+    check(under.under && under.a < 1 && under.w > 4 && under.h > 2 && under.worst <= 2, "a hurt brute fading in at the keep: its bar is queued but drawn under the keep's wall " + JSON.stringify(under));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
 
@@ -2291,6 +2404,29 @@ let BASE;
     await G(page, () => { const W = window.__pw; W.upgrade(W.G.towers[0]); });
     const l3 = await ringDiff([3.0 + 0.3]);
     check(l3[0] === 0, 'a level 3 tower has no next-level ring ' + l3[0]);
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'tower-readability-range: the placing and ready lines refit after a rotation';
+  {
+    const { ctx, page } = await newPage(browser, { viewport: { width: 667, height: 375 } });
+    await startMap(page, 1);
+    const fit = () => page.$eval('#info', el => ({ sh: el.scrollHeight, ch: el.clientHeight, w: el.clientWidth, t: el.textContent }));
+    const rotate = async (w, h) => { await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(250); };
+    await tapTile(page, 4, 5); await page.click('.tw[data-t="arc"]');
+    const a = await fit();
+    check(a.sh <= a.ch + 1 && /Covers \d+\.\d tiles of road\./.test(a.t), 'landscape 667x375: the placing line fits #info ' + JSON.stringify(a));
+    await rotate(375, 667);
+    const b = await fit();
+    check(b.w !== a.w && b.sh <= b.ch + 1 && /Covers \d+\.\d tiles of road\. (Tap again to build|Not enough gold yet)\./.test(b.t), 'rotated to portrait 375x667: the placing line is refit to the new width, not cut off ' + JSON.stringify(b));
+    await tapTile(page, 1, 0); await page.click('.tw[data-t="mortar"]');
+    await rotate(844, 390);
+    const c = await fit();
+    check(c.t.startsWith('Mortar ready') && c.sh <= c.ch + 1, 'landscape 844x390: the ready line fits ' + JSON.stringify(c));
+    await rotate(320, 568);
+    const d = await fit();
+    check(d.w < c.w && d.t.startsWith('Mortar ready') && d.sh <= d.ch + 1, 'rotated to a 320x568 portrait: the ready line is refit, not cut off ' + JSON.stringify(d));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
