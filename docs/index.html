@@ -269,6 +269,7 @@ let algae=[],meat=[],cells=[],parts=[],blooms=[],player=null,mode='title',t=0,al
 const cam={x:0,y:0,v:430,ang:0};
 let dna=0,gen=1,kills=0,lineT=0,heirs=0,maxSeen={},won=false,paused=false,hints=0,migrantT=45,saveT=8,booted=false;
 let hist=[],histT=0,hudT=0,nextId=1;
+let errN=0,updErr=false; // frame errors so far; true while the last update() threw (saves are skipped then)
 
 function binomial(g,r){
   const i=clamp(Math.floor((r-6)/7),0,4);
@@ -350,7 +351,7 @@ function spawnMigrant(){
   if(dd>DISH-60){x*=(DISH-60)/dd;y*=(DISH-60)/dd}
   const r=clamp(player.r*rand(1.18,1.38),12,44);
   const g={speed:clamp(player.g.speed-(Math.random()<.5?1:0),0,MAX.speed),jaws:r>25?2:1,spikes:Math.random()<.3?1:0,armor:clamp(Math.floor(r/14),0,3),photo:0,eye:1};
-  const c=makeCell(x,y,r,g,rand(285,315),{announce:5,stalk:30});
+  const c=makeCell(x,y,r,g,rand(285,315),{announce:5,stalk:30,migrant:true});
   c.en=c.maxEn*.4;cells.push(c);
   toast('A larger hunter has drifted into the dish.');
 }
@@ -361,7 +362,8 @@ const r1=v=>Math.round(v*10)/10;
 function snapshot(){
   if(mode!=='play'||!player||player.dead)return null;
   return{v:1,dna,gen,kills,lineT:r1(lineT),heirs,won,hints,maxSeen,migrantT:r1(migrantT),
-    cells:cells.filter(c=>!c.dead).map(c=>({x:r1(c.x),y:r1(c.y),a:r1(c.a),r:r1(c.r),g:c.g,hue:r1(c.hue),age:r1(c.age),life:c.isPlayer?0:r1(c.life),hp:r1(c.hp),en:r1(c.en),kin:c.kin,p:c.isPlayer,lv:c.lv||null})),
+    cells:cells.filter(c=>!c.dead).map(c=>({x:r1(c.x),y:r1(c.y),a:r1(c.a),r:r1(c.r),g:c.g,hue:r1(c.hue),age:r1(c.age),life:c.isPlayer?0:r1(c.life),hp:r1(c.hp),en:r1(c.en),kin:c.kin,p:c.isPlayer,lv:c.lv||null,
+      st:c.stalk>0?r1(c.stalk):undefined,an:c.announce>0?r1(c.announce):undefined,mg:c.migrant?1:undefined})),
     algae:algae.map(f=>[r1(f.x),r1(f.y),r1(f.r),r1(f.a)]),
     meat:meat.map(m=>[r1(m.x),r1(m.y),r1(m.r),r1(m.v),r1(m.life),r1(m.rot)]),
     blooms:blooms.map(b=>({x:r1(b.x),y:r1(b.y),s:r1(b.s),vx:r1(b.vx),vy:r1(b.vy)})),hist:hist.slice(-80)};
@@ -369,25 +371,38 @@ function snapshot(){
 function restore(sv){
   if(!sv||sv.v!==1||!Array.isArray(sv.cells))return false;
   try{
+    // Tolerant: every field has a default, so a v:1 save written by an older or newer build still loads.
+    // A field added to snapshot() later must be read here through num() or another default.
+    const num=(v,d)=>Number.isFinite(v)?v:d,fin=a=>a.every(Number.isFinite);
     const nc=[];let np=null;
     for(const d of sv.cells){
-      const c=makeCell(d.x,d.y,d.r,d.g,d.hue,{kin:!!d.kin,isPlayer:!!d.p,a:d.a,age:d.age,life:d.p?Infinity:d.life});
-      if(d.p){c.lv={size:0,speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0,...d.lv};applyLv(c);np=c}else recompute(c);
-      c.hp=clamp(d.hp,1,c.maxHp);c.en=clamp(d.en,0,c.maxEn);nc.push(c);
+      if(!d||!fin([d.x,d.y,d.r])||d.r<=0)continue;
+      const g={speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0};
+      for(const k of GENES)g[k]=clamp(Math.round(num(d.g&&d.g[k],0)),0,MAX[k]);
+      const hue=num(d.hue,d.kin||d.p?338:g.jaws?298:218);
+      const c=makeCell(d.x,d.y,d.r,g,hue,{kin:!!d.kin,isPlayer:!!d.p,a:num(d.a,0),age:num(d.age,0),life:d.p?Infinity:num(d.life,rand(100,170))});
+      if(d.p){c.lv={};for(const u of UP)c.lv[u.k]=clamp(Math.round(num(d.lv&&d.lv[u.k],0)),0,MAX[u.k]);applyLv(c);np=c}else recompute(c);
+      c.hp=clamp(num(d.hp,c.maxHp),1,c.maxHp);c.en=clamp(num(d.en,c.maxEn*.5),0,c.maxEn);
+      c.stalk=num(d.st,0);c.announce=num(d.an,0);c.migrant=!!d.mg;
+      nc.push(c);
     }
     if(!np)return false;
-    const na=sv.algae.map(([x,y,r,a])=>({x,y,r,a,dead:false}));
-    const nm=sv.meat.map(([x,y,r,v,life,rot])=>({x,y,r,v,life,rot,dead:false}));
-    const nb=Array.isArray(sv.blooms)&&sv.blooms.length?sv.blooms:blooms;
-    if(!Number.isFinite(sv.dna)||!Number.isFinite(sv.gen))return false;
-    cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=Array.isArray(sv.hist)?sv.hist:[];
-    ({dna,gen,kills,lineT,heirs,won,hints,maxSeen,migrantT}=sv);
+    const rows=(a,n)=>Array.isArray(a)?a.filter(w=>Array.isArray(w)&&w.length>=n&&fin(w.slice(0,n))):[];
+    const na=rows(sv.algae,4).map(([x,y,r,a])=>({x,y,r,a,dead:false}));
+    const nm=rows(sv.meat,6).map(([x,y,r,v,life,rot])=>({x,y,r,v,life,rot,dead:false}));
+    const okB=Array.isArray(sv.blooms)&&sv.blooms.length&&sv.blooms.every(b=>b&&fin([b.x,b.y,b.s,b.vx,b.vy]));
+    const nb=okB?sv.blooms.map(({x,y,s,vx,vy})=>({x,y,s,vx,vy})):blooms;
+    const nh=Array.isArray(sv.hist)?sv.hist.filter(p=>p&&fin([p.g,p.h,p.k])).slice(-80):[];
+    const ms={};
+    for(const k of GENES){let m=num(sv.maxSeen&&sv.maxSeen[k],0);for(const c of nc)if(!c.isPlayer&&!c.kin&&c.g[k]>m)m=c.g[k];ms[k]=m}
+    cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;maxSeen=ms;
+    dna=num(sv.dna,0);gen=Math.max(1,num(sv.gen,1));kills=num(sv.kills,0);lineT=num(sv.lineT,0);heirs=num(sv.heirs,0);won=!!sv.won;hints=num(sv.hints,0)|0;migrantT=num(sv.migrantT,45);
     player.shield=2;cam.x=player.x;cam.y=player.y;cam.v=viewR();
     mode='play';paused=false;lastCensus=census();
     return true;
   }catch(e){return false}
 }
-function saveGame(){const sv=snapshot();if(!sv)return;try{localStorage.setItem(SAVE_KEY,JSON.stringify(sv))}catch(e){}}
+function saveGame(){if(updErr)return;const sv=snapshot();if(!sv)return;try{localStorage.setItem(SAVE_KEY,JSON.stringify(sv))}catch(e){}}
 function clearSave(){try{localStorage.removeItem(SAVE_KEY)}catch(e){}}
 function loadSave(){try{return JSON.parse(localStorage.getItem(SAVE_KEY)||'null')}catch(e){return null}}
 
@@ -968,17 +983,27 @@ addEventListener('resize',resize);
 resize();
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(resize);
 let last=performance.now();
+// The first error is rethrown outside the loop so it still reaches the console; a persistent one is reported once.
+function onErr(e){if(++errN===1)setTimeout(()=>{throw e});if(errN===60)toast('Something went wrong. Your last autosave is kept.')}
 function frame(now){
-  const raw=(now-last)/1000,dt=Math.min(.05,raw);last=now;
+  requestAnimationFrame(frame); // re-arm first: an exception below can never stop the loop
+  const raw=(now-last)/1000,dt=Math.min(.05,Math.max(0,raw));last=now;
   // drop resolution, then effects, if this device can't keep up
   if(!document.hidden&&raw<.5){slowFrames=raw>.045?slowFrames+1:Math.max(0,slowFrames-2);
     if(slowFrames>90){slowFrames=0;if(DPR>1){maxDPR=1;resize()}else lowFx=true}}
-  if(!booted){requestAnimationFrame(frame);return}
-  if(!paused)update(dt);
-  render();
-  if(mode==='play'){saveT-=dt;if(saveT<=0){saveT=8;saveGame()}}
-  hudT-=dt;if(hudT<=0){hudT=.1;refreshHud()}
-  requestAnimationFrame(frame);
+  if(!booted)return;
+  // a throwing update() skips the autosave, so the last good save is kept
+  try{
+    if(!paused){update(dt);updErr=false}
+    if(mode==='play'){saveT-=dt;if(saveT<=0){saveT=8;saveGame()}}
+  }catch(e){updErr=true;onErr(e)}
+  try{
+    render();
+    hudT-=dt;if(hudT<=0){hudT=.1;refreshHud()}
+  }catch(e){
+    for(let i=0;i<12;i++)ctx.restore(); // unwind the save()s the throw skipped, or the field clip would stick for good
+    onErr(e);
+  }
 }
 requestAnimationFrame(frame);
 })();
