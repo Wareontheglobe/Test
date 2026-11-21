@@ -1,7 +1,8 @@
 // Balance check for Pathwarden: a greedy bot plays every road many times and the summary is checked against the release targets.
 // Not part of tests/run.js. Run it by hand from the repo root after changing CFG, MAPS[i].hp, TD or the waves:
-//   node tests/balance.js            all target profiles: 140 runs, under a minute on 4 cores (the plan budgeted 10-20 minutes)
-//   node tests/balance.js --profiles=smart,plain --seeds=5 --hpB=0.026 --hard=1.05 --budget=0.85   a quick look while tuning
+//   node tests/balance.js            all target profiles: 140 runs, about a minute on 4 cores (the plan budgeted 10-20 minutes)
+//   node tests/balance.js --profiles=smart,reader --seeds=5 --hpB=0.026 --hard=1.05 --budget=0.85   a quick look while tuning
+//   --earlyMul=2 tries another early-call bonus (CFG.earlyMul).
 //   --file=path/to/index.html plays another copy (an older build, to compare); --json=out.json saves every run.
 // The bot only uses window.__pw (build, upgrade, startWave, step, buildWave, G), so it plays index.html as shipped. The game's
 // randomness is drawing only, so a seed always plays the same run.
@@ -16,20 +17,23 @@ const arg = (k, d) => { const a = process.argv.find(x => x.startsWith(`--${k}=`)
 const FILE = 'file://' + path.resolve(arg('file') || path.join(__dirname, '..', 'index.html'));
 const ROADS = ['switch', 'meadow', 'quarry'], DIFF = ['Easy', 'Normal', 'Hard'];
 // Overrides for tuning, applied to __pw.CFG and __pw.MAPS before each run. Without them the game's own values are used.
-const over = { hpB: arg('hpB'), hard: arg('hard'), budget: arg('budget') };
+const over = { hpB: arg('hpB'), hard: arg('hard'), budget: arg('budget'), earlyMul: arg('earlyMul') };
 const SEEDS = arg('seeds') ? +arg('seeds') : null;
 const range = n => Array.from({ length: SEEDS ? Math.min(SEEDS, n) : n }, (_, i) => i + 1);
 
-// Profiles. smart: a balanced builder with some noise that reads the coming waves (look: 4, see BOT). plain: the same builder
-// without reading them, as the design team's bot played before themed waves (not a target; for comparison). spam: Bolts only.
-// mlf: Mortar, Longshot and Frost only. early: smart, calling the next wave early whenever the road is safe.
-const SMART = { frostN: 3, div: 0.3, noise: 0.3, look: 4 };
+// Profiles (the plan's). smart: the design team's balanced builder with some noise. It does not read the coming waves, so it is a
+// player who ignores the preview. spam: Bolts only. mlf: Mortar, Longshot and Frost only. early: smart, calling the next wave early
+// whenever the road is safe. reader: smart reading the next 4 waves (look: 4, see BOT), as a player reads the chips and their theme
+// tag (not a target; it shows what the preview is worth).
+// endless: roads where the bot plays on past wave 30 until it falls (up to wave 100), so 'median cleared' there can tell smart and
+// early apart. Capped at 30, both win every Normal run and the early target would compare 30 with 30.
+const SMART = { frostN: 3, div: 0.3, noise: 0.3 };
 const PROFILES = {
-  smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20) },
+  smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1] },
   spam: { opts: { allow: ['bolt'], div: 0 }, maps: [0, 1, 2], seeds: range(5) },
   mlf: { opts: { allow: ['mortar', 'long', 'frost'] }, maps: [1], seeds: range(5) },
-  early: { opts: { ...SMART, early: true }, maps: [0, 1, 2], seeds: range(20) },
-  plain: { opts: { frostN: 3, div: 0.3, noise: 0.3 }, maps: [0, 1, 2], seeds: range(20), extra: true },
+  early: { opts: { ...SMART, early: true }, maps: [0, 1, 2], seeds: range(20), endless: [1] },
+  reader: { opts: { ...SMART, look: 4 }, maps: [0, 1, 2], seeds: range(20), extra: true },
 };
 const want = (arg('profiles') || Object.keys(PROFILES).filter(p => !PROFILES[p].extra).join(',')).split(',');
 
@@ -38,8 +42,8 @@ const want = (arg('profiles') || Object.keys(PROFILES).filter(p => !PROFILES[p].
 // of the road covered, per gold, with a few habits: some Frost from wave 3, Mortars held to a third of the build, Longshots
 // favoured from wave 7. Two additions play the way the 1.1 interface teaches: with o.look it reads the coming waves (the chips
 // and their theme tag) and scales each tower by how much of them it can hurt; and it puts its Longshots on Toughest for a Warlord
-// wave and back on First after it (the only targeting change it makes). It records lives after every wave and the lives lost on
-// each wave.
+// wave and back on First after it (the only targeting change it makes). It records lives after every wave, the lives it had when
+// wave 30 was cleared (at30) and the lives lost on each wave.
 function BOT(o) {
   const W = window.__pw, g = W.G, map = g.map, TD = W.TD, C = W.COLS, R = W.ROWS;
   let rs = (o.seed || 1) * 7919 + 13; const rnd = () => { rs = (rs * 1103515245 + 12345) & 0x7fffffff; return rs / 0x7fffffff; };
@@ -92,7 +96,7 @@ function BOT(o) {
   }
   const boss = w => W.buildWave(w).some(([t]) => W.ED[t].boss);
   const send = () => { const m = boss(g.wave + 1) ? 'tough' : 'first'; for (const t of g.towers) if (t.type === 'long') t.mode = m; W.startWave(); };
-  const res = { map: map.id, seed: o.seed, traj: [20], loss: {} }, maxWave = o.maxWave || 30;
+  const res = { map: map.id, seed: o.seed, traj: [20], loss: {}, at30: null }, maxWave = o.maxWave || 30;
   while (!g.over && g.wave < maxWave) {
     spend();
     const l0 = g.lives, w0 = g.wave + 1; send();
@@ -104,6 +108,7 @@ function BOT(o) {
     // Lives lost from this wave's start to calm (with early calls that can cover several waves; it is booked on the first).
     if (l0 > g.lives) res.loss[w0] = l0 - g.lives;
     res.traj[g.cleared] = g.lives;
+    if (g.cleared >= 30 && res.at30 === null) res.at30 = g.lives;
   }
   res.over = g.over; res.cleared = g.cleared; res.lives = g.lives; res.won = g.cleared >= 30; res.towers = g.towers.length;
   return res;
@@ -113,7 +118,9 @@ function BOT(o) {
   const t0 = Date.now();
   const browser = await chromium.launch();
   const jobs = [];
-  for (const p of want) { const P = PROFILES[p]; if (!P) throw new Error('unknown profile ' + p); for (const m of P.maps) for (const s of P.seeds) jobs.push({ p, m, s }); }
+  for (const p of want) { const P = PROFILES[p]; if (!P) throw new Error('unknown profile ' + p); for (const m of P.maps) for (const s of P.seeds) jobs.push({ p, m, s, o: { ...P.opts, seed: s, maxWave: (P.endless || []).includes(m) ? 100 : 30 } }); }
+  // The longest runs first, so the workers finish together.
+  jobs.sort((a, b) => b.o.maxWave - a.o.maxWave);
   const out = []; let next = 0, done = 0;
   async function worker() {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 780 } });
@@ -124,13 +131,13 @@ function BOT(o) {
       await page.goto(FILE); await page.waitForTimeout(50);
       const r = await page.evaluate(([bot, m, o, ov]) => {
         const W = window.__pw;
-        if (ov.hpB) W.CFG.hpB = +ov.hpB; if (ov.budget) W.CFG.themeBudget = +ov.budget; if (ov.hard) W.MAPS[2].hp = +ov.hard;
+        if (ov.hpB) W.CFG.hpB = +ov.hpB; if (ov.budget) W.CFG.themeBudget = +ov.budget; if (ov.hard) W.MAPS[2].hp = +ov.hard; if (ov.earlyMul) W.CFG.earlyMul = +ov.earlyMul;
         W.newGame(m);
         const res = eval('(' + bot + ')')(o);
         res.air = Object.entries(res.loss).filter(([w]) => W.waveTheme && W.waveTheme(+w) === 'Air raid').reduce((s, [, n]) => s + n, 0);
-        res.cfg = { hpB: W.CFG.hpB, budget: W.CFG.themeBudget, hard: W.MAPS[2].hp };
+        res.cfg = { hpB: W.CFG.hpB, budget: W.CFG.themeBudget, hard: W.MAPS[2].hp, earlyMul: W.CFG.earlyMul };
         return res;
-      }, [BOT.toString(), j.m, { ...PROFILES[j.p].opts, seed: j.s }, over]);
+      }, [BOT.toString(), j.m, j.o, over]);
       out.push({ ...r, profile: j.p });
       if (++done % 10 === 0) process.stdout.write(`${done}/${jobs.length} `);
     }
@@ -140,14 +147,15 @@ function BOT(o) {
   await browser.close();
 
   const cfg = out[0].cfg;
-  console.log(`\n\nPathwarden balance: CFG.hpB ${cfg.hpB}, CFG.themeBudget ${cfg.budget}, Quarry hp ${cfg.hard} (${out.length} runs, ${Math.round((Date.now() - t0) / 1000)}s)\n`);
+  console.log(`\n\nPathwarden balance: CFG.hpB ${cfg.hpB}, CFG.themeBudget ${cfg.budget}, Quarry hp ${cfg.hard}, CFG.earlyMul ${cfg.earlyMul} (${out.length} runs, ${Math.round((Date.now() - t0) / 1000)}s)\n`);
   const median = a => { const s = a.slice().sort((x, y) => x - y); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
   const runs = (p, m) => out.filter(r => r.profile === p && r.map === ROADS[m]);
   for (const p of want) for (const m of PROFILES[p].maps) {
     const rs = runs(p, m); if (!rs.length) continue;
     const wins = rs.filter(r => r.won);
-    console.log(`${p.padEnd(5)} ${DIFF[m].padEnd(6)} wins ${String(wins.length).padStart(2)}/${rs.length}  median cleared ${String(median(rs.map(r => r.cleared))).padStart(4)}  cleared ${rs.map(r => r.cleared).sort((a, b) => a - b).join(',')}` +
-      `  lives at 30 ${wins.map(r => r.lives).sort((a, b) => a - b).join(',') || '-'}  lost on Air raids ${rs.map(r => r.air).join(',')}`);
+    const at30 = wins.map(r => r.at30).sort((a, b) => a - b);
+    console.log(`${p.padEnd(6)} ${DIFF[m].padEnd(6)} wins ${String(wins.length).padStart(2)}/${rs.length}  median cleared ${String(median(rs.map(r => r.cleared))).padStart(4)}${(PROFILES[p].endless || []).includes(m) ? ' (endless)' : ''}  cleared ${rs.map(r => r.cleared).sort((a, b) => a - b).join(',')}` +
+      `  lives at 30 ${at30.join(',') || '-'}${at30.length ? ` (median ${median(at30)})` : ''}  lost on Air raids ${rs.map(r => r.air).join(',')}`);
   }
 
   const results = [];
@@ -169,8 +177,10 @@ function BOT(o) {
     target('mlf on Normal loses at least 1 life on an Air raid wave', a.every(x => x >= 1), 'lives lost on Air raids per run ' + a.join(','));
   }
   if (want.includes('early') && want.includes('smart')) {
+    // Both play Normal on past wave 30 until they fall, so this measures how far each gets. Lives at wave 30 are shown with it.
     const e = median(runs('early', 1).map(r => r.cleared)), s = median(runs('smart', 1).map(r => r.cleared));
-    target('early vs smart: median cleared wave within +-2 on Normal', Math.abs(e - s) <= 2, `early ${e}, smart ${s}`);
+    const l = p => median(runs(p, 1).filter(r => r.won).map(r => r.at30));
+    target('early vs smart: median cleared wave within +-2 on Normal', Math.abs(e - s) <= 2, `early ${e}, smart ${s}, played on until they fall; median lives at wave 30: early ${l('early')}, smart ${l('smart')}`);
   }
   const bad = results.filter(x => !x).length;
   console.log(`\n${results.length - bad}/${results.length} targets met`);

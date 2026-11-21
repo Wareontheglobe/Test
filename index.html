@@ -97,6 +97,8 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #info b{color:var(--ink);font-weight:700}
 #chips{display:flex;flex-wrap:wrap;gap:2px 8px;line-height:16px;max-height:34px;overflow:hidden;border-radius:4px}
 #chips.one{max-height:16px}
+/* One row that can't hold all of it (a 320px phone) closes up its gaps before anything is dropped; see refreshPanel. */
+#chips.tight{column-gap:4px}
 /* A tapped chip's detail takes the row's place. Collapsed rather than hidden, so keyboard focus stays on it. */
 #chips.off{max-height:0}
 #chips:focus-visible{outline:2px solid var(--brass);outline-offset:-2px}
@@ -306,7 +308,7 @@ const MAPS=[
    theme:{g1:'#7a8f3f',g2:'#73883a',path:'#e0cf9c',edge:'#a8915d',deco:'#56692a',flower:'#f3a6a0'}},
   {id:'meadow',name:'Meadow Bend',diff:'Normal',hp:1.0,pts:[[1,-1],[1,3],[7,3],[7,7],[1,7],[1,11],[7,11],[7,14]],
    theme:{g1:'#6b8f3e',g2:'#648839',path:'#dcc690',edge:'#a68c59',deco:'#4c6b2b',flower:'#f1d36b'}},
-  {id:'quarry',name:'Quarry Run',diff:'Hard',hp:1.035,pts:[[4,-1],[4,3],[1,3],[1,8],[7,8],[7,14]],
+  {id:'quarry',name:'Quarry Run',diff:'Hard',hp:1.05,pts:[[4,-1],[4,3],[1,3],[1,8],[7,8],[7,14]],
    theme:{g1:'#79814f',g2:'#717948',path:'#cfc2a4',edge:'#8c8166',deco:'#5a613e',flower:'#d9d3c1'}},
 ];
 // desc: what sets a tower apart. key: the same trait in a word or two, for lines too narrow for desc.
@@ -327,9 +329,9 @@ const ED={
   boss:    {name:'Warlord',hp:900,spd:0.42,gold:100,r:0.5,color:'#6a3d8f',lives:5,armor:6,boss:true},
 };
 // Balance (tests/balance.js checks it; README 'Balance' has the numbers). hpA, hpB: enemy HP grows by 1+hpA*(w-1)+hpB*(w-1)^2.
-// themeBudget: a themed wave's share of the Mixed wave's HP. earlyMul: calling wave w early pays earlyMul*(10+w); above 3,
-// always calling early turns into a net gain, so keep it at 3 or less. Defined up here: loading storage already builds waves.
-const CFG={hpA:0.25,hpB:0.025,goldGrow:0.01,bonusA:15,bonusB:2,startGold:200,earlyMul:3,themeBudget:0.85};
+// themeBudget: a themed wave's share of the Mixed wave's HP. earlyMul: calling wave w early pays earlyMul*(10+w); the plan caps
+// it at 3 (README 'Balance' has what the bot makes of it). Defined up here: loading storage already builds waves.
+const CFG={hpA:0.25,hpB:0.021,goldGrow:0.01,bonusA:15,bonusB:2,startGold:200,earlyMul:3,themeBudget:0.85};
 // The wave themes with a tag in the preview, and the tag's class (see waveTheme). Mixed has none.
 const THEME_CLS={Swarm:'swarm',Armored:'armored','Air raid':'air'};
 // Fliers are drawn this many tiles above the road. Shots, sparks and the kill pop aim there too.
@@ -422,15 +424,17 @@ if(!S.best||typeof S.best!=='object'||Array.isArray(S.best))S.best={};
   if(real(old)&&!S.saves[old.map]){S.saves[old.map]=old;S.last=old.map}
   delete S.save;
   // Enemy types the player has met (startWave adds each wave's). A player from before 1.1 has met everything up to their best wave,
-  // so they are not introduced to it again. Every type is in waves 1-10, so the walk stops at 60 even if a best is corrupt.
+  // so they are not introduced to it again. That is 1.0's waves: the Mixed formula and the boss waves, not 1.1's themes (1.0's wave 5
+  // brought Wisps, and its first Splitters came in wave 7). Every type is in waves 1-10, so the walk stops at 60 even if a best is corrupt.
   if(Array.isArray(S.seen))S.seen=[...new Set(['grunt',...S.seen.filter(t=>Object.keys(ED).includes(t))])];
   else{
     const top=Math.min(60,Math.max(0,...Object.values(S.best).filter(Number.isFinite)));S.seen=['grunt'];
-    for(let w=1;w<=top;w++)for(const [t] of buildWave(w))if(!S.seen.includes(t))S.seen.push(t);
+    for(let w=1;w<=top;w++)for(const [t] of (w%10?mixedWave(w):buildWave(w)))if(!S.seen.includes(t))S.seen.push(t);
   }
-  // Stars per road (1-3), earned by winning the campaign. Before 1.1 a win only left a best of 30, which counts as 1 star.
-  const st=S.stars&&typeof S.stars==='object'&&!Array.isArray(S.stars)?S.stars:{};S.stars={};
-  for(const m of MAPS){const v=st[m.id],b=S.best[m.id];if([1,2,3].includes(v))S.stars[m.id]=v;else if(Number.isFinite(b)&&b>=FINAL_WAVE)S.stars[m.id]=1}
+  // Stars per road (1-3), earned by winning the campaign. Before 1.1 a win only left a best of 30, which counts as 1 star. That is
+  // done once, for storage from before 1.1 (no S.stars): from then on only a win gives stars, so a count never changes between launches.
+  const had=!!S.stars&&typeof S.stars==='object'&&!Array.isArray(S.stars),st=had?S.stars:{};S.stars={};
+  for(const m of MAPS){const v=st[m.id],b=S.best[m.id];if([1,2,3].includes(v))S.stars[m.id]=v;else if(!had&&Number.isFinite(b)&&b>=FINAL_WAVE)S.stars[m.id]=1}
   persist();
 }
 // Drop anything in a stored run that this version can't rebuild, rather than failing to start.
@@ -445,20 +449,27 @@ function validSave(sv){
   }).map(t=>({type:t.type,c:t.c,r:t.r,level:[1,2,3].includes(t.level)?t.level:1,
     spent:Number.isFinite(t.spent)&&t.spent>0?Math.round(t.spent):TD[t.type].cost,mode:migrateMode(t.type,t.mode)}));
   sv.won=!!sv.won;
-  // The run report so far. A save from before 1.1 (or a damaged one) starts the report over rather than failing to load.
-  sv.stats=validStats(sv.stats);
+  // The run report so far. A save from before 1.1 (or a damaged one) starts the report over rather than failing to load. Past wave 0,
+  // that report covers only the waves from here (stats.from), and the end card says so.
+  const restart=!statsOk(sv.stats);sv.stats=validStats(sv.stats);if(restart&&sv.wave>0)sv.stats.from=sv.wave+1;
   if(!int(sv.prevBest,0))delete sv.prevBest;
   return sv;
 }
 // A run's report: kills, gold earned (kills, wave bonuses, early calls), lives lost per enemy type (leaks), damage dealt per
 // tower type (dmg) and how many times Frost slowed something. Used as stored only if every number is finite and >= 0 and every
-// key is an enemy (leaks) or tower (dmg) type; otherwise a fresh report. Always returns a copy.
+// key is an enemy (leaks) or tower (dmg) type; otherwise a fresh report. Always returns a copy. from: the first wave a report covers,
+// when it was started over on a run loaded from an older save (validSave); a whole run's report has none.
 function freshStats(){return {kills:0,gold:0,leaks:{},dmg:{},slowed:0}}
-function validStats(s){
+function statsOk(s){
   const num=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0;
   const tally=(o,keys)=>!!o&&typeof o==='object'&&!Array.isArray(o)&&Object.entries(o).every(([k,v])=>keys.includes(k)&&num(v));
-  if(!s||typeof s!=='object'||!num(s.kills)||!num(s.gold)||!num(s.slowed)||!tally(s.leaks,Object.keys(ED))||!tally(s.dmg,TKEYS))return freshStats();
-  return {kills:s.kills,gold:s.gold,leaks:{...s.leaks},dmg:{...s.dmg},slowed:s.slowed};
+  return !!s&&typeof s==='object'&&num(s.kills)&&num(s.gold)&&num(s.slowed)&&tally(s.leaks,Object.keys(ED))&&tally(s.dmg,TKEYS);
+}
+function validStats(s){
+  if(!statsOk(s))return freshStats();
+  const o={kills:s.kills,gold:s.gold,leaks:{...s.leaks},dmg:{...s.dmg},slowed:s.slowed};
+  if(Number.isInteger(s.from)&&s.from>1)o.from=s.from;
+  return o;
 }
 function persist(){try{localStorage.setItem(STORE,JSON.stringify(S))}catch(e){}}
 
@@ -622,6 +633,8 @@ const bossWave=w=>buildWave(w).some(([t])=>ED[t].boss);
 const INTRO=['grunt','scout','brute','wisp','splitter','boss'];
 function newTypes(w){const m=waveCounts(w);return INTRO.filter(t=>m[t]&&!S.seen.includes(t))}
 // What #info says about a type the first time it comes (plain copy), and in a tapped chip's detail.
+// A blurb's sentences: "Wisp. Flies. Mortars can't hit it." -> ['Wisp.', 'Flies.', "Mortars can't hit it."].
+const sentences=s=>s.split('. ').map((x,i,a)=>i<a.length-1?x+'.':x);
 const BLURB={grunt:'Grunt. Steady and common.',scout:'Scout. Fast and fragile.',brute:'Brute. Armored, so small hits do less. Longshot ignores armor. Costs 2 lives.',
   wisp:"Wisp. Flies. Mortars can't hit it.",splitter:'Splitter. Bursts into 2 Scouts.',boss:'Warlord. Heavy armor. Costs 5 lives.'};
 // The small line under 'WAVE N', parts joined with ' · ': the theme ('Air raid'; not Mixed), or the Warlord's warning, then what is new.
@@ -640,8 +653,11 @@ function setBanner(b){G.banner={sub:'',...b,t:0};G.bannerNext=null;say(b.say)}
 function say(msg){if(!msg)return;const el=$('#sr');el.textContent=el.textContent===msg?msg+'\u00a0':msg}
 const goldGain=()=>flashClass($('#sGold'),'gain',250);
 
+// Wave 30 ends the campaign. Until it is won, the next wave can't be called while it is on the road, so the win always comes on a
+// calm road (waveDone), where the stars are given and the win card shows. From wave 31 on, calling early is open again.
+const finaleLive=()=>!G.won&&G.wave>=FINAL_WAVE&&activeWaves()>0;
 function startWave(){
-  if(!G||G.over||G.spawnQ.length)return;
+  if(!G||G.over||G.spawnQ.length||finaleLive())return;
   const early=activeWaves()>0;
   for(const t of G.towers)t.refund=0;
   G.sendArmAt=0;
@@ -894,9 +910,10 @@ function gameOver(){
   G.hurtT=0.9;G.bannerNext=null;if(G.banner)G.banner.cut=0.4;syncInert();
   const g=G;setTimeout(()=>{if(G===g&&G.over&&$('#endOv').hidden)showEnd(false)},900);
 }
-// Stars for winning the campaign, by the lives left: 3 from STAR3, 2 from STAR2, else 1. Set against the balance bot (tests/balance.js):
-// its smart Normal winners finish with 2-15 lives (median 10), so they split across 1, 2 and 3 stars; on Hard they finish with 1-7.
-const STAR3=13,STAR2=10;
+// Stars for winning the campaign, by the lives left: 3 from STAR3, 2 from STAR2, else 1 (the plan's 16 and 10). Checked against the
+// balance bot (tests/balance.js): its smart Normal winners finish with 3-20 lives (median 10) and split 7 / 5 / 7 across 3, 2 and
+// 1 stars; its Hard winners finish with 1-14, so none earns 3.
+const STAR3=16,STAR2=10;
 const starCount=l=>l>=STAR3?3:l>=STAR2?2:1;
 const STAR_D='M12 1.9L15 8.9L22.7 9.6L16.9 14.7L18.6 22.1L12 18.2L5.4 22.1L7.1 14.7L1.3 9.6L9 8.9z';
 // Three stars, the first n earned. Stars from index `from` up pop in, 150ms apart (not under reduced motion).
@@ -919,14 +936,17 @@ const END_TIP={wisp:"Wisps fly. Mortars can't hit them, but Bolt, Frost, Arc and
 const nwJoin=(parts,sep)=>parts.map((p,i)=>`<span class="nw">${p}${i<parts.length-1?sep.trimEnd():''}</span>`).join(' ');
 function endStatsHtml(loss){
   const s=G.stats,out=[],en=n=>n.toLocaleString('en-US');
-  out.push(`<div>${nwJoin([`${en(s.kills)} kill${s.kills===1?'':'s'}`,`${en(s.gold)} gold earned`],' · ')}</div>`);
+  // A report started over on a run from an older save (stats.from) says which waves it covers, so it never claims the whole run.
+  const from=s.from>1?`<span class="nw">From wave ${s.from}:</span> `:'';
+  out.push(`<div>${from}${nwJoin([`${en(s.kills)} kill${s.kills===1?'':'s'}`,`${en(s.gold)} gold earned`],' · ')}</div>`);
   const lk=Object.entries(s.leaks).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]||INTRO.indexOf(a[0])-INTRO.indexOf(b[0]));
   out.push(lk.length?`<div>Got through: ${nwJoin(lk.slice(0,3).map(([t,v])=>{const n=Math.round(v/ED[t].lives);return `${n} ${ED[t].name}${n===1?'':'s'} (-${v})`}),', ')}</div>`
-    :'<div class="ok">Nothing got through.</div>');
+    :`<div class="ok">${s.from>1?`Nothing got through from wave ${s.from}.`:'Nothing got through.'}</div>`);
   const tot=TKEYS.reduce((a,k)=>a+(s.dmg[k]||0),0);
   if(tot>0){
     const ds=TKEYS.filter(k=>s.dmg[k]>0).map(k=>[k,100*s.dmg[k]/tot]).sort((a,b)=>b[1]-a[1]);
-    const line=ds.filter(([,p])=>Math.round(p)>=1).map(([k,p])=>`${TD[k].name} ${Math.round(p)}%`);
+    // Types under 1% are only in the bar: one at 0.7% would read '1%'.
+    const line=ds.filter(([,p])=>p>=1).map(([k,p])=>`${TD[k].name} ${Math.round(p)}%`);
     if(s.slowed>0)line.push(`Frost slowed ${fmtK(s.slowed)}`);
     out.push(`<div><div class="dbar" aria-hidden="true">${ds.map(([k,p])=>`<i data-t="${k}" style="width:${p.toFixed(3)}%;background:${TD[k].color}"></i>`).join('')}</div><div class="dmg">${nwJoin(line,' · ')}</div></div>`);
   }
@@ -1417,15 +1437,21 @@ function fitReady(msg,k){
   readyFit={key,html:msg.innerHTML};
 }
 // The next wave as chips: each type's icon (drawEnemy on a stub, centred) and how many come. refreshPanel runs on every gold
-// change, so the chips are rebuilt only when the road or the wave changes (chipKey). A resize clears the key, as the DPR may change.
+// change, so the chips are rebuilt only when the road, the wave or the type the 'New' intro names changes (chipKey). A resize
+// clears the key, as the DPR may change.
+// The type the intro names (the one the game introduces last) leads the chips: beside the intro there is one row, and on a 320px
+// phone a 4-type wave has no room for its last chip, which must not be the type the line is about.
 let chipKey='';
+// A tap on a theme tag shows the type the theme is built on, the way a chip shows its own: 'AIR RAID' shows the Wisp.
+const THEME_LEAD={Swarm:'scout',Armored:'brute','Air raid':'wisp'};
 function syncChips(){
-  const w=G.wave+1,key=`${G.map.id}:${w}`;if(chipKey===key)return;chipKey=key;
-  const box=$('#chips'),dpr=Math.min(3,window.devicePixelRatio||1),th=waveTheme(w);
+  const w=G.wave+1,nt=newTypes(w),lead=nt[nt.length-1]||'',key=`${G.map.id}:${w}:${lead}`;if(chipKey===key)return;chipKey=key;
+  const box=$('#chips'),dpr=Math.min(3,window.devicePixelRatio||1),th=waveTheme(w),counts=waveCounts(w);
   box.textContent='';box.setAttribute('aria-label','Next wave: '+waveSummary(w));
   // A themed wave's tag leads the row ('AIR RAID'). Mixed waves have none.
-  if(THEME_CLS[th]){const tag=document.createElement('span');tag.className='theme '+THEME_CLS[th];tag.textContent=th;box.append(tag)}
-  for(const [type,n] of Object.entries(waveCounts(w))){
+  if(THEME_CLS[th]){const tag=document.createElement('span');tag.className='theme '+THEME_CLS[th];tag.textContent=th;if(counts[THEME_LEAD[th]])tag.dataset.t=THEME_LEAD[th];box.append(tag)}
+  const list=Object.entries(counts);if(lead)list.sort((a,b)=>(b[0]===lead)-(a[0]===lead));
+  for(const [type,n] of list){
     const d=ED[type],ch=document.createElement('span'),c=document.createElement('canvas'),num=document.createElement('span');
     // The canvas outline marks fliers (blue), armor (steel) and the Warlord (purple).
     ch.className='chip'+(d.fly?' air':d.boss?' boss':d.armor?' armor':'');ch.dataset.t=type;
@@ -1445,8 +1471,16 @@ function chipDetail(type){
   const w=G.wave+1,d=ED[type],n=waveCounts(w)[type]||0,hp=Math.round(d.hp*hpScale(w)*G.map.hp);
   const speed=d.spd<0.8?'Slow':d.spd>1.3?'Fast':'Normal';
   const head=`<b>${d.name}</b> ×${n} · ${hp} HP · ${speed}${d.armor?` · Armor ${(d.armor*(1+(w-1)*0.03)).toFixed(0)}`:''}. `;
-  const sent=BLURB[type].split('. ').map((x,i,a)=>i<a.length-1?x+'.':x);
+  const sent=sentences(BLURB[type]);
   return sent.map((x,i)=>head+sent.slice(i).join(' '));
+}
+// The 'New' intro on its 2 lines, longest first. Where the blurb runs past them (the Brute's, on nearly every phone), the sentences
+// after the name go first, so the name and the last sentence still show: 'New: Brute. Longshot ignores armor. Costs 2 lives.', then
+// 'New: Brute. Costs 2 lives.'
+function newLines(type){
+  const s=sentences(BLURB[type]),out=[];
+  for(let k=1;k<s.length;k++)out.push(`<b>New:</b> ${[s[0],...s.slice(k)].join(' ')}`);
+  return out.length?out:[`<b>New:</b> ${BLURB[type]}`];
 }
 // A chip shows its type in #info for 4s, then the chips come back. The detail is read out too (#sr).
 // Enter or Space on #chips picks the first chip; pressed again while a detail shows, the next one.
@@ -1488,9 +1522,9 @@ function refreshPanel(){
   // The chips show unless a tile is selected or a tower was armed on purpose: placing uses all of #info, as before.
   // A tower kept armed after a build still leaves #info to the wave preview.
   syncChips();
-  const tag=chips.querySelector('.theme');if(tag)tag.hidden=false; // put back before measuring; see the end
+  const tag=chips.querySelector('.theme');if(tag)tag.hidden=false;chips.classList.remove('tight'); // put back before measuring; see the end
   const armed=!!G.pending&&!G.armKept;
-  let chipsOn=!G.sel&&!armed,lines=1,oneRow=false,coach=false,ready=null,place=null,next=null,tipLines=null,marching=false,nt;
+  let chipsOn=!G.sel&&!armed,lines=1,oneRow=false,coach=false,ready=null,place=null,next=null,tipLines=null,newL=null,marching=false,nt;
   const tip=chipsOn&&G.chipTip&&G.chipTip.key===chipKey?G.chipTip:null;
   // A tap on Target says what the new mode does, over 3 lines, for 4s (the chips make way, as for a chip's detail).
   const mtip=!tip&&t&&G.modeTip&&G.modeTip.t===t?G.modeTip:null;
@@ -1508,7 +1542,7 @@ function refreshPanel(){
   else if(armed){lines=3;ready=G.pending} // written by fitReady once #bWave has its label
   // The coach line and the 'New' intro get 2 lines over one row of chips.
   else if(G.wave===0&&!G.towers.length){coach=true;lines=2;oneRow=true;msg.innerHTML='<b>Build first:</b> tap a grass tile beside the road.'}
-  else if((nt=newTypes(G.wave+1)).length){lines=2;oneRow=true;msg.innerHTML=`<b>New:</b> ${BLURB[nt[nt.length-1]]}`}
+  else if((nt=newTypes(G.wave+1)).length){lines=2;oneRow=true;newL=newLines(nt[nt.length-1]);msg.innerHTML=newL[0]}
   // Before the run's first Air raid, the same 2 lines over one row: what the theme means for a build.
   else if(firstAirRaid(G.wave+1)){lines=2;oneRow=true;msg.innerHTML="<b>Air raid next:</b> Mortars can't hit fliers."}
   else if(G.spawnQ.length){marching=true;msg.innerHTML=`Wave <b>${G.wave}</b> is marching in. Next:`}
@@ -1517,33 +1551,37 @@ function refreshPanel(){
   msg.classList.toggle('l1',lines===1);msg.classList.toggle('l2',lines===2);msg.classList.toggle('coach',coach);
   // #bWave gets its label before the fitters run, as they fit #info to the room it leaves. Calling early is a choice, not the main
   // action: an outlined button that says what it pays ('Call 5 early +45'; 'Call early +45' on phones 360px wide or less).
-  const bw=$('#bWave'),early=!G.spawnQ.length&&activeWaves()>0;
+  // Until the campaign is won, wave 30 can't be overlapped (finaleLive): the button reads 'Wave 30…' until it is over.
+  const bw=$('#bWave'),fin=finaleLive(),early=!G.spawnQ.length&&activeWaves()>0&&!fin;
   bw.classList.toggle('early',early);
   // The markup is replaced only when it changes: refreshPanel runs on every kill's gold, and a tap must not lose the <small> it pressed.
   if(early){const n=G.wave+1,b=earlyBonus(n),h=`${NARROW.matches?'Call':`Call ${n}`} early <small>+${b}</small>`;bw.disabled=false;if(bw.innerHTML!==h)bw.innerHTML=h;bw.setAttribute('aria-label',`Call wave ${n} early for ${b} bonus gold`)}
   else{
     bw.removeAttribute('aria-label');
-    if(G.spawnQ.length){bw.disabled=true;bw.textContent=`Wave ${G.wave}…`}
+    if(G.spawnQ.length||fin){bw.disabled=true;bw.textContent=`Wave ${G.wave}…`}
     else{bw.disabled=false;bw.textContent=G.wave===0?(sendArmed()?'Send anyway?':'Start wave 1'):`Start wave ${G.wave+1}`}
   }
   if(ready)fitReady(msg,ready);
   if(place)fitFirst(msg,place,placeFit);
   if(tipLines)fitFirst(msg,tipLines,tipFit);
+  if(newL)fitFirst(msg,newL,newFit);
   if(next)fitNext(msg,next);
   // On a narrow phone 'Wave 12 is marching in. Next:' runs past one line. When the chips need only one row, it gets a second line;
   // under two rows it becomes 'Next wave:' (#bWave already reads 'Wave 12…').
   if(marching&&msg.scrollHeight>msg.clientHeight+1){
     if(chips.scrollHeight<=17){msg.classList.replace('l1','l2');chips.classList.add('one')}else msg.innerHTML='Next wave:';
   }
-  // One row of chips that can't also hold the theme tag (a 320px phone beside 'Call early +51') drops the tag rather than a chip:
-  // the chips are what the wave is, and the Air raid line names its theme anyway.
-  if(tag&&!chips.hidden&&chips.classList.contains('one')&&chips.scrollHeight>chips.clientHeight+1)tag.hidden=true;
+  // One row of chips that can't hold it all (a 320px phone beside 'Call early +45') closes up its gaps first, which keeps the 'SWARM'
+  // tag beside the wave-5 'New: Splitter' line. Only if the theme tag still doesn't fit does it go rather than a chip: the chips are
+  // what the wave is, and the Air raid line names its theme anyway.
+  const over=()=>chips.scrollHeight>chips.clientHeight+1;
+  if(!chips.hidden&&chips.classList.contains('one')&&over()){chips.classList.add('tight');if(tag&&over())tag.hidden=true}
 }
 // Writes the first of lines that fits #infoMsg (the last one if none does), cached per first line and width.
 // The placing line: the tower's name, its trait and the coverage stay. Where the spec line doesn't fit (narrow phones, longer
 // descriptions), 'Tap again to build.' (or 'Not enough gold yet.') goes first, as the armed palette button already says it;
 // then the description shortens to the trait's key phrase ('Ground only', 'Ignores armor').
-const placeFit={key:''},tipFit={key:''};
+const placeFit={key:''},tipFit={key:''},newFit={key:''};
 function fitFirst(msg,lines,cache){
   const key=lines[0]+':'+msg.clientWidth;
   if(cache.key===key){if(msg.innerHTML!==cache.html)msg.innerHTML=cache.html;return}
@@ -1628,11 +1666,12 @@ cv.addEventListener('pointerdown',ev=>{
 });
 // A tap beside the board (where #stage is bigger than it) clears the selection and disarms, like a tap off the grid.
 $('#stage').addEventListener('pointerdown',ev=>{if(ev.target!==cv)onBoardTap(-1,-1)});
-// A tap on a chip picks it. A tap elsewhere on the row picks the chip nearest the finger: the chips are only 16px tall.
+// A tap on a chip picks it, and a tap on the theme tag the type the theme is built on (its data-t, see syncChips). A tap elsewhere
+// on the row picks the one nearest the finger: the chips are only 16px tall.
 $('#chips').addEventListener('click',ev=>{
-  const hit=ev.target.closest&&ev.target.closest('.chip');if(hit){showTip(hit.dataset.t);return}
+  const hit=ev.target.closest&&ev.target.closest('.chip,.theme');if(hit){if(hit.dataset.t)showTip(hit.dataset.t);return}
   let best=null,bd=1e9;
-  for(const c of $('#chips').querySelectorAll('.chip')){const r=c.getBoundingClientRect();if(!r.width)continue;
+  for(const c of $('#chips').querySelectorAll('.chip,.theme[data-t]')){const r=c.getBoundingClientRect();if(!r.width)continue;
     const dx=Math.max(r.left-ev.clientX,0,ev.clientX-r.right),dy=Math.max(r.top-ev.clientY,0,ev.clientY-r.bottom),d=dx*dx+dy*dy;if(d<bd){bd=d;best=c}}
   if(best)showTip(best.dataset.t);
 });

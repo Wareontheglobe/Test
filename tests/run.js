@@ -2460,9 +2460,13 @@ let BASE;
     check(a1.n === a1.want && a1.n === 2 && a1.n6 === a1.want6 && a1.n6 === 4, `newGame(1); G.wave=4; refreshPanel(): the '#chips canvas' count (${a1.n}) equals the number of distinct types in __pw.buildWave(5) (${a1.want}), and so for wave 6 (${a1.n6})`);
     check(a1.fly.length === 1 && a1.fly[0] === 'wisp', 'before wave 6 one chip, the Wisp, has the 1px #8fd0ff flier outline ' + JSON.stringify(a1.fly));
     check(a1.size.every(s => s === '16,16,16,16') && a1.radius === '4px', 'each chip icon is a 16x16 css canvas with 4px corners ' + JSON.stringify(a1.size));
-    const cnt = await G(page, () => { const W = window.__pw, m = {}; for (const [t, c] of W.buildWave(5)) m[t] = (m[t] || 0) + c; const chips = [...document.querySelectorAll('#chips .chip')];
-      const cs = getComputedStyle(chips[0].querySelector('span')); return { got: chips.map(c => c.dataset.t + c.textContent), want: Object.entries(m).map(([t, c]) => t + '×' + c), font: cs.fontSize + ' ' + cs.fontWeight + ' ' + cs.color }; });
-    check(JSON.stringify(cnt.got) === JSON.stringify(cnt.want), 'each chip is its icon plus ×n, the count of its type in the wave, in the order the wave sends them ' + JSON.stringify(cnt));
+    // (review fix: the type the 'New' intro names leads the row. Fresh storage meets Scouts and Splitters in wave 5, and the intro names
+    // the Splitter, so it comes first; with both met, the wave's own order.)
+    const cnt = await G(page, () => { const W = window.__pw, m = {}; for (const [t, c] of W.buildWave(5)) m[t] = (m[t] || 0) + c; const list = () => [...document.querySelectorAll('#chips .chip')];
+      const chips = list(), cs = getComputedStyle(chips[0].querySelector('span')), font = cs.fontSize + ' ' + cs.fontWeight + ' ' + cs.color, got = chips.map(c => c.dataset.t + c.textContent), keep = W.S.seen;
+      W.S.seen = Object.keys(W.ED); W.refreshPanel(); const met = list().map(c => c.dataset.t + c.textContent); W.S.seen = keep; W.refreshPanel();
+      const want = Object.entries(m).map(([t, c]) => t + '×' + c); return { got, met, want, lead: [want[1], want[0]], font }; });
+    check(JSON.stringify(cnt.met) === JSON.stringify(cnt.want) && JSON.stringify(cnt.got) === JSON.stringify(cnt.lead), "each chip is its icon plus ×n, the count of its type in the wave, in the order the wave sends them, except that the type the 'New' intro names leads " + JSON.stringify(cnt));
     check(cnt.font === '12px 800 rgb(240, 233, 210)', 'the count is 12px, weight 800, in ink (' + cnt.font + ')');
     const outl = await G(page, () => { const W = window.__pw, o = w => { W.G.wave = w - 1; W.refreshPanel(); return Object.fromEntries([...document.querySelectorAll('#chips .chip')].map(c => { const s = getComputedStyle(c.querySelector('canvas')); return [c.dataset.t, s.outlineStyle === 'none' ? 'none' : s.outlineWidth + ' ' + s.outlineColor]; })); }; return { w6: o(6), w20: o(20) }; });
     check(outl.w6.brute === '1px rgb(214, 219, 224)' && outl.w6.grunt === 'none' && outl.w6.scout === 'none', 'the armored Brute chip has a 1px #d6dbe0 outline; Grunt and Scout have none ' + JSON.stringify(outl.w6));
@@ -2576,7 +2580,9 @@ let BASE;
       g.W = {}; g.spawnQ = []; g.wave = 5; W.startWave(); const b6 = g.banner.sub; out.push(at(6));
       g.wave = 9; W.startWave(); const b10 = g.banner.sub; out.push(at(10));
       return { out, b6, b10, seen: W.S.seen.slice().sort().join() }; });
-    check(seq.out[0] === 'New: Brute. Armored, so small hits do less. Longshot ignores armor. Costs 2 lives.' && seq.out[1] === 'Next wave:' && seq.out[2] === 'New: Warlord. Heavy armor. Costs 5 lives.' && seq.out[3] === 'Next wave:', 'before waves 6 and 10 the Brute and the Warlord get their blurbs ' + JSON.stringify(seq.out));
+    // (review fix: the Brute's whole blurb runs past the intro's 2 lines on a 390px phone, so 'Armored, so small hits do less.' goes
+    // and the line still ends on what it costs; see "the 'New' intro on every phone" below.)
+    check(seq.out[0] === 'New: Brute. Longshot ignores armor. Costs 2 lives.' && seq.out[1] === 'Next wave:' && seq.out[2] === 'New: Warlord. Heavy armor. Costs 5 lives.' && seq.out[3] === 'Next wave:', 'before waves 6 and 10 the Brute and the Warlord get their blurbs (the Brute\'s shortened to fit its 2 lines) ' + JSON.stringify(seq.out));
     check(seq.b6 === 'New: Brute' && seq.b10 === 'A Warlord is coming', "banner subs: 'New: Brute'; a Warlord's first wave keeps 'A Warlord is coming' " + JSON.stringify(seq));
     check(seq.out[4] === 'Next wave:' && seq.out[5] === 'Next wave:' && seq.seen === 'boss,brute,grunt,scout,splitter,wisp', 'once met, neither is introduced again ' + JSON.stringify(seq));
     const subs = await G(page, () => { const W = window.__pw, keep = W.S.seen, sub = (seen, w) => { W.S.seen = seen; return W.bannerSub(w); };
@@ -2601,8 +2607,16 @@ let BASE;
     await G(page, () => { window.__pw.G.running = false; }); // so the reloads below do not save the run (and S) over the storage set for them
     const odd = [];
     for (const v of [{ best: { meadow: 1e9 } }, { best: { meadow: 'x', quarry: null } }, { seen: 'wisp', best: { meadow: 5 } }, { seen: ['wisp', 'laser', 7, 'wisp', 'constructor'] }]) odd.push((await load(v)).seen.join());
-    // (themed-waves-balance: the Splitter now comes with the wave-5 Swarm, before the Wisp in wave 6.)
-    check(odd[0] === 'grunt,scout,brute,splitter,wisp,boss' && odd[1] === 'grunt' && odd[2] === 'grunt,scout,brute,splitter' && odd[3] === 'grunt,wisp', 'a huge or broken best, or a broken seen list, still loads to a clean S.seen ' + JSON.stringify(odd));
+    // (review fix: seeded from 1.0's waves, which a 1.0 best covers: Wisps from wave 5, the first Splitters in wave 7.)
+    check(odd[0] === 'grunt,scout,brute,wisp,splitter,boss' && odd[1] === 'grunt' && odd[2] === 'grunt,scout,brute,wisp' && odd[3] === 'grunt,wisp', 'a huge or broken best, or a broken seen list, still loads to a clean S.seen ' + JSON.stringify(odd));
+    // A 1.0 player with best 5 met Wisps in 1.0's wave 5 and no Splitter yet (1.0's first was in wave 7). So 1.1's wave-5 Swarm
+    // introduces the Splitter, and wave 6 does not introduce the Wisp again. With best 6 the Splitter is still new.
+    const b5 = await load({ best: { meadow: 5 } });
+    await startMap(page, 1);
+    const in5 = await G(page, () => { const W = window.__pw, g = W.G, m = document.querySelector('#infoMsg'); g.running = false; W.build('bolt', 2, 2); const at = w => { g.wave = w - 1; W.refreshPanel(); return m.textContent; };
+      const r = { w5: at(5), w6: at(6) }; g.wave = 0; return r; });
+    const b6 = await load({ best: { meadow: 6 } });
+    check(b5.seen.join() === 'grunt,scout,brute,wisp' && in5.w5.startsWith('New: Splitter.') && !in5.w6.includes('Wisp') && b6.seen.join() === 'grunt,scout,brute,wisp', 'a 1.0 best of 5 or 6: S.seen is what 1.0\'s waves 1-5 brought (grunt, scout, brute, wisp), so the wave-5 Swarm introduces the Splitter and wave 6 says nothing about Wisps ' + JSON.stringify({ b5: b5.seen, in5, b6: b6.seen }));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -2634,6 +2648,41 @@ let BASE;
       g.spawnQ = []; W.refreshPanel(); return { bad, two, marchFit, twoLines, short, air: air.join() }; });
     check(all.bad.length === 0 && all.two > 5, `320px, waves 1-41, between waves and while one marches in: #info is never over 50px, every chip shows whole (${all.two} previews take two rows), and no message is cut ` + JSON.stringify(all.bad.slice(0, 3)));
     check(all.marchFit + all.short === 39 && all.air === '6,6s' && all.twoLines > 5 && all.short > 0, `320px: 'Wave N is marching in. Next:' takes a second line over one row of chips (${all.twoLines} times); over two rows it becomes 'Next wave:' (${all.short} times); before wave 7 the Air raid line shows instead ` + JSON.stringify(all));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // (review fixes) The 'New' intro on every phone, in the order a player meets the types: it fits its 2 lines (the Brute's blurb drops
+  // sentences after the name, so it still ends on what the Brute costs), the type it names leads the one row of chips (on a 320px
+  // phone a 4-type wave has no room for its last chip, and that must not be the new one), and a themed wave keeps its tag.
+  current = "wave-intel: the 'New' intro on every phone";
+  for (const vp of [{ width: 320, height: 568 }, { width: 330, height: 600 }, { width: 360, height: 640 }, { width: 390, height: 780 }, { width: 844, height: 390 }]) {
+    const { ctx, page } = await newPage(browser, { viewport: vp });
+    await startMap(page, 1);
+    const r = await G(page, () => { const W = window.__pw, g = W.G, i = document.querySelector('#info'), m = document.querySelector('#infoMsg'), c = document.querySelector('#chips'), out = []; g.running = false; W.build('bolt', 2, 2);
+      const met = w => { const s = ['grunt']; for (let x = 1; x < w; x++) for (const [t] of W.buildWave(x)) if (!s.includes(t)) s.push(t); return s; };
+      // Waves 4, 5, 6 and 10 bring the Brute, the Splitter (in the first Swarm), the Wisp and the Warlord. Wave 9 is the Swarm where a
+      // player from 1.0 with a best of 5 or 6 meets the Splitter.
+      for (const [w, seen] of [[4], [5], [6], [9, ['grunt', 'scout', 'brute', 'wisp']], [10]]) for (const st of ['calm', 'early', 'march']) {
+        W.S.seen = seen || met(w); g.wave = w - 1; g.W = {}; g.spawnQ = [];
+        if (st === 'early') g.W = { [w - 1]: { rem: 0, alive: 1 } };
+        if (st === 'march') { g.spawnQ = [{ at: 1e9, type: 'grunt', w: w - 1 }]; g.W = { [w - 1]: { rem: 1, alive: 0 } }; }
+        W.refreshPanel();
+        const nt = W.newTypes(w), type = nt[nt.length - 1], cr = c.getBoundingClientRect(), chips = [...c.querySelectorAll('.chip')], tag = c.querySelector('.theme');
+        const inside = x => { const b = x.getBoundingClientRect(); return b.bottom <= cr.bottom + 0.5 && b.right <= cr.right + 0.5; };
+        out.push({ w, st, type, msg: m.textContent, l2: m.classList.contains('l2'), fits: m.scrollHeight <= m.clientHeight + 1, ends: m.textContent.endsWith(W.BLURB[type].split('. ').pop()),
+          named: m.textContent.startsWith(`New: ${W.ED[type].name}.`), lead: !!chips[0] && chips[0].dataset.t === type && inside(chips[0]), cut: chips.filter(x => !inside(x)).map(x => x.dataset.t),
+          tag: tag ? !tag.hidden && inside(tag) : null, sh: i.scrollHeight, label: document.querySelector('#bWave').textContent });
+      }
+      W.S.seen = Object.keys(W.ED); g.W = {}; g.spawnQ = []; W.refreshPanel(); return out; });
+    // At 320px wave 6 (Wisp, Grunt, Scout, Brute) leaves its last chip, the one Brute, past the row: the Wisp it introduces leads.
+    const bad = r.filter(x => !x.l2 || !x.fits || !x.ends || !x.named || !x.lead || x.tag === false || x.sh > 50 || x.cut.length > (vp.width === 320 && x.w === 6 ? 1 : 0));
+    check(bad.length === 0 && r.length === 15, `${vp.width}px: every 'New' intro (Brute, Splitter, Wisp, Warlord; between waves, beside the early call and while a wave marches in) fits its 2 lines, keeps the name and the blurb's last sentence, leads the chips with the type it names, and keeps the theme tag ` + JSON.stringify(bad.slice(0, 3)));
+    const brute = r.filter(x => x.w === 4).map(x => x.msg);
+    // (While wave 3 marches in, the shorter 'Wave 3…' leaves room for 'Longshot ignores armor.' as well.)
+    if (vp.width === 320) check(brute[0] === 'New: Brute. Costs 2 lives.' && brute[1] === brute[0] && brute[2] === 'New: Brute. Longshot ignores armor. Costs 2 lives.' && r.filter(x => x.w === 5).every(x => x.tag) && r.find(x => x.w === 5 && x.st === 'early').label === 'Call early +45', "320px: the Brute's line is 'New: Brute. Costs 2 lives.' (beside 'Wave 3…' it keeps 'Longshot ignores armor.' too), and the wave-5 Swarm keeps its tag, also beside 'Call early +45' " + JSON.stringify(brute));
+    if (vp.width === 390) check(brute.every(x => x === 'New: Brute. Longshot ignores armor. Costs 2 lives.'), "390px: 'New: Brute. Longshot ignores armor. Costs 2 lives.' " + JSON.stringify(brute));
+    if (vp.width === 320) await page.screenshot({ path: path.join(__dirname, 'out', 'new-intro-320.png') });
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -2889,7 +2938,8 @@ let BASE;
     const res = await G(page, () => { const W = window.__pw, g = W.G, bw = document.querySelector('#bWave'), m = document.querySelector('#infoMsg'), out = [];
       g.running = false; W.S.seen = Object.keys(W.ED); W.build('bolt', 2, 2); W.build('mortar', 4, 5);
       for (const w of [1, 11, 29, 98]) {
-        g.spawnQ = []; g.enemies = []; g.W = { [w]: { rem: 0, alive: 1 } }; g.wave = w; g.selTower = null; W.refreshPanel();
+        // (review fix: a run on wave 98 has won the campaign. Until it is won, wave 31 can't be called during wave 30.)
+        g.spawnQ = []; g.enemies = []; g.W = { [w]: { rem: 0, alive: 1 } }; g.wave = w; g.won = w >= 30; g.selTower = null; W.refreshPanel();
         const row = { w, text: bw.textContent, early: bw.classList.contains('early'), sw: bw.scrollWidth, cw: bw.clientWidth, h: bw.getBoundingClientRect().height, tips: [] };
         // Each mode's line beside it, for a Bolt and a Mortar.
         for (const t of g.towers) { g.selTower = t; for (const mode of ['first', 'tough', 'air']) { if (t.type === 'mortar' && mode === 'air') continue; t.mode = mode; g.modeTip = { t, until: performance.now() + 1e6 };
@@ -3024,12 +3074,24 @@ let BASE;
       }
       g.W = {}; g.spawnQ = []; W.refreshPanel(); return { bad, tags, back: !document.querySelector('#chips .theme').hidden }; });
     check(fit.bad.length === 0, `${vp.width}px: beside 'Start wave 7', 'Wave 6…' and the early call, the Air raid line and every chip fit ` + JSON.stringify(fit));
-    // Where one row can't hold the tag as well (320px beside 'Call early +51'), the tag goes, not a chip; it is back once there is room.
-    check(vp.width === 390 ? fit.tags.every(t => t.endsWith(':tag')) : fit.tags[0].endsWith(':tag') && fit.tags[2] === 'Call early +51:no tag' && fit.back, `${vp.width}px: the tag shows wherever the row has room for it ` + JSON.stringify(fit));
-    // A tap on the tag picks the chip nearest to it, as anywhere else on the row.
+    // (review fix) Where one row can't hold it all (320px beside 'Call early +51'), the row first closes up its gaps, which keeps the tag.
+    check(fit.tags.every(t => t.endsWith(':tag')) && fit.back && (vp.width === 390 || fit.tags[2] === 'Call early +51:tag'), `${vp.width}px: the tag shows beside every wave button label ` + JSON.stringify(fit));
+    // Only where even that is not enough does the tag go, not a chip; it is back once there is room. (#info squeezed to force it.)
+    const squeeze = await G(page, () => { const W = window.__pw, g = W.G, c = document.querySelector('#chips'), i = document.querySelector('#info'); g.wave = 6; g.W = { 6: { rem: 0, alive: 1 } }; g.spawnQ = [];
+      const st = () => ({ tag: !c.querySelector('.theme').hidden, tight: c.classList.contains('tight'), whole: [...c.querySelectorAll('.chip')].every(x => x.getBoundingClientRect().bottom <= c.getBoundingClientRect().bottom + 0.5) });
+      W.refreshPanel(); const a = st(); i.style.maxWidth = '112px'; W.refreshPanel(); const b = st(); i.style.maxWidth = ''; g.W = {}; W.refreshPanel(); const d = st(); return { a, b, d }; });
+    check(squeeze.b.tight && !squeeze.b.tag && squeeze.b.whole && squeeze.d.tag && !squeeze.d.tight, `${vp.width}px: squeezed further, the row drops the tag rather than a chip, and both come back with the room ` + JSON.stringify(squeeze));
+    // (review fix) A tap on the tag shows the type the theme is built on, not whichever chip is beside it: 'AIR RAID' shows the Wisps.
     await G(page, () => { const W = window.__pw; W.G.wave = 6; W.refreshPanel(); });
     await page.click('#chips .theme');
-    check((await G(page, () => window.__pw.G.chipTip && window.__pw.G.chipTip.type)) === 'grunt' && (await text(page, '#infoMsg')).startsWith('Grunt ×6'), 'a tap on the tag shows the nearest chip, the Grunts ' + (await text(page, '#infoMsg')));
+    check((await G(page, () => window.__pw.G.chipTip && window.__pw.G.chipTip.type)) === 'wisp' && (await text(page, '#infoMsg')).startsWith('Wisp ×19'), 'a tap on the Air raid tag shows the Wisps, not the Grunts beside it ' + (await text(page, '#infoMsg')));
+    // Every tag, touch-tapped at its centre: Swarm the Scouts, Armored the Brutes, Air raid the Wisps.
+    const tapTag = async w => { await G(page, w => { const W = window.__pw, g = W.G; g.chipTip = null; W.S.seen = Object.keys(W.ED); g.wave = w - 1; W.refreshPanel(); }, w);
+      const r = await page.$eval('#chips .theme', el => { const b = el.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+      await page.touchscreen.tap(r.x, r.y); return text(page, '#infoMsg'); };
+    const tt = { 13: await tapTag(13), 14: await tapTag(14), 15: await tapTag(15) };
+    check(tt[13].startsWith('Scout ×') && tt[14].startsWith('Brute ×') && tt[14].includes('Armor') && tt[15].startsWith('Wisp ×') && tt[15].includes("Mortars can't hit it"), "touch-tapping 'SWARM', 'ARMORED' and 'AIR RAID' shows the Scouts, the Brutes and the Wisps " + JSON.stringify(tt));
+    await G(page, () => { const W = window.__pw, g = W.G; g.chipTip = null; W.S.seen = ['grunt', 'scout', 'brute', 'splitter', 'wisp']; g.wave = 6; W.refreshPanel(); });
     if (vp.width === 390) await page.screenshot({ path: path.join(__dirname, 'out', 'themed-air-raid-390.png') });
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
@@ -3059,24 +3121,27 @@ let BASE;
   {
     const { ctx, page } = await newPage(browser);
     const v = await G(page, () => { const W = window.__pw; return { cfg: { ...W.CFG }, hp: W.MAPS.map(m => m.hp), td: Object.fromEntries(Object.entries(W.TD).map(([k, d]) => [k, [d.cost, d.range, d.rate, d.dmg, d.splash || 0, d.slow || 0, d.chain || 0].join()])) }; });
-    check(v.cfg.hpB === 0.025 && v.cfg.themeBudget === 0.85 && v.hp.join() === '0.88,1,1.035', `the shipped retune: CFG.hpB ${v.cfg.hpB}, CFG.themeBudget ${v.cfg.themeBudget}, road hp ${v.hp.join(', ')} (Quarry Run 1.035)`);
+    // (review fix: retuned for the plan's smart profile, which does not read the coming waves.)
+    check(v.cfg.hpB === 0.021 && v.cfg.themeBudget === 0.85 && v.hp.join() === '0.88,1,1.05', `the shipped retune: CFG.hpB ${v.cfg.hpB}, CFG.themeBudget ${v.cfg.themeBudget}, road hp ${v.hp.join(', ')} (Quarry Run 1.05)`);
     check(v.cfg.hpA === 0.25 && v.cfg.goldGrow === 0.01 && v.cfg.bonusA === 15 && v.cfg.bonusB === 2 && v.cfg.startGold === 200 && v.cfg.earlyMul === 3, 'nothing else in CFG moved ' + JSON.stringify(v.cfg));
     check(JSON.stringify(v.td) === JSON.stringify({ bolt: '50,2.4,0.55,11,0,0,0', mortar: '90,2.4,1.5,30,0.95,0,0', frost: '70,2,1,5,0.75,0.42,0', arc: '130,2.2,1.1,21,0,0,3', long: '120,4.6,2.1,78,0,0,0' }), 'no tower stat changed in this pass ' + JSON.stringify(v.td));
     // README 'Balance' records the numbers.
     const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8'), bal = readme.slice(readme.indexOf('## Balance'));
-    check(readme.includes('## Balance') && bal.includes('`CFG.hpB` 0.025') && bal.includes('`CFG.themeBudget` 0.85') && bal.includes('`hp` 1.035') && bal.includes('node tests/balance.js') && /smart \(20 seeds\) \| 20\/20/.test(bal), "README.md has a 'Balance' section with the final numbers and the bot results");
+    check(readme.includes('## Balance') && bal.includes('`CFG.hpB` 0.021') && bal.includes('`CFG.themeBudget` 0.85') && bal.includes('`hp` 1.05') && bal.includes('node tests/balance.js') && /smart \(20 seeds\) \| 20\/20/.test(bal), "README.md has a 'Balance' section with the final numbers and the bot results");
     // tests/balance.js: exists, parses, and holds the spec's profiles and targets. It is run by hand (10-20 minutes budgeted), never from here.
     const bj = path.join(__dirname, 'balance.js'), src = fs.existsSync(bj) ? fs.readFileSync(bj, 'utf8') : '';
     const parse = require('child_process').spawnSync(process.execPath, ['--check', bj], { encoding: 'utf8' });
     check(src && parse.status === 0, 'tests/balance.js exists and parses ' + (parse.stderr || ''));
-    check(["smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20) }", "spam: { opts: { allow: ['bolt'], div: 0 }, maps: [0, 1, 2], seeds: range(5) }", "mlf: { opts: { allow: ['mortar', 'long', 'frost'] }, maps: [1], seeds: range(5) }", 'early: { opts: { ...SMART, early: true }', 'frostN: 3, div: 0.3, noise: 0.3'].every(x => src.includes(x)), 'it defines the smart, spam, mlf and early profiles over the spec seeds');
+    // (review fix: smart is the plan's profile again, with no reading ahead; the reading bot is the extra 'reader' profile. Smart and
+    // early play Normal on past wave 30 until they fall, so the early target compares how far each gets, not 30 with 30.)
+    check(["smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1] }", "spam: { opts: { allow: ['bolt'], div: 0 }, maps: [0, 1, 2], seeds: range(5) }", "mlf: { opts: { allow: ['mortar', 'long', 'frost'] }, maps: [1], seeds: range(5) }", 'early: { opts: { ...SMART, early: true }', 'const SMART = { frostN: 3, div: 0.3, noise: 0.3 };', "reader: { opts: { ...SMART, look: 4 }", '(P.endless || []).includes(m) ? 100 : 30'].every(x => src.includes(x)), 'it defines the smart (the plan\'s profile), spam, mlf and early profiles over the spec seeds, and plays smart and early on Normal until they fall');
     check(['smart wins Easy >= 19/20', 'smart wins Normal >= 17/20', 'smart wins Hard 8-12/20', 'dies before wave 24', 'loses at least 1 life on an Air raid wave', 'median cleared wave within +-2 on Normal'].every(x => src.includes(x)) && !/require\(['"][^'"]*balance/.test(fs.readFileSync(__filename, 'utf8')), 'and checks every target; tests/run.js does not run it');
     // A 1.1 save from before this item still loads: its run carries on into the themed waves.
     await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ saves: { meadow: { map: 'meadow', wave: 6, gold: 300, lives: 17, towers: [{ type: 'mortar', c: 2, r: 2, level: 2, spent: 160, mode: 'first' }] } }, last: 'meadow', best: { meadow: 6 } })));
     await page.reload(); await page.waitForTimeout(250);
     await page.click('#bContinue'); await page.waitForTimeout(80);
     const sv = await G(page, () => ({ wave: window.__pw.G.wave, towers: window.__pw.G.towers.length, seen: window.__pw.S.seen.join(), tag: (document.querySelector('#chips .theme') || {}).textContent, msg: document.querySelector('#infoMsg').textContent }));
-    check(sv.wave === 6 && sv.towers === 1 && sv.seen === 'grunt,scout,brute,splitter,wisp' && sv.tag === 'Air raid' && sv.msg === AIR_LINE, 'an older save at wave 6 (best 6, no S.seen) loads; S.seen is rebuilt from the new waves and wave 7 is previewed as an Air raid ' + JSON.stringify(sv));
+    check(sv.wave === 6 && sv.towers === 1 && sv.seen === 'grunt,scout,brute,wisp' && sv.tag === 'Air raid' && sv.msg === AIR_LINE, 'an older save at wave 6 (best 6, no S.seen) loads; S.seen is rebuilt from 1.0\'s waves 1-6 and wave 7 is previewed as an Air raid ' + JSON.stringify(sv));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -3155,7 +3220,8 @@ let BASE;
   }
 
   current = 'stars-run-report: 2 stars and 1 star, the hint, and the thresholds';
-  for (const [lives, n, hint] of [[12, 2, 'Finish with 13 or more lives for the third star.'], [9, 1, 'Finish with 10 or more lives for a second star.']]) {
+  // (review fix: back to the plan's thresholds, 16 and 10, now that tests/balance.js plays the plan's smart profile.)
+  for (const [lives, n, hint] of [[12, 2, 'Finish with 16 or more lives for the third star.'], [9, 1, 'Finish with 10 or more lives for a second star.']]) {
     const { ctx, page } = await newPage(browser);
     await startMap(page, 1);
     const w = await winAt(page, lives);
@@ -3167,20 +3233,20 @@ let BASE;
       // A better win later: only the star new to this road pops.
       await G(page, () => { delete window.__pw.S.saves.meadow; });
       await page.click('#bEndAlt'); await startMap(page, 1);
-      const w3 = await winAt(page, 13);
+      const w3 = await winAt(page, 16);
       const c3 = await endCard(page);
-      check(w3.stars === 3 && c3.on === 3 && c3.popAt.join() === '-,-,0ms' && c3.hint === null, 'winning again with 13 lives earns the third star, and only that one pops ' + JSON.stringify({ w3, pop: c3.popAt }));
+      check(w3.stars === 3 && c3.on === 3 && c3.popAt.join() === '-,-,0ms' && c3.hint === null, 'winning again with 16 lives earns the third star, and only that one pops ' + JSON.stringify({ w3, pop: c3.popAt }));
     }
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
   {
     const { ctx, page } = await newPage(browser);
-    const th = await G(page, () => { const W = window.__pw; return { t: [W.STAR3, W.STAR2], n: [20, 16, 13, 12, 10, 9, 1].map(l => W.starCount(l)) }; });
-    check(th.n.join() === '3,3,3,2,2,1,1' && th.t.join() === '13,10', '3 stars from 13 lives, 2 from 10, else 1 (16 and 20 give 3, 12 gives 2, 9 gives 1) ' + JSON.stringify(th));
-    // Thresholds against tests/balance.js (smart bot, 20 seeds; lives when wave 30 clears): Easy 19-20, Normal 2-15 (median 10), Hard winners
-    // 1-7. At 13/10 the smart Normal winners split 5 / 7 / 8 across 3, 2 and 1 stars, and no smart Hard winner reaches 3.
-    const BOT_NORMAL = [2, 6, 7, 7, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 13, 13, 14, 15, 15], BOT_HARD = [1, 2, 2, 3, 3, 4, 5, 6, 7, 7];
+    const th = await G(page, () => { const W = window.__pw; return { t: [W.STAR3, W.STAR2], n: [20, 16, 15, 13, 12, 10, 9, 1].map(l => W.starCount(l)) }; });
+    check(th.n.join() === '3,3,2,2,2,2,1,1' && th.t.join() === '16,10', '3 stars from 16 lives, 2 from 10, else 1 (20 gives 3, 15 and 12 give 2, 9 gives 1) ' + JSON.stringify(th));
+    // Thresholds against tests/balance.js (the plan's smart bot, 20 seeds; lives when wave 30 clears): Easy 16-20, Normal winners 3-20
+    // (median 10), Hard winners 1-14. At 16/10 the smart Normal winners split 7 / 5 / 7 across 3, 2 and 1 stars, and no Hard winner gets 3.
+    const BOT_NORMAL = [3, 3, 3, 6, 8, 8, 9, 10, 10, 10, 11, 15, 17, 17, 17, 18, 18, 19, 20], BOT_HARD = [1, 2, 2, 3, 4, 4, 5, 10, 14];
     const split = await G(page, ([a, b]) => { const W = window.__pw, k = l => [0, 0, 0, 0].map((_, i) => l.filter(x => W.starCount(x) === i).length); return { normal: k(a), hard: k(b) }; }, [BOT_NORMAL, BOT_HARD]);
     check(split.normal[3] >= 3 && split.normal[2] >= 3 && split.hard[3] === 0, "the bot's Normal winners split across 2 and 3 stars, and its Hard winners earn no 3 stars " + JSON.stringify(split));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
@@ -3194,6 +3260,37 @@ let BASE;
     await winAt(page, 16);
     const c = await endCard(page), anim = await page.$$eval('#endStars .star', els => els.map(e => getComputedStyle(e).animationName));
     check(c.on === 3 && c.popAt.every(p => p === '-') && anim.every(a => a === 'none'), 'reduced motion: three stars, none popping ' + JSON.stringify({ pop: c.popAt, anim }));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // (review fix) Wave 31 can't be called early while wave 30 is on the road and the campaign is not won yet, so the win (and its stars)
+  // always comes when wave 30 is over. Past the campaign, calling early is open again; before wave 30 it always was.
+  current = 'stars-run-report: wave 30 is won before wave 31 can be called';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const btn = () => G(page, () => { const b = document.querySelector('#bWave'); return { text: b.textContent, early: b.classList.contains('early'), disabled: b.disabled, wave: window.__pw.G.wave }; });
+    // The whole wave out of the cave at once: the spawn queue is empty and the wave is still on the road.
+    const onRoad = () => G(page, () => { const W = window.__pw, g = W.G; W.startWave(); g.spawnQ.forEach(q => { q.at = g.time; }); W.step(1 / 30); return g.enemies.length; });
+    await G(page, () => { const g = window.__pw.G; g.running = false; g.wave = 28; g.cleared = 28; g.lives = 18; });
+    await onRoad();
+    const w29 = await btn();
+    check(w29.early && !w29.disabled && /^Call 30 early\s*\+120$/.test(w29.text), "wave 29 on the road: 'Call 30 early +120' as before " + JSON.stringify(w29));
+    await G(page, () => { const W = window.__pw, g = W.G; g.enemies = []; g.W = {}; g.cleared = 29; W.refreshPanel(); });
+    const n30 = await onRoad();
+    const w30 = await btn();
+    await page.click('#bWave', { force: true });
+    const after = await G(page, () => { const W = window.__pw, g = W.G, w0 = g.wave; W.startWave(); return { click: w0, call: g.wave, active: Object.keys(g.W).join() }; });
+    check(n30 > 0 && w30.disabled && !w30.early && w30.text === 'Wave 30…' && after.click === 30 && after.call === 30 && after.active === '30', "wave 30 on the road, nothing left to spawn: #bWave reads 'Wave 30…' and is disabled, and neither a tap nor startWave() calls wave 31 " + JSON.stringify({ w30, after }));
+    await G(page, () => { const W = window.__pw; let t = 0; while (document.querySelector('#endOv').hidden && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; } });
+    const c = await endCard(page), st = await G(page, () => ({ stars: window.__pw.S.stars.meadow, won: window.__pw.G.won }));
+    check(c.shown && c.title === 'The road holds' && c.on === 3 && st.stars === 3 && st.won, 'wave 30 over: the win card with its 3 stars (18 lives) ' + JSON.stringify({ c: c.title, on: c.on, st }));
+    await page.click('#bEndMain');
+    await G(page, () => { window.__pw.G.running = false; });
+    await onRoad();
+    const w31 = await btn();
+    check(w31.wave === 31 && w31.early && /^Call 32 early\s*\+126$/.test(w31.text), "past the campaign the early call is back: 'Call 32 early +126' during wave 31 " + JSON.stringify(w31));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -3214,6 +3311,15 @@ let BASE;
     check(JSON.stringify(r.stars) === '{"quarry":2}' && r.head === 'Choose a road · ★ 2/9', 'only 1-3 on a real road is kept ' + JSON.stringify(r));
     r = await load({ stars: [3, 3, 3] });
     check(JSON.stringify(r.stars) === '{}' && r.head === 'Choose a road · ★ 0/9', 'an array is not a stars object ' + JSON.stringify(r.stars));
+    // (review fix) Only storage from before 1.1 (no stars yet) turns a best of 30 into a star, once. 1.1 storage keeps what was won,
+    // so a road's stars never change between launches.
+    r = await load({ best: { meadow: 30, switch: 30 }, stars: { switch: 2 } });
+    await page.reload(); await page.waitForTimeout(250);
+    const r2 = { stars: await G(page, () => window.__pw.S.stars), head: await text(page, '#roadHead') };
+    check(JSON.stringify(r.stars) === '{"switch":2}' && JSON.stringify(r2.stars) === '{"switch":2}' && r2.head === 'Choose a road · ★ 2/9', 'stored 1.1 stars: a best of 30 on a road with none earns no star, on this launch or the next ' + JSON.stringify({ r: r.stars, r2 }));
+    r = await load({ best: { quarry: 30 } });
+    await page.reload(); await page.waitForTimeout(250);
+    check(JSON.stringify(r.stars) === '{"quarry":1}' && JSON.stringify(await G(page, () => window.__pw.S.stars)) === '{"quarry":1}', 'a 1.0 store gets its 1 star once, and keeps it on the next launch ' + JSON.stringify(r.stars));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -3287,6 +3393,13 @@ let BASE;
     const segs = await page.$$eval('#endStats .dbar i', els => els.length);
     check(c.lines[0] === '12,345 kills · 1,234,567 gold earned', "toLocaleString('en-US'): '12,345 kills · 1,234,567 gold earned' (" + c.lines[0] + ')');
     check(c.lines[2] === 'Longshot 59% · Mortar 24% · Arc 11% · Bolt 5% · Frost slowed 1.2k' && segs === 5, "'Longshot 59% · Mortar 24% · Arc 11% · Bolt 5% · Frost slowed 1.2k': Frost's 0.4% is in the bar but not the line (" + c.lines[2] + ')');
+    // (review fix) A share under 1% stays out of the line even where it rounds to 1%: 0.7% is in the bar only.
+    await page.click('#bEndMain');
+    await G(page, () => { window.__pw.G.stats = { kills: 1, gold: 1, leaks: {}, dmg: { long: 99.3, frost: 0.7 }, slowed: 0 }; });
+    await loseNow(page); await page.waitForTimeout(1000);
+    c = await endCard(page);
+    const segs2 = await page.$$eval('#endStats .dbar i', els => els.map(e => e.dataset.t).join());
+    check(c.lines[2] === 'Longshot 99%' && segs2 === 'long,frost', "Longshot 99.3% and Frost 0.7%: the line is 'Longshot 99%' and the bar still has both (" + c.lines[2] + ', ' + segs2 + ')');
     const f = await G(page, () => [0, 7, 999, 1000, 1234, 15678].map(window.__pw.fmtK));
     check(f.join() === '0,7,999,1.0k,1.2k,15.7k', 'fmt: under 1000 as is, else one decimal and k ' + f.join());
     // A win where nothing got through.
@@ -3363,7 +3476,8 @@ let BASE;
     await page.reload(); await page.waitForTimeout(250);
     await page.click('#bContinue'); await page.waitForTimeout(80);
     const old = await G(page, () => ({ stats: JSON.stringify(window.__pw.G.stats), prev: window.__pw.G.prevBest, wave: window.__pw.G.wave, towers: window.__pw.G.towers.length }));
-    check(old.stats === '{"kills":0,"gold":0,"leaks":{},"dmg":{},"slowed":0}' && old.wave === 3 && old.towers === 1 && old.prev === 3, 'acceptance: an old save without stats loads with zeroed stats (and prevBest from the best wave) ' + JSON.stringify(old));
+    // (review fix: such a report covers only the waves from the one the run goes on with, stats.from.)
+    check(old.stats === '{"kills":0,"gold":0,"leaks":{},"dmg":{},"slowed":0,"from":4}' && old.wave === 3 && old.towers === 1 && old.prev === 3, 'acceptance: an old save without stats loads with zeroed stats, marked as covering waves 4 on (and prevBest from the best wave) ' + JSON.stringify(old));
     // Damaged reports start over; a good one is kept.
     await G(page, () => { window.__pw.G.running = false; });
     const base = { wave: 3, gold: 150, lives: 20, towers: [] }, good = { kills: 5, gold: 40, leaks: { wisp: 1 }, dmg: { bolt: 120.5, long: 3 }, slowed: 2 };
@@ -3374,9 +3488,19 @@ let BASE;
       await page.reload(); await page.waitForTimeout(250);
       res.push(...(await G(page, () => { const s = window.__pw.S.saves; return [JSON.stringify(s.meadow.stats), JSON.stringify(s.quarry.stats), JSON.stringify(s.switch.stats) + ':' + s.switch.prevBest]; })));
     }
-    const fresh = '{"kills":0,"gold":0,"leaks":{},"dmg":{},"slowed":0}', goodS = JSON.stringify(good) + ':9';
+    const fresh = '{"kills":0,"gold":0,"leaks":{},"dmg":{},"slowed":0,"from":4}', goodS = JSON.stringify(good) + ':9';
     check(res.filter((_, i) => i % 3 < 2).every(x => x === fresh), 'a report with a negative, non-number or missing field, or a key that is not an enemy (leaks) or tower (dmg) type, starts over ' + JSON.stringify(res));
     check(res.filter((_, i) => i % 3 === 2).every(x => x === goodS), 'a sound report (and prevBest) loads as saved ' + JSON.stringify(res.filter((_, i) => i % 3 === 2)));
+    // (review fix) The end card of a run continued from a 1.0 save says which waves its report covers. It does not claim that nothing
+    // got through the whole run (this one is down to 9 lives).
+    await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ saves: { meadow: { map: 'meadow', wave: 29, gold: 500, lives: 9, towers: [{ type: 'long', c: 3, r: 5 }] } }, last: 'meadow', best: { meadow: 29 } })));
+    await page.reload(); await page.waitForTimeout(250);
+    await page.click('#bContinue'); await page.waitForTimeout(80);
+    await G(page, () => { const W = window.__pw, g = W.G; g.running = false; W.startWave(); let t = 0; while (document.querySelector('#endOv').hidden && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; } });
+    const pc = await endCard(page), psv = (await stored(page)).saves.meadow;
+    check(pc.shown && pc.title === 'The road holds' && /^From wave 30: [\d,]+ kills · [\d,]+ gold earned$/.test(pc.lines[0]) && pc.lines[1] === 'Nothing got through from wave 30.' && !pc.lines.includes('Nothing got through.') && psv.stats.from === 30,
+      "a win continued from a 1.0 save at wave 29: 'From wave 30: … kills · … gold earned' and 'Nothing got through from wave 30.', and the saved run keeps stats.from " + JSON.stringify({ lines: pc.lines, from: psv.stats.from }));
+    await page.click('#bEndMain');
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
