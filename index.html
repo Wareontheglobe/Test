@@ -328,6 +328,12 @@ function hintTiles(map){
   list.sort((a,b)=>b.n-a.n||a.r-b.r||a.c-b.c);
   return list.slice(0,2).map(({c,r})=>({c,r}));
 }
+// How much of this road a tower on tile (c,r) reaches, in tiles: the on-board samples (every 0.1 tile) within range, times 0.1.
+function coverage(c,r,range){
+  const x=c+0.5,y=r+0.5,R2=range*range+1e-9;let n=0;
+  for(const p of roadPts(G.map)){const dx=p.x-x,dy=p.y-y;if(dx*dx+dy*dy<=R2)n++}
+  return n*0.1;
+}
 
 /* ---------- storage ---------- */
 const STORE='pathwarden.v1';
@@ -449,7 +455,7 @@ function newGame(map,save){
 }
 function placeTower(type,c,r,level,spent,mode){
   // refund: the part of spent that sells back in full. Only builds and upgrades made between waves earn it, and the next wave clears it.
-  const t={type,c,r,x:c+0.5,y:r+0.5,level:level||1,spent:spent||TD[type].cost,refund:0,mode:mode||(type==='long'?'strong':'first'),cd:0.2,ang:-Math.PI/2,flash:0,born:G.time};
+  const t={type,c,r,x:c+0.5,y:r+0.5,level:level||1,spent:spent||TD[type].cost,refund:0,mode:mode||(type==='long'?'strong':'first'),cd:0.2,ang:-Math.PI/2,flash:0,born:G.time,upT:0};
   G.towers.push(t);G.grid[r*COLS+c]=2;return t;
 }
 function towerAt(c,r){return G.towers.find(t=>t.c===c&&t.r===r)}
@@ -664,7 +670,7 @@ function step(dt){
   }
   for(const t of G.towers){
     const st=tstats(t.type,t.level);
-    t.cd-=dt;if(t.flash>0)t.flash-=dt;
+    t.cd-=dt;if(t.flash>0)t.flash-=dt;if(t.upT>0)t.upT=Math.max(0,t.upT-dt);
     const e=findTarget(t,st);
     if(e){
       if(t.type!=='frost'){const want=Math.atan2(e.y-t.y,e.x-t.x);let d=want-t.ang;d=Math.atan2(Math.sin(d),Math.cos(d));t.ang+=d*Math.min(1,dt*14)}
@@ -790,15 +796,26 @@ function layout(){
   const d=0.6*T,W=COLS*T,H=ROWS*T,strip=(x0,y0,x1,y1)=>{const gr=ctx.createLinearGradient(x0,y0,x1,y1);gr.addColorStop(0,'rgba(227,100,79,.55)');gr.addColorStop(1,'rgba(227,100,79,0)');return gr};
   hurtStrips=[[strip(0,0,0,d),0,0,W,d],[strip(0,H,0,H-d),0,H-d,W,d],[strip(0,0,d,0),0,0,d,H],[strip(W,0,W-d,0),W-d,0,d,H]];
 }
-function drawTower(g,type,lv,x,y,s,ang,flash,time){
+// Each tower has its own base shape, so none relies on colour alone: Bolt a circle, Mortar a squat octagon, Frost a hexagon,
+// Arc a coil, Longshot a diamond. Level pips (at least 2px) sit on the plate; from level 2 the plate has a brass edge,
+// and level 3 adds a brass ring (wider on Frost, outside its hexagon). plate=false (the palette icons) draws the tower alone,
+// so each icon's outline is its own shape.
+function drawTower(g,type,lv,x,y,s,ang,flash,time,plate=true){
   const d=TD[type];
   g.save();g.translate(x,y);g.lineWidth=Math.max(1,s*0.045);g.strokeStyle=INK;g.lineJoin='round';
-  rr(g,-s*0.42,-s*0.4,s*0.84,s*0.82,s*0.16);g.fillStyle='#4f4a3a';g.fill();g.stroke();
-  rr(g,-s*0.36,-s*0.36,s*0.72,s*0.64,s*0.12);g.fillStyle='#6f6750';g.fill();
-  for(let i=0;i<lv;i++){circle(g,(i-(lv-1)/2)*s*0.17,s*0.31,s*0.05);g.fillStyle='#e3ad45';g.fill();g.lineWidth=Math.max(1,s*0.025);g.stroke()}
+  if(plate){
+    rr(g,-s*0.42,-s*0.4,s*0.84,s*0.82,s*0.16);g.fillStyle='#4f4a3a';g.fill();g.strokeStyle=lv>=2?'#c99a3e':INK;g.stroke();g.strokeStyle=INK;
+    rr(g,-s*0.36,-s*0.36,s*0.72,s*0.64,s*0.12);g.fillStyle='#6f6750';g.fill();
+  }
+  if(lv===3){circle(g,0,-s*0.02,s*(type==='frost'?0.35:0.3));g.strokeStyle='#e3ad45';g.lineWidth=Math.max(1,s*0.05);g.stroke();g.strokeStyle=INK}
+  if(plate){
+    // Every pip's dark rim first, then the brass discs, so a rim never cuts into the pip beside it.
+    const pr=Math.max(2,s*0.065),pw=Math.max(1,s*0.025),px=i=>(i-(lv-1)/2)*s*0.2;
+    g.fillStyle=INK;for(let i=0;i<lv;i++){circle(g,px(i),s*0.31,pr+pw);g.fill()}
+    g.fillStyle='#e3ad45';for(let i=0;i<lv;i++){circle(g,px(i),s*0.31,pr);g.fill()}
+  }
   g.lineWidth=Math.max(1,s*0.045);
   const kick=flash>0?-s*0.06*(flash/0.12):0;
-  if(lv===3&&type!=='frost'){circle(g,0,-s*0.02,s*0.3);g.strokeStyle='#e3ad45';g.lineWidth=Math.max(1,s*0.05);g.stroke();g.strokeStyle=INK;g.lineWidth=Math.max(1,s*0.045)}
   g.translate(0,-s*0.02);
   if(type==='bolt'){
     circle(g,0,0,s*0.22);g.fillStyle=d.color;g.fill();g.stroke();
@@ -807,7 +824,8 @@ function drawTower(g,type,lv,x,y,s,ang,flash,time){
     g.beginPath();g.arc(s*0.1,0,s*0.26,-1.15,1.15);g.strokeStyle='#3b2a14';g.lineWidth=Math.max(1,s*0.06);g.stroke();
     g.beginPath();g.moveTo(s*0.46,0);g.lineTo(s*0.38,-s*0.06);g.lineTo(s*0.38,s*0.06);g.closePath();g.fillStyle='#e8e2d0';g.fill();
   }else if(type==='mortar'){
-    circle(g,0,0,s*0.26);g.fillStyle=d.color;g.fill();g.stroke();
+    g.beginPath();for(let i=0;i<8;i++){const a=i*Math.PI/4+Math.PI/8;g.lineTo(Math.cos(a)*s*0.30,Math.sin(a)*s*0.26)}g.closePath();
+    g.fillStyle=d.color;g.fill();g.stroke();
     g.rotate(ang);g.translate(kick,0);
     rr(g,-s*0.02,-s*0.13,s*0.36,s*0.26,s*0.06);g.fillStyle='#4a5059';g.fill();g.stroke();
     circle(g,s*0.34,0,s*0.1);g.fillStyle='#2a2d33';g.fill();g.stroke();
@@ -827,7 +845,8 @@ function drawTower(g,type,lv,x,y,s,ang,flash,time){
     g.fillStyle=`rgba(164,135,255,${0.25+0.25*pulse})`;circle(g,0,-s*0.14,s*0.2);g.fill();
     circle(g,0,-s*0.14,s*0.1);g.fillStyle=flash>0?'#ffffff':'#d9ccff';g.fill();g.strokeStyle=INK;g.lineWidth=Math.max(1,s*0.035);g.stroke();
   }else if(type==='long'){
-    circle(g,0,0,s*0.21);g.fillStyle=d.color;g.fill();g.stroke();
+    g.beginPath();g.moveTo(0,-s*0.27);g.lineTo(s*0.27,0);g.lineTo(0,s*0.27);g.lineTo(-s*0.27,0);g.closePath();
+    g.fillStyle=d.color;g.fill();g.stroke();
     g.rotate(ang);g.translate(kick,0);
     rr(g,0,-s*0.04,s*0.56,s*0.08,s*0.02);g.fillStyle='#3a2c2a';g.fill();g.stroke();
     rr(g,s*0.06,-s*0.12,s*0.18,s*0.07,s*0.02);g.fillStyle='#e3ad45';g.fill();g.stroke();
@@ -953,9 +972,17 @@ function render(time){
   const ox=sh?(Math.random()*2-1)*sh:0,oy=sh?(Math.random()*2-1)*sh:0;
   g.setTransform(DPR,0,0,DPR,ox*DPR,oy*DPR);
   g.drawImage(bg,0,0,COLS*s,ROWS*s);
+  // Range preview: a pale disc, the road inside it glowing gold (what this spot covers), and an edge with a dark backing
+  // under a light dash, so it shows on the cream road as well as the grass. Red when the tower can't be afforded.
   const showRange=(x,y,r,ok)=>{
-    g.beginPath();g.arc(x*s,y*s,r*s,0,Math.PI*2);g.fillStyle=ok?'rgba(255,248,220,.13)':'rgba(227,100,79,.15)';g.fill();
-    g.setLineDash([s*0.15,s*0.12]);g.lineWidth=Math.max(1,s*0.035);g.strokeStyle=ok?'rgba(255,248,220,.75)':'rgba(227,100,79,.85)';g.stroke();g.setLineDash([]);
+    const cx=x*s,cy=y*s,R=r*s,P=G.map.path.P;
+    circle(g,cx,cy,R);g.fillStyle=ok?'rgba(255,248,220,.16)':'rgba(227,100,79,.18)';g.fill();
+    g.save();circle(g,cx,cy,R);g.clip();
+    g.beginPath();P.forEach((p,i)=>i?g.lineTo(p.x*s,p.y*s):g.moveTo(p.x*s,p.y*s));
+    g.lineWidth=s*0.74;g.lineCap='round';g.lineJoin='round';g.strokeStyle=ok?'rgba(255,214,102,.45)':'rgba(227,100,79,.35)';g.stroke();
+    g.restore();
+    circle(g,cx,cy,R);g.strokeStyle='rgba(24,18,8,.55)';g.lineWidth=Math.max(2.5,s*0.075);g.stroke();
+    g.setLineDash([s*0.18,s*0.1]);g.lineWidth=Math.max(1.5,s*0.04);g.strokeStyle=ok?'#fff6d8':'#ff9a85';g.stroke();g.setLineDash([]);
   };
   if(G.sel){
     const {c,r}=G.sel;
@@ -965,12 +992,19 @@ function render(time){
     }
     rr(g,c*s+1.5,r*s+1.5,s-3,s-3,s*0.14);g.strokeStyle='#f3d27a';g.lineWidth=Math.max(2,s*0.07);g.stroke();
   }
-  if(G.selTower){const t=G.selTower;showRange(t.x,t.y,tstats(t.type,t.level).range,true)}
+  if(G.selTower){
+    const t=G.selTower;showRange(t.x,t.y,tstats(t.type,t.level).range,true);
+    // Where the next level would reach (+0.3 tile): a thin gold dash, no fill.
+    if(t.level<3){circle(g,t.x*s,t.y*s,tstats(t.type,t.level+1).range*s);g.globalAlpha=0.6;g.setLineDash([s*0.12,s*0.1]);
+      g.lineWidth=Math.max(1.5,s*0.035);g.strokeStyle='#f3d27a';g.stroke();g.setLineDash([]);g.globalAlpha=1}
+  }
   for(const t of G.towers){
-    const age=G.time-t.born,sc=still||age>=0.25?1:0.6+0.4*(age/0.25);
-    if(sc<1){g.save();g.translate(t.x*s,t.y*s);g.scale(sc,sc);g.translate(-t.x*s,-t.y*s)}
+    // A new tower grows in from 0.6. An upgrade punches out to 1.22 and back over 0.22s (upT). Neither under reduced motion.
+    const age=G.time-t.born;let sc=still||age>=0.25?1:0.6+0.4*(age/0.25);
+    if(!still&&t.upT>0)sc*=1+0.22*Math.sin(Math.PI*(1-t.upT/0.22));
+    if(sc!==1){g.save();g.translate(t.x*s,t.y*s);g.scale(sc,sc);g.translate(-t.x*s,-t.y*s)}
     drawTower(g,t.type,t.level,t.x*s,t.y*s,s,t.ang,t.flash,time);
-    if(sc<1)g.restore();
+    if(sc!==1)g.restore();
     if(t===G.selTower){rr(g,t.c*s+1.5,t.r*s+1.5,s-3,s-3,s*0.14);g.strokeStyle='#f3d27a';g.lineWidth=Math.max(2,s*0.07);g.stroke()}
   }
   // First-run hint tiles: a dashed brass outline that breathes on a 1.2s cycle (held at 0.8 under reduced motion).
@@ -1012,9 +1046,9 @@ function render(time){
     const k=f.t/f.dur;
     if(f.k==='p'){g.globalAlpha=1-k;g.fillStyle=f.c;circle(g,f.x*s,f.y*s,f.r*s*(1-k*0.5));g.fill();g.globalAlpha=1}
     else if(f.k==='ring'){
-      // A ring with r0 grows from r0 to r tiles (held at r under reduced motion); without, from 0.4r to r.
+      // A ring with r0 grows from r0 to r tiles (held at r under reduced motion); without, from 0.4r to r. f.a: starting alpha (0.85).
       const rad=f.r0!=null?(still?f.r:f.r0+(f.r-f.r0)*k):f.r*(0.4+0.6*k);
-      g.globalAlpha=(1-k)*0.85;g.strokeStyle=f.c;g.lineWidth=Math.max(1,s*0.08*(1-k));circle(g,f.x*s,f.y*s,rad*s);g.stroke();g.globalAlpha=1}
+      g.globalAlpha=(1-k)*(f.a??0.85);g.strokeStyle=f.c;g.lineWidth=Math.max(1,s*0.08*(1-k));circle(g,f.x*s,f.y*s,rad*s);g.stroke();g.globalAlpha=1}
     else if(f.k==='bossin'){
       // Two dark rings out of the cave, the second a beat behind, growing from 0.4 to 1.4 tiles (fixed radii under reduced motion).
       g.strokeStyle='#3e2356';
@@ -1104,7 +1138,7 @@ for(const k of TKEYS){
 function paintIcons(){
   const dpr=Math.min(3,window.devicePixelRatio||1);
   for(const k of TKEYS){const c=tbtn[k].querySelector('canvas'),sz=c.clientWidth||34;c.width=sz*dpr;c.height=sz*dpr;
-    const g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,sz,sz);drawTower(g,k,1,sz/2,sz/2+1,sz*0.95,-Math.PI/4,0,0)}
+    const g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,sz,sz);drawTower(g,k,1,sz/2,sz/2+1,sz*1.1,-Math.PI/4,0,0,false)}
 }
 function paintTvIcon(t){
   const c=$('#tvIcon'),dpr=Math.min(3,window.devicePixelRatio||1),sz=44;c.width=sz*dpr;c.height=sz*dpr;
@@ -1171,7 +1205,7 @@ function refreshPanel(){
     if(G.poorWas[k]===true&&!poor)flashClass(b,'ready',600);
     G.poorWas[k]=poor;
   }
-  let coach=false,ready=null;
+  let coach=false,ready=null,place=null;
   if(t){
     const nx=upCost(t),upPoor=t.level<3&&G.gold<nx;
     $('#tvName').textContent=`${TD[t.type].name} · Level ${t.level}`;
@@ -1190,7 +1224,12 @@ function refreshPanel(){
     info.innerHTML=t.level<3?`Next level: <b>${statLine(t.type,t.level+1)}</b>`:`<b>${TD[t.type].desc}</b>`;
   }else{
     G.upWas=null;
-    if(G.sel&&G.pending){const d=TD[G.pending];info.innerHTML=`<b>${d.name}</b> · ${d.desc}<br>${G.gold>=d.cost?'Tap again to build.':'Not enough gold yet.'}`}
+    if(G.sel&&G.pending){
+      // How much road this spot covers, then what a second tap does. fitPlace drops the description if that doesn't fit.
+      const d=TD[G.pending],cov=coverage(G.sel.c,G.sel.r,tstats(G.pending,1).range);
+      const tail=`Covers ${cov.toFixed(1)} tiles of road. ${G.gold>=d.cost?'Tap again to build.':'Not enough gold yet.'}`;
+      place=[`<b>${d.name}</b> · ${d.desc}<br>${tail}`,`<b>${d.name}</b><br>${tail}`,`<b>${d.name}</b> · ${tail}`];info.innerHTML=place[0];
+    }
     else if(G.sel)info.innerHTML='Pick a tower to place here.';
     else if(G.pending&&!G.armKept)ready=G.pending; // written by fitReady once #bWave has its label
     else if(G.wave===0&&!G.towers.length){coach=true;info.innerHTML='<b>Build first:</b> tap a grass tile beside the road.'}
@@ -1203,6 +1242,16 @@ function refreshPanel(){
   else if(activeWaves()){bw.disabled=false;bw.textContent=`Call ${G.wave+1} early`}
   else{bw.disabled=false;bw.textContent=G.wave===0?(sendArmed()?'Send anyway?':'Start wave 1'):`Start wave ${G.wave+1}`}
   if(ready)fitReady(info,ready);
+  if(place)fitPlace(info,place);
+}
+// The placing line must fit #info's 3 lines too. Where the spec line doesn't (narrow phones, longer descriptions), it keeps
+// the tower's name, the coverage and the instruction and drops the description, then also the line break. Cached per line and width.
+let placeFit={key:''};
+function fitPlace(info,lines){
+  const key=lines[0]+':'+info.clientWidth;
+  if(placeFit.key===key){if(info.innerHTML!==placeFit.html)info.innerHTML=placeFit.html;return}
+  for(const h of lines){info.innerHTML=h;if(info.scrollHeight<=info.clientHeight+1)break}
+  placeFit={key,html:info.innerHTML};
 }
 // Wave-1 guard: the first tap on 'Start wave 1' with no towers only warns; a second tap 0.4s-3s later sends it.
 const NO_TOWERS='No towers yet. Enemies will walk straight in.',SEND_GAP=400;
@@ -1267,7 +1316,10 @@ $('#stage').addEventListener('pointerdown',ev=>{if(ev.target!==cv)onBoardTap(-1,
 $('#bUp').addEventListener('click',()=>{
   const t=G.selTower;if(!t||t.level>=3)return;const c=upCost(t);
   if(G.gold<c){toast(`Need ${c-G.gold} more gold`,true);sfx('no');goldShort();return}
-  G.gold-=c;t.spent+=c;if(isCalm())t.refund+=c;t.level++;t.born=G.time;sfx(t.level===3?'up3':'up2');burst(t.x,t.y,'#e3ad45',8,false);G.sellArm=false;refreshPanel();updateHud(true);saveRunIfCalm();
+  G.gold-=c;t.spent+=c;if(isCalm())t.refund+=c;t.level++;
+  // The punch: the tower swells and settles (upT, see render), and a brass ring grows out to the new range.
+  t.upT=0.22;const nr=tstats(t.type,t.level).range;G.fx.push({k:'ring',x:t.x,y:t.y,t:0,dur:0.45,r:nr,r0:nr*0.4,c:'#e3ad45',a:0.8});
+  sfx(t.level===3?'up3':'up2');burst(t.x,t.y,'#e3ad45',8,false);G.sellArm=false;refreshPanel();updateHud(true);saveRunIfCalm();
 });
 $('#bMode').addEventListener('click',()=>{const t=G.selTower;if(!t)return;t.mode=MODES[(MODES.indexOf(t.mode)+1)%MODES.length];G.sellArm=false;refreshPanel();saveRunIfCalm()});
 $('#bSell').addEventListener('click',()=>{
@@ -1426,7 +1478,7 @@ paintIcons();showMenu();requestAnimationFrame(frame);
 
 window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,refreshPanel,sellValue,hintTiles:i=>hintTiles(MAPS[i]),step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
-  CFG,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
+  CFG,tstats,coverage,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
   hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},hurt:(e,d,p,src)=>hurt(e,d,p,src),LIFT,
   drawEnemy:(g,e,s,t)=>drawEnemy(g,e,s,t||0,rm()),drawR:e=>e.r*T*enemyScale(T),bars:()=>hpBars.map(b=>({...b})),render:t=>render(t??performance.now()/1000),keep:()=>keepPos(),cave:()=>cavePos(),bossInfo:()=>bossInfo(),rm,syncOv,toast,menuGuardLeft,spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
 

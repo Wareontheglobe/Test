@@ -2070,6 +2070,232 @@ let BASE;
   }
 
   // ---------------------------------------------------------------
+  // tower-readability-range: a base shape per tower (Longshot diamond, Mortar octagon), bigger level pips, a brass plate edge from level 2,
+  // the level 3 ring on every tower; an upgrade punch (scale, brass ring out to the new range) that keeps t.born; a range preview that
+  // lights the road it covers with a dark-backed edge, 'Covers N tiles of road' in #info, and the next level's ring on a selected tower.
+  // Boards are Meadow Bend with the run stopped (calmBoard), so only __pw.step moves anything.
+  // brass(d, i, tol): pixel i of image data d is within tol of #e3ad45. ringDiff(page, rTiles, cx, cy, setOn, setOff): how many of 360
+  // points on a circle differ by more than 20 in a channel between a render after setOn() and one after setOff().
+  const BRASS_JS = 'const brass = (d, i, tol) => Math.abs(d[i] - 0xe3) <= tol && Math.abs(d[i + 1] - 0xad) <= tol && Math.abs(d[i + 2] - 0x45) <= tol;';
+
+  current = 'tower-readability-range: tower shapes, pips, plate edge and the level 3 ring';
+  {
+    const { ctx, page } = await newPage(browser);
+    // Acceptance: the palette icons masked to non-transparent pixels.
+    const iou = await G(page, () => {
+      const m = {}, n = {};
+      for (const c of document.querySelectorAll('.tw canvas')) { const k = c.parentNode.dataset.t, d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, a = []; for (let i = 3; i < d.length; i += 4) a.push(d[i] > 0 ? 1 : 0); m[k] = a; n[k] = a.reduce((s, v) => s + v, 0); }
+      const io = (a, b) => { let i = 0, u = 0; for (let j = 0; j < a.length; j++) { i += a[j] & b[j]; u += a[j] | b[j]; } return +(i / u).toFixed(3); };
+      return { n, bl: io(m.bolt, m.long), bm: io(m.bolt, m.mortar), ml: io(m.mortar, m.long), bf: io(m.bolt, m.frost), ba: io(m.bolt, m.arc) };
+    });
+    check(iou.bl < 0.85 && iou.bm < 0.9, 'palette canvases masked to non-transparent pixels: IoU(bolt,long) < 0.85 and IoU(bolt,mortar) < 0.9 ' + JSON.stringify(iou));
+    check(Math.min(...Object.values(iou.n)) > 150 && iou.ml < 0.9 && iou.bf < 0.9 && iou.ba < 0.9, 'every icon is drawn, and no two silhouettes match closely');
+    await startMap(page, 1);
+    await calmBoard(page, 0);
+    // Longshot's base is a diamond: solid red just below its centre, plate where a circle's edge would be (the diagonal).
+    const dia = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, at = (x, y) => [...c.getImageData(Math.floor(x), Math.floor(y), 1, 1).data].slice(0, 3);
+      W.build('long', 4, 5); g.towers[0].born = -10; W.render(0); const cx = 4.5 * T, cy = 5.48 * T; const r = { T, below: at(cx, cy + 0.18 * T), diag: at(cx + 0.17 * T, cy + 0.17 * T) }; g.towers = []; g.grid = W.MAPS[1].grid.slice(); return r; });
+    check(near3(dia.below, [0xcf, 0x55, 0x47], 8) && near3(dia.diag, [0x6f, 0x67, 0x50], 8), 'the Longshot base is a red diamond: red 0.18T below its centre, the plate 0.24T out on the diagonal ' + JSON.stringify(dia));
+    // Pips: radius Math.max(2, 0.065T), 0.2T apart. Brass blobs in the bottom 30% of the tile, by level.
+    const blobsAt = new Function('lv', 'type', BRASS_JS + `
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      g.towers = []; g.grid = W.MAPS[1].grid.slice(); W.build(type || 'bolt', 4, 5); const t = g.towers[0]; for (let i = 1; i < lv; i++) W.upgrade(t); t.born = -10; W.render(0);
+      const y0 = Math.ceil(5.7 * T), x0 = 4 * T, w = T, h = 6 * T - y0, d = c.getImageData(x0, y0, w, h).data, m = new Uint8Array(w * h), seen = new Uint8Array(w * h), out = [];
+      for (let i = 0; i < w * h; i++) m[i] = brass(d, i * 4, 20) ? 1 : 0;
+      for (let i = 0; i < w * h; i++) if (m[i] && !seen[i]) { let n = 0, sx = 0; const st = [i]; seen[i] = 1;
+        while (st.length) { const j = st.pop(), x = j % w, y = (j / w) | 0; n++; sx += x;
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) { const X = x + dx, Y = y + dy, k = Y * w + X; if (X >= 0 && Y >= 0 && X < w && Y < h && m[k] && !seen[k]) { seen[k] = 1; st.push(k); } } }
+        out.push({ n, x: sx / n }); }
+      g.towers = []; g.grid = W.MAPS[1].grid.slice(); return { T, all: out, big: out.filter(b => b.n >= 9) };`);
+    const pp = [];
+    for (const lv of [1, 2, 3]) pp.push(await G(page, blobsAt, lv));
+    const gaps = pp[2].big.map(b => b.x).sort((a, b) => a - b);
+    check(pp[0].big.length === 1 && pp[1].big.length === 2 && pp[2].big.length === 3, `390px: a level 1, 2 and 3 bolt show 1, 2 and 3 brass pips (${pp.map(p => p.big.length)})`);
+    check(Math.abs(gaps[1] - gaps[0] - 0.2 * pp[0].T) < 1 && Math.abs(gaps[2] - gaps[1] - 0.2 * pp[0].T) < 1 && pp[0].big[0].n >= Math.floor(Math.PI * (0.065 * pp[0].T) ** 2 * 0.7), 'pips are 0.2T apart with radius 0.065T (' + JSON.stringify(pp[2].big) + ')');
+    // From level 2 the outer plate is stroked #c99a3e instead of ink: its left edge, halfway down.
+    const edge = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, out = {};
+      for (const lv of [1, 2, 3]) { g.towers = []; g.grid = W.MAPS[1].grid.slice(); W.build('bolt', 4, 5); const t = g.towers[0]; for (let i = 1; i < lv; i++) W.upgrade(t); t.born = -10; W.render(0);
+        const x = Math.floor(4.5 * T - 0.42 * T), y = Math.floor(5.51 * T), d = c.getImageData(x - 2, y, 5, 1).data; let best = null;
+        for (let i = 0; i < 20; i += 4) { const p = [d[i], d[i + 1], d[i + 2]], e = Math.max(Math.abs(p[0] - 0xc9), Math.abs(p[1] - 0x9a), Math.abs(p[2] - 0x3e)); if (!best || e < best.e) best = { e, p }; }
+        out['L' + lv] = best; }
+      g.towers = []; g.grid = W.MAPS[1].grid.slice(); return out; });
+    check(edge.L1.e > 60 && edge.L2.e <= 12 && edge.L3.e <= 12, 'the outer plate edge is #c99a3e at levels 2 and 3, and not at level 1 ' + JSON.stringify(edge));
+    // Acceptance: a level 3 Frost draws the brass ring, at 0.35T (outside its hexagon). Level 2 has none; any level 3 tower has one.
+    const ring = await G(page, new Function(BRASS_JS + `
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      const count = (type, lv, rad) => { g.towers = []; g.grid = W.MAPS[1].grid.slice(); W.build(type, 4, 5); const t = g.towers[0]; for (let i = 1; i < lv; i++) W.upgrade(t); t.born = -10; t.ang = Math.PI / 2; W.render(0);
+        let n = 0; const N = 36; // the upper half of the circle, away from the pips (Bolt's barrel points down here)
+        for (let i = 0; i < N; i++) { const a = Math.PI + (i + 0.5) / N * Math.PI, d = c.getImageData(Math.floor(4.5 * T + Math.cos(a) * rad * T), Math.floor(5.48 * T + Math.sin(a) * rad * T), 1, 1).data; if (brass(d, 0, 24)) n++; }
+        return n; };
+      const r = { f3: count('frost', 3, 0.35), f2: count('frost', 2, 0.35), f3in: count('frost', 3, 0.3), b3: count('bolt', 3, 0.3), b2: count('bolt', 2, 0.3), m3: count('mortar', 3, 0.3), l3: count('long', 3, 0.3) };
+      g.towers = []; g.grid = W.MAPS[1].grid.slice(); return r;`));
+    check(ring.f3 >= 30 && ring.f2 === 0, 'a level 3 Frost draws brass pixels at radius 0.35T (none at level 2) ' + JSON.stringify(ring));
+    check(ring.f3in <= 3, 'the Frost ring is at 0.35T, not 0.3T inside its hexagon');
+    check(ring.b3 >= 15 && ring.b2 === 0 && ring.m3 >= 15 && ring.l3 >= 15, 'every level 3 tower has the ring (Bolt, Mortar, Longshot at 0.3T)');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+
+    // Acceptance at 320x568 (T=24): a level 2 bolt has 2 brass blobs of at least 9px in the bottom 30% of its tile.
+    const s = await newPage(browser, { viewport: { width: 320, height: 568 } });
+    await startMap(s.page, 1);
+    await calmBoard(s.page, 0);
+    const small = [];
+    for (const lv of [2, 3]) small.push(await G(s.page, blobsAt, lv));
+    check(small[0].T === 24 && small[0].big.length === 2, `320px: build a bolt, __pw.upgrade it and set born=-10: the bottom 30% of the tile has 2 brass (#e3ad45 ±20) blobs of >=9px ` + JSON.stringify(small[0]));
+    check(small[1].all.filter(b => b.n >= 6).length === 3, '320px: a level 3 bolt shows 3 separate pips ' + JSON.stringify(small[1].all));
+    check(s.page.errors.length === 0, 'no console errors: ' + s.page.errors.join('|'));
+    await s.ctx.close();
+  }
+
+  current = 'tower-readability-range: the upgrade punch';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await calmBoard(page, 0);
+    // Build, let 1s of game time pass (so resetting born would show), select it, then upgrade with #bUp.
+    const b0 = await G(page, () => { const W = window.__pw, g = W.G; W.build('bolt', 4, 5); W.step(1); return g.towers[0].born; });
+    await tapTile(page, 4, 5);
+    await page.click('#bUp');
+    const up = await G(page, () => { const W = window.__pw, g = W.G, t = g.towers[0]; return { level: t.level, born: t.born, time: g.time, upT: t.upT, rings: g.fx.filter(f => f.k === 'ring').map(f => ({ ...f })), range: W.tstats('bolt', 2).range }; });
+    check(up.level === 2 && up.born === b0 && up.time > b0 + 0.9, `upgrade via #bUp: towers[0].born is unchanged (${b0} -> ${up.born}, game time ${up.time})`);
+    check(up.upT > 0 && Math.abs(up.upT - 0.22) < 1e-9, 'towers[0].upT > 0 (0.22) ' + up.upT);
+    const rg = up.rings.find(r => Math.abs(r.r - up.range) < 0.05);
+    check(!!rg, `G.fx has a ring with |r - tstats('bolt',2).range| < 0.05 (range ${up.range}) ` + JSON.stringify(up.rings));
+    check(rg && rg.x === 4.5 && rg.y === 5.5 && rg.c === '#e3ad45' && rg.dur === 0.45 && Math.abs(rg.r0 - 0.4 * rg.r) < 1e-9 && rg.a === 0.8, 'the ring is brass, at the tower, grows from 0.4 to 1.0 of the new range over 0.45s, starting at alpha 0.8 ' + JSON.stringify(rg));
+    // The punch: scale 1 + 0.22*sin(pi*(1-upT/0.22)), so 1 at the start and end and 1.22 halfway. Measured as the tower's drawn area.
+    const area = () => G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, t = g.towers[0];
+      g.selTower = null; g.sel = null; g.fx = []; const b = [Math.round(3.2 * T), Math.round(4.2 * T), Math.round(2.6 * T), Math.round(2.6 * T)];
+      const keep = g.towers; g.towers = []; W.render(0); const bg = c.getImageData(...b).data; g.towers = keep;
+      const n = upT => { t.upT = upT; W.render(0); const d = c.getImageData(...b).data; let k = 0; for (let i = 0; i < d.length; i += 4) if (Math.max(Math.abs(d[i] - bg[i]), Math.abs(d[i + 1] - bg[i + 1]), Math.abs(d[i + 2] - bg[i + 2])) > 30) k++; return k; };
+      const r = { start: n(0.22), mid: n(0.11), late: n(0.03), end: n(0) }; t.upT = 0; return r; });
+    const pa = await area();
+    check(pa.mid > pa.end * 1.3 && pa.late > pa.end && pa.late < pa.mid && Math.abs(pa.start - pa.end) <= pa.end * 0.02, 'in render the tower swells to 1.22x halfway through upT and is back to its size at both ends ' + JSON.stringify(pa));
+    const dec = await G(page, () => { const W = window.__pw, t = W.G.towers[0]; t.upT = 0.22; W.step(0.1); const a = t.upT; W.step(0.2); return [+a.toFixed(4), t.upT]; });
+    check(dec[0] === 0.12 && dec[1] === 0, 'step decays upT and stops at 0 ' + JSON.stringify(dec));
+    // The ring fx: at t=0 it is at 0.4 of the new range; under reduced motion it holds at the full range.
+    const ringAt = () => G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, r = W.tstats('bolt', 2).range;
+      g.selTower = null; g.sel = null; g.fx = []; W.render(0); const bg = c.getImageData(0, 0, cv.width, cv.height).data;
+      g.fx = [{ k: 'ring', x: 4.5, y: 5.5, t: 0, dur: 0.45, r, r0: r * 0.4, c: '#e3ad45', a: 0.8 }]; W.render(0); const d = c.getImageData(0, 0, cv.width, cv.height).data; g.fx = [];
+      const on = rad => { let n = 0; for (let i = 0; i < 90; i++) { const a = i / 90 * Math.PI * 2, k = (Math.floor(5.5 * T + Math.sin(a) * rad * T) * cv.width + Math.floor(4.5 * T + Math.cos(a) * rad * T)) * 4; if (Math.max(Math.abs(d[k] - bg[k]), Math.abs(d[k + 1] - bg[k + 1]), Math.abs(d[k + 2] - bg[k + 2])) > 30) n++; } return n; };
+      return { inner: on(0.4 * r), outer: on(r) }; });
+    const rFull = await ringAt();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const rStill = await ringAt(), paStill = await area();
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    check(rFull.inner >= 80 && rFull.outer === 0, 'the ring starts at 0.4 of the new range ' + JSON.stringify(rFull));
+    check(rStill.outer >= 80 && rStill.inner === 0, 'reduced motion: the ring sits at the new range and only fades ' + JSON.stringify(rStill));
+    check(paStill.mid === paStill.end && paStill.start === paStill.end, 'reduced motion: no punch, the tower keeps its size ' + JSON.stringify(paStill));
+    // A new build still grows in from 0.6.
+    const grow = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, b = [Math.round(5.2 * T), Math.round(8.2 * T), Math.round(2.6 * T), Math.round(2.6 * T)];
+      W.render(0); const bg = c.getImageData(...b).data; W.build('frost', 6, 9); const t = g.towers[g.towers.length - 1];
+      const n = () => { W.render(0); const d = c.getImageData(...b).data; let k = 0; for (let i = 0; i < d.length; i += 4) if (Math.max(Math.abs(d[i] - bg[i]), Math.abs(d[i + 1] - bg[i + 1]), Math.abs(d[i + 2] - bg[i + 2])) > 30) k++; return k; };
+      const fresh = n(); t.born = -10; return { fresh, grown: n() }; });
+    check(grow.fresh < grow.grown * 0.5, 'a new tower still grows in from 0.6 ' + JSON.stringify(grow));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'tower-readability-range: the range preview lights the road it covers';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await G(page, () => { const g = window.__pw.G; g.running = false; g.hintTiles = []; });
+    await tapTile(page, 4, 5); await page.click('.tw[data-t="bolt"]');
+    await page.waitForTimeout(100);
+    const info = await page.$eval('#info', el => ({ text: el.textContent, html: el.innerHTML, fits: el.scrollHeight <= el.clientHeight + 1 }));
+    const want = await G(page, () => { const W = window.__pw, m = W.G.map, pts = []; for (let i = 0; i <= Math.round(m.path.len * 10); i++) { const p = m.path.at(i / 10); if (p.x >= 0 && p.x < W.COLS && p.y >= 0 && p.y < W.ROWS) pts.push(p); }
+      const cov = pts.filter(p => Math.hypot(p.x - 4.5, p.y - 5.5) <= 2.4 + 1e-9).length * 0.1; return { cov, fn: W.coverage(4, 5, 2.4) }; });
+    check(/Covers \d+\.\d tiles of road/.test(info.text), '#info matches /Covers \\d+\\.\\d tiles of road/ (' + info.text + ')');
+    check(Math.abs(want.fn - want.cov) < 1e-9 && info.html === `<b>Bolt</b> · Fast shots. Hits fliers.<br>Covers ${want.cov.toFixed(1)} tiles of road. Tap again to build.` && info.fits, 'coverage() counts the on-board road samples (every 0.1 tile) within range; at 390px #info is the full spec line and fits (' + info.html + ')');
+    // Acceptance: tap (4,5), then Bolt, and render. Pixels are picked where the plain board (no selection) shows bare road colour.
+    const pv = await G(page, () => {
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, Wd = cv.width;
+      const img = () => { W.render(0); return c.getImageData(0, 0, cv.width, cv.height).data; };
+      const sel = g.sel, pend = g.pending; g.sel = null; g.pending = null; const bg = img(); g.sel = sel; g.pending = pend; const on = img();
+      const hex = g.map.theme.path, road = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+      const at = (d, x, y) => { const k = (Math.floor(y) * Wd + Math.floor(x)) * 4; return [d[k], d[k + 1], d[k + 2]]; };
+      const bare = (x, y, tol) => at(bg, x, y).every((v, i) => Math.abs(v - road[i]) <= tol);
+      const find = (tx, ty) => { for (let r = 0; r < 8; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = tx * T + dx, y = ty * T + dy; if (bare(x, y, 2)) return [x, y]; } return null; };
+      const warm = p => p[0] + p[1] - 2 * p[2], lum = p => 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+      const pin = find(4.5, 3.5), pout = find(2.0, 3.5); // both on Meadow's row-3 stretch: 2.0 and 3.2 tiles from the tile centre
+      // The ring (radius 2.4T) where it crosses bare road: the darkest pixel there.
+      const R = 2.4 * T, cx = 4.5 * T, cy = 5.5 * T; let n = 0, min = 1e9;
+      for (let i = 0; i < 1440; i++) { const a = i / 1440 * Math.PI * 2, x = cx + Math.cos(a) * R, y = cy + Math.sin(a) * R; if (!bare(x, y, 8)) continue; n++; min = Math.min(min, lum(at(on, x, y))); }
+      return { pin, pout, wIn: warm(at(on, ...pin)), wOut: warm(at(on, ...pout)), wOutBg: warm(at(bg, ...pout)), wInBg: warm(at(bg, ...pin)), roadLum: lum(road), n, min };
+    });
+    check(pv.pin && pv.pout && pv.wIn - pv.wOut >= 25, `a road pixel inside range is ${pv.wIn - pv.wOut} units warmer (R+G-2B) than one outside (>= 25) ` + JSON.stringify(pv));
+    check(pv.wOut === pv.wOutBg && pv.wIn > pv.wInBg + 25, 'the glow is clipped to the range: road outside it is untouched');
+    check(pv.n >= 20 && pv.min < pv.roadLum - 60, `the ring edge where it crosses the road has luminance ${pv.min.toFixed(1)} < road luminance ${pv.roadLum.toFixed(1)} - 60 (${pv.n} points on bare road)`);
+    // The dash on top: #fff6d8 over the dark backing. Unaffordable: red fill and glow, #ff9a85 dash, and 'Not enough gold yet.'
+    const dash = ok => G(page, ([ok, pin, pout]) => { const W = window.__pw, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS; W.render(0);
+      const R = 2.4 * T, want = ok ? [0xff, 0xf6, 0xd8] : [0xff, 0x9a, 0x85]; let n = 0;
+      for (let i = 0; i < 720; i++) { const a = i / 720 * Math.PI * 2, d = c.getImageData(Math.floor(4.5 * T + Math.cos(a) * R), Math.floor(5.5 * T + Math.sin(a) * R), 1, 1).data; if (Math.abs(d[0] - want[0]) <= 24 && Math.abs(d[1] - want[1]) <= 24 && Math.abs(d[2] - want[2]) <= 24) n++; }
+      const p = q => [...c.getImageData(Math.floor(q[0]), Math.floor(q[1]), 1, 1).data].slice(0, 3); return { n, road: p(pin), out: p(pout) }; }, [ok, pv.pin, pv.pout]);
+    const okD = await dash(true);
+    await setGold(page, 10);
+    const poorInfo = await text(page, '#info'), poorD = await dash(false);
+    check(okD.n > 120 && poorD.n > 120, 'the edge is dashed #fff6d8, or #ff9a85 when the tower is unaffordable ' + JSON.stringify({ ok: okD.n, poor: poorD.n }));
+    check(/Covers \d+\.\d tiles of road\. Not enough gold yet\.$/.test(poorInfo), 'unaffordable: "Covers N tiles of road. Not enough gold yet." (' + poorInfo + ')');
+    check(poorD.road[1] < poorD.out[1] - 30 && poorD.road[0] >= poorD.out[0] - 5 && okD.road[2] < okD.out[2], 'and the covered road turns red instead of gold ' + JSON.stringify({ ok: okD, poor: poorD }));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+  for (const vp of [{ width: 320, height: 568 }, { width: 390, height: 780 }]) {
+    // The placing line beside every wave button label, for every tower, affordable or not: it fits #info and keeps the name, coverage and instruction.
+    const { ctx, page } = await newPage(browser, { viewport: vp });
+    await startMap(page, 1);
+    const res = await G(page, () => {
+      const W = window.__pw, g = W.G, info = document.querySelector('#info'), bw = document.querySelector('#bWave'), out = [];
+      g.running = false; g.hintTiles = [];
+      const states = { 'Start wave 1': () => { g.wave = 0; g.W = {}; g.spawnQ = []; g.sendArmAt = 0; }, 'Send anyway?': () => { g.wave = 0; g.W = {}; g.spawnQ = []; g.sendArmAt = performance.now(); }, 'Call 12 early': () => { g.wave = 11; g.W = { 11: { rem: 0, alive: 1 } }; g.spawnQ = []; } };
+      for (const gold of [9999, 0]) for (const [label, set] of Object.entries(states)) for (const k of Object.keys(W.TD)) {
+        set(); g.gold = gold; g.selTower = null; g.sel = { c: 4, r: 5 }; g.pending = k; W.refreshPanel();
+        const tx = info.textContent;
+        out.push({ label: bw.textContent, k, fits: info.scrollHeight <= info.clientHeight + 1, name: tx.startsWith(W.TD[k].name), cov: /Covers \d+\.\d tiles of road\. /.test(tx), end: tx.endsWith(gold ? 'Tap again to build.' : 'Not enough gold yet.'), full: tx.includes(W.TD[k].desc) });
+      }
+      g.sel = null; g.pending = null; g.W = {}; g.wave = 0; W.refreshPanel();
+      return out;
+    });
+    const bad = res.filter(r => !r.fits || !r.name || !r.cov || !r.end);
+    check(bad.length === 0 && res.length === 30, `${vp.width}px: for every tower and wave button label, the placing line fits #info and keeps the name, 'Covers N tiles of road.' and the instruction ` + JSON.stringify(bad.slice(0, 3)));
+    if (vp.width === 390) check(res.filter(r => r.label === 'Start wave 1' && r.k !== 'long').every(r => r.full), '390px beside Start wave 1: the description is kept for every tower but Longshot');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'tower-readability-range: a selected tower shows where its next level reaches';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await calmBoard(page, 0);
+    await G(page, () => { const W = window.__pw; W.build('bolt', 4, 5); W.G.towers[0].born = -10; });
+    await tapTile(page, 4, 5);
+    check(await G(page, () => window.__pw.G.selTower === window.__pw.G.towers[0]), 'the level 1 bolt is selected');
+    // ringDiff(rad): of 360 points on a circle of rad tiles round the tower, how many differ (> 20 in a channel) from the frame with no selection.
+    const ringDiff = rads => G(page, rads => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, t = g.towers[0];
+      const img = () => { W.render(0); return c.getImageData(0, 0, cv.width, cv.height).data; };
+      const on = img(), s = g.selTower; g.selTower = null; const off = img(); g.selTower = s;
+      return rads.map(rad => { let n = 0; for (let i = 0; i < 360; i++) { const a = i / 360 * Math.PI * 2, k = (Math.floor(t.y * T + Math.sin(a) * rad * T) * cv.width + Math.floor(t.x * T + Math.cos(a) * rad * T)) * 4;
+        if (Math.max(Math.abs(on[k] - off[k]), Math.abs(on[k + 1] - off[k + 1]), Math.abs(on[k + 2] - off[k + 2])) > 20) n++; } return n; }); }, rads);
+    const l1 = await ringDiff([2.4 + 0.3, 2.4 + 0.6]);
+    check(l1[0] >= 120, `select a level 1 tower and render: pixels on radius range+0.3 differ from the frame with no selection (${l1[0]} of 360)`);
+    check(l1[1] === 0, 'nothing is drawn further out (range+0.6) ' + l1[1]);
+    const col = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      const img = () => { W.render(0); return c.getImageData(0, 0, cv.width, cv.height).data; }, on = img(), s = g.selTower; g.selTower = null; const off = img(); g.selTower = s;
+      const goldish = (d, k) => d[k] > d[k + 2] + 60 && d[k + 1] > d[k + 2] + 30; let gold = 0;
+      for (let i = 0; i < 360; i++) { const a = i / 360 * Math.PI * 2, k = (Math.floor(5.5 * T + Math.sin(a) * 2.7 * T) * cv.width + Math.floor(4.5 * T + Math.cos(a) * 2.7 * T)) * 4; if (goldish(on, k) && !goldish(off, k)) gold++; } return gold; });
+    check(col >= 80, 'the next-level ring is a gold (#f3d27a) dash: points on grass that turn gold ' + col);
+    await G(page, () => { const W = window.__pw; W.upgrade(W.G.towers[0]); });
+    const l2 = await ringDiff([2.7 + 0.3, 2.7]);
+    check(l2[0] >= 90 && l2[1] > 60, 'at level 2 the ring moves out to the level 3 range, and the current range is 2.7 ' + JSON.stringify(l2));
+    await G(page, () => { const W = window.__pw; W.upgrade(W.G.towers[0]); });
+    const l3 = await ringDiff([3.0 + 0.3]);
+    check(l3[0] === 0, 'a level 3 tower has no next-level ring ' + l3[0]);
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------
   current = 'long run soak (30 waves, all roads)';
   for (let mi = 0; mi < 3; mi++) {
     const { ctx, page } = await newPage(browser);
