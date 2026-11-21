@@ -37,7 +37,7 @@
 }
 *,*::before,*::after{box-sizing:border-box}
 html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
-body{background:var(--bg);color:var(--ink);font:14px/1.35 var(--font-body);
+body{background:var(--bg);color:var(--ink);font:14px/1.35 var(--font-body);touch-action:manipulation;
   -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
 [hidden]{display:none!important}
 button{font:inherit;color:inherit;touch-action:manipulation;cursor:pointer;border:0;background:none;padding:0}
@@ -137,6 +137,15 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .link{color:var(--muted);text-decoration:underline;font-size:12px}
 
 @media (prefers-reduced-motion:reduce){#toast{transition:none}}
+/* Short landscape screens: board on the left, HUD and controls stacked on the right. */
+@media (orientation:landscape) and (max-height:560px){
+  #app{display:grid;max-width:none;grid-template-columns:minmax(0,1fr) minmax(300px,360px);grid-template-rows:auto minmax(0,1fr);
+    grid-template-areas:"stage hud" "stage panel";column-gap:16px}
+  #hud{grid-area:hud}
+  #stage{grid-area:stage}
+  #panel{grid-area:panel;justify-content:flex-end}
+}
+@media (max-width:360px){.tw .nm{font-size:10px;letter-spacing:-.02em}.tw{padding-inline:0}}
 @media (min-height:820px){.tw canvas{width:40px;height:40px}#pbody{height:104px}}
 </style>
 </head>
@@ -150,7 +159,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     <button class="hbtn" id="bSpeed" aria-label="Game speed">1×</button>
     <button class="hbtn" id="bPause" aria-label="Pause"><svg viewBox="0 0 16 16"><rect x="3" y="2" width="3.6" height="12" rx="1" fill="currentColor"/><rect x="9.4" y="2" width="3.6" height="12" rx="1" fill="currentColor"/></svg></button>
   </header>
-  <div id="stage"><canvas id="cv"></canvas><div id="toast"></div></div>
+  <div id="stage"><canvas id="cv" aria-label="Game board"></canvas><div id="toast"></div></div>
   <footer id="panel">
     <div id="phead"><div id="info"></div><button id="bWave">Start wave 1</button></div>
     <div id="pbody">
@@ -214,7 +223,7 @@ const MAPS=[
    theme:{g1:'#7a8f3f',g2:'#73883a',path:'#e0cf9c',edge:'#a8915d',deco:'#56692a',flower:'#f3a6a0'}},
   {id:'meadow',name:'Meadow Bend',diff:'Normal',hp:1.0,pts:[[1,-1],[1,3],[7,3],[7,7],[1,7],[1,11],[7,11],[7,14]],
    theme:{g1:'#6b8f3e',g2:'#648839',path:'#dcc690',edge:'#a68c59',deco:'#4c6b2b',flower:'#f1d36b'}},
-  {id:'quarry',name:'Quarry Run',diff:'Hard',hp:1.15,pts:[[4,-1],[4,3],[1,3],[1,8],[7,8],[7,14]],
+  {id:'quarry',name:'Quarry Run',diff:'Hard',hp:1.05,pts:[[4,-1],[4,3],[1,3],[1,8],[7,8],[7,14]],
    theme:{g1:'#79814f',g2:'#717948',path:'#cfc2a4',edge:'#8c8166',deco:'#5a613e',flower:'#d9d3c1'}},
 ];
 const TD={
@@ -266,9 +275,25 @@ for(const m of MAPS){
 
 /* ---------- storage ---------- */
 const STORE='pathwarden.v1';
-let S={};
-try{S=JSON.parse(localStorage.getItem(STORE))||{}}catch(e){S={}}
-S.best=S.best||{};
+let S=null;
+try{S=JSON.parse(localStorage.getItem(STORE))}catch(e){S=null}
+if(!S||typeof S!=='object'||Array.isArray(S))S={};
+if(!S.best||typeof S.best!=='object'||Array.isArray(S.best))S.best={};
+S.save=validSave(S.save);
+// Drop anything in a stored run that this version can't rebuild, rather than failing to start.
+function validSave(sv){
+  if(!sv||typeof sv!=='object')return undefined;
+  const map=MAPS.find(m=>m.id===sv.map),int=(v,min)=>Number.isInteger(v)&&v>=min;
+  if(!map||!int(sv.wave,0)||!int(sv.gold,0)||!int(sv.lives,1))return undefined;
+  const seen=new Set();
+  sv.towers=(Array.isArray(sv.towers)?sv.towers:[]).filter(t=>{
+    if(!t||!TD[t.type]||!int(t.c,0)||!int(t.r,0)||t.c>=COLS||t.r>=ROWS)return false;
+    const k=t.r*COLS+t.c;if(map.grid[k]===1||seen.has(k))return false;seen.add(k);return true;
+  }).map(t=>({type:t.type,c:t.c,r:t.r,level:[1,2,3].includes(t.level)?t.level:1,
+    spent:Number.isFinite(t.spent)&&t.spent>0?Math.round(t.spent):TD[t.type].cost,mode:MODES.includes(t.mode)?t.mode:undefined}));
+  sv.won=!!sv.won;
+  return sv;
+}
 function persist(){try{localStorage.setItem(STORE,JSON.stringify(S))}catch(e){}}
 
 /* ---------- audio ---------- */
@@ -307,14 +332,15 @@ function sfx(name){
 }
 
 /* ---------- game state ---------- */
-let G=null;
+let G=null,speedPref=1;
 function newGame(map,save){
   G={map,grid:map.grid.slice(),wave:0,gold:CFG.startGold,lives:20,towers:[],enemies:[],projs:[],fx:[],spawnQ:[],W:{},time:0,
-     speed:1,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,sellArm:false,gateFlash:0,running:true};
+     speed:speedPref,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,sellArm:false,gateFlash:0,running:true};
   if(save){
     G.wave=save.wave;G.cleared=save.wave;G.gold=save.gold;G.lives=save.lives;G.won=!!save.won;
     for(const t of save.towers)placeTower(t.type,t.c,t.r,t.level,t.spent,t.mode);
   }
+  $('#bSpeed').textContent=G.speed+'×';
   layout();refreshPanel();updateHud(true);
 }
 function placeTower(type,c,r,level,spent,mode){
@@ -434,7 +460,7 @@ function fire(t,e,st){
     for(let i=0;i<st.chain&&cur;i++){
       hit.add(cur);pts.push({x:cur.x,y:cur.y-(cur.fly?0.25:0)});hurt(cur,dmg);dmg*=0.85;
       let nx=null,nd=1.7*1.7;
-      for(const o of G.enemies){if(o.dead||hit.has(o))continue;const d2=(o.x-cur.x)**2+(o.y-cur.y)**2;if(d2<nd){nd=d2;nx=o}}
+      for(const o of G.enemies){if(o.dead||hit.has(o)||o.dist<0.1)continue;const d2=(o.x-cur.x)**2+(o.y-cur.y)**2;if(d2<nd){nd=d2;nx=o}}
       cur=nx;
     }
     G.fx.push({k:'zap',pts,t:0,dur:0.18,seed:Math.random()*1000});sfx('arc');
@@ -474,7 +500,7 @@ function step(dt){
     if(p.k==='shell'){
       p.t+=dt;
       if(p.t>=p.dur){p.done=true;
-        for(const e of G.enemies){if(e.dead||e.fly)continue;if(Math.hypot(e.x-p.tx,e.y-p.ty)<=p.splash+e.r*0.5)hurt(e,p.dmg)}
+        for(const e of G.enemies.slice()){if(e.dead||e.fly)continue;if(Math.hypot(e.x-p.tx,e.y-p.ty)<=p.splash+e.r*0.5)hurt(e,p.dmg)}
         G.fx.push({k:'ring',x:p.tx,y:p.ty,t:0,dur:0.35,r:p.splash,c:'#ffcf7a'});burst(p.tx,p.ty,'#8a7a5a',5,false);sfx('boom');
       }
       continue;
@@ -487,7 +513,7 @@ function step(dt){
       p.done=true;
       if(p.k==='bolt')hurt(e,p.dmg);
       else{
-        for(const o of G.enemies){if(o.dead)continue;if(Math.hypot(o.x-e.x,o.y-e.y)<=p.splash){o.slow=Math.max(o.slow,p.slow*(o.d.boss?0.5:1));o.slowT=p.slowDur;hurt(o,p.dmg)}}
+        for(const o of G.enemies.slice()){if(o.dead||o.dist<0.1)continue;if(Math.hypot(o.x-e.x,o.y-e.y)<=p.splash){o.slow=Math.max(o.slow,p.slow*(o.d.boss?0.5:1));o.slowT=p.slowDur;hurt(o,p.dmg)}}
         G.fx.push({k:'ring',x:e.x,y:e.y,t:0,dur:0.3,r:p.splash,c:'#c9f3ff'});
       }
     }else{p.x+=dx/d*mv;p.y+=dy/d*mv}
@@ -791,7 +817,7 @@ function updateHud(force){
   if(!force&&v.l===hudCache.l&&v.g===hudCache.g&&v.w===hudCache.w)return;
   const goldChanged=v.g!==hudCache.g;hudCache=v;
   $('#sLives span').textContent=G.lives;$('#sGold span').textContent=G.gold;
-  $('#sWave').innerHTML=`Wave&nbsp;<b>${G.wave}</b>/${FINAL_WAVE}`;
+  $('#sWave').innerHTML=G.wave>FINAL_WAVE?`Wave&nbsp;<b>${G.wave}</b>`:`Wave&nbsp;<b>${G.wave}</b>/${FINAL_WAVE}`;
   if(goldChanged||force)refreshPanel();
 }
 function deselect(){G.sel=null;G.selTower=null;G.pending=null;G.sellArm=false}
@@ -804,7 +830,7 @@ function tryBuild(){
   const k=G.pending,{c,r}=G.sel,d=TD[k];
   if(G.gold<d.cost){toast(`Need ${d.cost-G.gold} more gold`,true);sfx('no');return}
   G.gold-=d.cost;placeTower(k,c,r);sfx('build');burst(c+0.5,r+0.6,'#d8c99f',6,false);
-  G.sel=null;G.pending=null;refreshPanel();updateHud(true);
+  G.sel=null;G.pending=null;refreshPanel();updateHud(true);saveRunIfCalm();
 }
 function onBoardTap(c,r){
   audioInit();if(!G||G.over)return;
@@ -815,6 +841,8 @@ function onBoardTap(c,r){
   if(G.sel&&G.sel.c===c&&G.sel.r===r){if(G.pending)tryBuild();else{deselect();refreshPanel()}return}
   const keep=G.pending;G.selTower=null;G.sellArm=false;G.sel={c,r};G.pending=keep;refreshPanel();
 }
+cv.addEventListener('contextmenu',ev=>ev.preventDefault());
+document.addEventListener('gesturestart',ev=>ev.preventDefault());
 cv.addEventListener('pointerdown',ev=>{
   const b=cv.getBoundingClientRect();
   onBoardTap(Math.floor((ev.clientX-b.left)/T),Math.floor((ev.clientY-b.top)/T));
@@ -823,17 +851,17 @@ cv.addEventListener('pointerdown',ev=>{
 $('#bUp').addEventListener('click',()=>{
   const t=G.selTower;if(!t||t.level>=3)return;const c=upCost(t);
   if(G.gold<c){toast(`Need ${c-G.gold} more gold`,true);sfx('no');return}
-  G.gold-=c;t.spent+=c;t.level++;t.born=G.time;sfx('build');burst(t.x,t.y,'#e3ad45',8,false);G.sellArm=false;refreshPanel();updateHud(true);
+  G.gold-=c;t.spent+=c;t.level++;t.born=G.time;sfx('build');burst(t.x,t.y,'#e3ad45',8,false);G.sellArm=false;refreshPanel();updateHud(true);saveRunIfCalm();
 });
-$('#bMode').addEventListener('click',()=>{const t=G.selTower;if(!t)return;t.mode=MODES[(MODES.indexOf(t.mode)+1)%MODES.length];G.sellArm=false;refreshPanel()});
+$('#bMode').addEventListener('click',()=>{const t=G.selTower;if(!t)return;t.mode=MODES[(MODES.indexOf(t.mode)+1)%MODES.length];G.sellArm=false;refreshPanel();saveRunIfCalm()});
 $('#bSell').addEventListener('click',()=>{
   const t=G.selTower;if(!t)return;
   if(!G.sellArm){G.sellArm=true;refreshPanel();return}
   G.gold+=sellValue(t);G.towers=G.towers.filter(x=>x!==t);G.grid[t.r*COLS+t.c]=0;burst(t.x,t.y,'#8a7a5a',8,false);sfx('sell');
-  deselect();refreshPanel();updateHud(true);
+  deselect();refreshPanel();updateHud(true);saveRunIfCalm();
 });
 $('#bWave').addEventListener('click',()=>{audioInit();startWave();updateHud(true)});
-$('#bSpeed').addEventListener('click',()=>{if(!G)return;G.speed=G.speed===1?2:G.speed===2?3:1;$('#bSpeed').textContent=G.speed+'×'});
+$('#bSpeed').addEventListener('click',()=>{if(!G)return;G.speed=speedPref=G.speed===1?2:G.speed===2?3:1;$('#bSpeed').textContent=G.speed+'×'});
 function setPause(p){
   if(!G||G.over)return;G.paused=p;$('#pauseOv').hidden=!p;
   if(p)$('#pauseInfo').textContent=`${G.map.name} · wave ${G.wave}`;
@@ -842,7 +870,7 @@ $('#bPause').addEventListener('click',()=>setPause(true));
 $('#bResume').addEventListener('click',()=>setPause(false));
 $('#bRestart').addEventListener('click',()=>{const m=G.map;delete S.save;persist();$('#pauseOv').hidden=true;newGame(m)});
 $('#bMenu').addEventListener('click',()=>{saveRunIfCalm();$('#pauseOv').hidden=true;showMenu()});
-function saveRunIfCalm(){if(G&&!G.over&&!activeWaves()&&!G.spawnQ.length)saveRun()}
+function saveRunIfCalm(){if(G&&G.running&&!G.over&&!activeWaves()&&!G.spawnQ.length)saveRun()}
 $('#bEndMain').addEventListener('click',()=>{
   $('#endOv').hidden=true;
   if(G.won&&!G.over){G.paused=false;refreshPanel();return}
@@ -851,7 +879,10 @@ $('#bEndMain').addEventListener('click',()=>{
 $('#bEndAlt').addEventListener('click',()=>{$('#endOv').hidden=true;showMenu()});
 function syncMute(){const t=`Sound: ${AU.on?'on':'off'}`;$('#bMute').textContent=t;$('#bMute2').textContent=t}
 for(const id of ['#bMute','#bMute2'])$(id).addEventListener('click',()=>{AU.on=!AU.on;S.muted=!AU.on;persist();syncMute();audioInit()});
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&G&&G.running&&!G.paused&&!G.over&&$('#menu').hidden)setPause(true)});
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden||!G||!G.running||G.over||!$('#menu').hidden)return;
+  saveRunIfCalm();if(!G.paused)setPause(true);
+});
 
 function showMenu(){
   if(G){G.running=false}
@@ -898,7 +929,8 @@ paintIcons();showMenu();requestAnimationFrame(frame);
 
 window.__pw={get G(){return G},step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
-  CFG,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS};
+  CFG,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
+  hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},render:()=>render(performance.now()/1000),spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
 
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
   window.addEventListener('load',()=>{try{navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){}});
