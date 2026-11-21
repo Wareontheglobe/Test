@@ -496,6 +496,226 @@ let BASE;
   }
 
   // ---------------------------------------------------------------
+  // phone-basics: reduced motion, toast at the bottom, dialogs and focus, keys, back gesture, remembered speed, toggles, labels.
+  const rect = (page, sel) => page.$eval(sel, el => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; });
+  const active = page => G(page, () => { const a = document.activeElement; return { id: a.id, tag: a.tagName, inMenu: !!a.closest('#menu'), inPause: !!a.closest('#pauseOv'), inEnd: !!a.closest('#endOv'), ring: a.matches(':focus-visible') }; });
+  const tileHash = (page, c, r, t) => G(page, ([c, r, t]) => { const W = window.__pw; W.render(t === null ? undefined : t); const cv = document.querySelector('#cv'); const T = cv.width / W.COLS; const d = cv.getContext('2d').getImageData(Math.round(c * T), Math.round(r * T), Math.round(T), Math.round(T)).data; let h = 2166136261; for (let i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 16777619); } return h >>> 0; }, [c, r, t]);
+
+  current = 'phone-basics: toast, dialogs, focus and keys';
+  {
+    const { ctx, page } = await newPage(browser);
+    check(await page.$eval('#toast', el => el.getAttribute('role') === 'status' && el.getAttribute('aria-live') === 'polite'), '#toast has role=status and aria-live=polite');
+    const dlg = await page.evaluate(() => ['#menu', '#pauseOv', '#endOv'].map(s => { const o = document.querySelector(s), l = document.getElementById(o.getAttribute('aria-labelledby') || '-'); return o.getAttribute('role') === 'dialog' && o.getAttribute('aria-modal') === 'true' && !!l && o.contains(l) && l.textContent.trim().length > 0; }));
+    check(dlg.every(Boolean), 'menu, pause and end overlays are labelled modal dialogs ' + JSON.stringify(dlg));
+    check(await page.$eval('#menuTitle', el => el.textContent === 'Pathwarden') && await page.$eval('#pauseTitle', el => el.textContent === 'Paused'), 'dialog titles menuTitle and pauseTitle');
+    let a = await active(page);
+    check(a.inMenu && !a.ring, 'on load focus is in the menu with no focus ring ' + JSON.stringify(a));
+    await page.keyboard.press('Tab');
+    a = await active(page);
+    check(a.inMenu && (await G(page, () => document.querySelector('#app').inert === true)), 'Tab on load: activeElement inside #menu and #app.inert ' + JSON.stringify(a));
+    check(a.ring, 'keyboard focus shows a focus ring');
+    await page.keyboard.press('Escape');
+    check(!(await hidden(page, '#menu')) && !(await G(page, () => window.__pw.G.paused)), 'Escape on the menu does nothing');
+
+    await startMap(page, 2); // Quarry Run
+    check((await G(page, () => document.querySelector('#app').inert)) === false, 'starting a road clears #app.inert');
+    await page.click('#bWave');
+    await page.waitForTimeout(250);
+    const ts = await rect(page, '#toast'), cv = await rect(page, '#cv');
+    check((await text(page, '#toast')) === 'Wave 1' && (await page.$eval('#toast', el => el.classList.contains('show'))), 'wave 1 toast showing');
+    check(ts.top > cv.top + cv.height / 2 && ts.bottom <= cv.bottom, `toast sits in the bottom half of the board (toast ${Math.round(ts.top)}-${Math.round(ts.bottom)}, board ${Math.round(cv.top)}-${Math.round(cv.bottom)})`);
+    check(Math.abs(ts.bottom - (cv.bottom - 10)) <= 1 && ts.left >= cv.left && ts.right <= cv.right, 'toast is 10px above the board bottom and inside it horizontally');
+    check(await page.$eval('#toast', (el, w) => parseFloat(el.style.maxWidth) === w - 24 && getComputedStyle(el).textOverflow === 'ellipsis', cv.width), 'toast max-width is board width - 24 with ellipsis');
+
+    await page.keyboard.press('Escape');
+    a = await active(page);
+    check((await G(page, () => window.__pw.G.paused)) && !(await hidden(page, '#pauseOv')), 'Escape pauses and shows #pauseOv');
+    check(a.inPause && (await G(page, () => document.querySelector('#app').inert === true)), 'focus moves into #pauseOv and the game is inert ' + JSON.stringify(a));
+    await page.keyboard.press('Escape');
+    a = await active(page);
+    check(!(await G(page, () => window.__pw.G.paused)) && (await hidden(page, '#pauseOv')), 'Escape again unpauses');
+    check(a.id === 'bPause', 'closing pause focuses #bPause (' + a.id + ')');
+    await page.keyboard.press('p');
+    check((await G(page, () => window.__pw.G.paused)) && !(await hidden(page, '#pauseOv')), 'P pauses');
+    await page.keyboard.press('P');
+    check(!(await G(page, () => window.__pw.G.paused)), 'P again unpauses');
+    await page.click('#bPause');
+    check((await active(page)).id === 'bResume' && !(await active(page)).ring, 'tapping Pause focuses Resume without a ring');
+    await page.click('#bResume');
+    check((await active(page)).id === 'bPause', 'Resume returns focus to #bPause');
+
+    // Keys 1-5 pick towers from the palette.
+    await G(page, () => { document.activeElement.blur(); window.__pw.G.running = false; window.__pw.G.gold = 500; });
+    await page.waitForTimeout(100); // let the HUD pick up the gold change before the hint is written
+    await page.keyboard.press('2');
+    check((await text(page, '#info')).startsWith('Mortar') && (await text(page, '#info')).includes('Tap a grass tile first'), 'key 2 with no tile explains Mortar (' + (await text(page, '#info')) + ')');
+    await tapTile(page, 2, 2);
+    await page.keyboard.press('3');
+    check((await G(page, () => window.__pw.G.pending)) === 'frost', 'key 3 arms Frost');
+    await page.keyboard.press('3');
+    check((await G(page, () => window.__pw.G.towers.map(t => t.type).join())) === 'frost', 'key 3 again builds Frost');
+
+    // Back while the end overlay is up does nothing; the end overlay takes focus.
+    await G(page, () => { const W = window.__pw, g = W.G; g.running = true; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); for (let i = 0; i < 30 && !g.over; i++) W.step(1 / 30); });
+    a = await active(page);
+    check((await G(page, () => window.__pw.G.over)) && a.id === 'bEndMain' && a.inEnd, 'game over moves focus to Try again ' + JSON.stringify(a));
+    await page.keyboard.press('Escape');
+    check(await hidden(page, '#pauseOv'), 'Escape does not pause behind the end overlay');
+    await G(page, () => window.dispatchEvent(new PopStateEvent('popstate', { state: null })));
+    check(await hidden(page, '#pauseOv') && !(await hidden(page, '#endOv')), 'popstate after game over does nothing');
+    await page.click('#bEndMain');
+    check((await G(page, () => history.state && history.state.pw)) === 'game' && !(await G(page, () => document.querySelector('#app').inert)), 'Try again keeps the run entry and clears inert');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'phone-basics: back gesture pauses instead of leaving';
+  {
+    const { ctx, page } = await newPage(browser);
+    const len0 = await G(page, () => history.length);
+    await startMap(page, 1);
+    check((await G(page, () => history.state && history.state.pw)) === 'game', "starting a road pushes history.state.pw==='game'");
+    const len1 = await G(page, () => history.length);
+    const url = page.url();
+    await page.goBack(); await page.waitForTimeout(80);
+    check(!(await hidden(page, '#pauseOv')) && (await G(page, () => window.__pw.G.paused)), 'back pauses and shows #pauseOv');
+    check(page.url() === url && (await G(page, () => !window.__pw.G.over)), 'URL unchanged and the run goes on (G.over false)');
+    check((await G(page, () => history.state && history.state.pw)) === 'game', 'the run entry is pushed again after back');
+    await page.goBack(); await page.waitForTimeout(80);
+    check(!(await G(page, () => window.__pw.G.paused)) && (await hidden(page, '#pauseOv')), 'back again unpauses');
+    check(page.url() === url && (await G(page, () => history.length)) === len1, 'still on the page with no extra history entries');
+    await page.click('#bPause'); await page.click('#bMenu'); await page.waitForTimeout(80);
+    check(!(await hidden(page, '#menu')) && (await G(page, () => history.state === null)), 'Main menu pops the run entry');
+    await G(page, () => window.dispatchEvent(new PopStateEvent('popstate', { state: null })));
+    check(!(await hidden(page, '#menu')) && (await hidden(page, '#pauseOv')), 'popstate on the menu does nothing');
+    await startMap(page, 1);
+    check((await G(page, () => history.state && history.state.pw)) === 'game' && (await G(page, () => history.length)) === len1, 'a second run reuses the entry instead of growing history');
+    check(len1 === len0 + 1, `one entry per run (${len0} -> ${len1})`);
+    // Reload mid-run: the stale run entry is popped on the menu, and Continue pushes it again.
+    await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    await page.reload(); await page.waitForTimeout(250);
+    check(!(await hidden(page, '#menu')) && (await G(page, () => history.state === null)), 'after a reload the menu pops the stale run entry');
+    await page.click('#bContinue'); await page.waitForTimeout(50);
+    check((await G(page, () => history.state && history.state.pw)) === 'game' && (await G(page, () => history.length)) === len1, 'Continue pushes the run entry');
+    await page.goBack(); await page.waitForTimeout(80);
+    check(!(await hidden(page, '#pauseOv')) && page.url() === url, 'back pauses a continued run');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'phone-basics: remembered speed, labels and toggles';
+  {
+    const { ctx, page } = await newPage(browser, { init: () => { Object.defineProperty(Navigator.prototype, 'vibrate', { configurable: true, value: function (p) { (window.__vib = window.__vib || []).push(p); return true; } }); } });
+    const mute = await rect(page, '#bMute');
+    check(mute.height >= 40 && (await page.$eval('#bMute', el => el.textContent.trim())) === 'Sound: on', `#bMute is ${mute.height}px tall and reads "Sound: on"`);
+    check(await page.$eval('#bMute', el => el.classList.contains('pill') && !!el.querySelector('svg[aria-hidden="true"]')), 'sound toggle is a pill with a hidden speaker icon');
+    check(!(await hidden(page, '#bVibe')) && (await text(page, '#bVibe')) === 'Vibration: on' && (await rect(page, '#bVibe')).height >= 40, 'Vibration pill shown when the phone can vibrate');
+    await page.click('#bMute');
+    check((await text(page, '#bMute')) === 'Sound: off' && (await text(page, '#bMute2')) === 'Sound: off' && (await stored(page)).muted === true, 'sound toggles off, both pills agree, saved');
+    await page.click('#bMute');
+    await page.click('#bVibe');
+    check((await text(page, '#bVibe')) === 'Vibration: off' && (await text(page, '#bVibe2')) === 'Vibration: off' && (await stored(page)).vibe === false, 'vibration toggles off and is saved as S.vibe=false');
+    await page.click('#bVibe');
+    check((await stored(page)).vibe === true, 'vibration back on');
+
+    await startMap(page, 1);
+    check(await page.$eval('#cv', el => el.getAttribute('role') === 'img'), '#cv has role=img');
+    check(await page.$eval('#sLives', el => el.getAttribute('role') === 'img' && el.getAttribute('aria-label') === '20 lives') && await page.$eval('#sGold', el => el.getAttribute('role') === 'img' && el.getAttribute('aria-label') === '200 gold'), 'lives and gold have role=img with "20 lives" / "200 gold"');
+    await G(page, () => { window.__pw.G.gold = 345; window.__pw.G.lives = 7; });
+    await page.waitForTimeout(80);
+    check((await page.$eval('#sGold', el => el.getAttribute('aria-label'))) === '345 gold' && (await page.$eval('#sLives', el => el.getAttribute('aria-label'))) === '7 lives', 'HUD labels follow lives and gold');
+    check((await page.$eval('#bSpeed', el => el.getAttribute('aria-label'))).includes('1×'), '#bSpeed aria-label contains 1×');
+    await page.click('#bSpeed');
+    check((await page.$eval('#bSpeed', el => el.getAttribute('aria-label'))) === 'Game speed 2×', '#bSpeed aria-label after one click is "Game speed 2×"');
+    await page.click('#bSpeed');
+    check((await text(page, '#bSpeed')) === '3×' && (await stored(page)).speed === 3, 'speed 3× is saved as S.speed');
+
+    // Leaks vibrate only while vibration is on.
+    const leakOnce = () => G(page, () => { const W = window.__pw, g = W.G; g.running = false; g.lives = 20; W.spawn('grunt', g.map.path.len - 0.3); for (let i = 0; i < 30; i++) W.step(1 / 30); g.running = true; return (window.__vib || []).length; });
+    check((await leakOnce()) === 1, 'a leak vibrates');
+    await page.click('#bPause'); await page.click('#bVibe2'); await page.click('#bResume');
+    check((await leakOnce()) === 1 && (await G(page, () => window.__pw.S.vibe)) === false, 'no vibration after turning it off in the pause menu');
+
+    await page.reload(); await page.waitForTimeout(250);
+    check((await text(page, '#bVibe')) === 'Vibration: off', 'vibration setting survives a reload');
+    await startMap(page, 0);
+    check((await text(page, '#bSpeed')) === '3×' && (await G(page, () => window.__pw.G.speed)) === 3 && (await page.$eval('#bSpeed', el => el.getAttribute('aria-label'))) === 'Game speed 3×', 'after reload a new road starts at the remembered 3×');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'phone-basics: no vibration pill without vibrate, pills at 320px';
+  {
+    const { ctx, page } = await newPage(browser, { viewport: { width: 320, height: 568 }, init: () => { delete Navigator.prototype.vibrate; } });
+    check((await hidden(page, '#bVibe')) && (await hidden(page, '#bVibe2')), 'Vibration pills hidden where vibrate is missing');
+    await ctx.close();
+    const r = await newPage(browser, { viewport: { width: 320, height: 568 } });
+    const footFit = sel => r.page.$eval(sel, f => { const card = f.closest('.card').getBoundingClientRect(), pills = [...f.querySelectorAll('.pill')].map(p => p.getBoundingClientRect()), note = f.lastElementChild.getBoundingClientRect(); return { n: pills.length, inside: pills.every(p => p.left >= card.left + 19 && p.right <= card.right - 19), above: pills.every(p => p.bottom <= note.top), noScroll: f.scrollWidth <= f.clientWidth }; });
+    let fit = await footFit('#menu .foot');
+    check(fit.n === 2 && fit.inside && fit.above && fit.noScroll, 'menu at 320px: pills wrap inside the card, above "Saves after every wave" ' + JSON.stringify(fit));
+    await startMap(r.page, 1); await r.page.click('#bPause');
+    fit = await footFit('#pauseOv .foot');
+    check(fit.n === 2 && fit.inside && fit.above && fit.noScroll, 'pause at 320px: pills wrap inside the card ' + JSON.stringify(fit));
+    check((await r.page.evaluate(() => document.documentElement.scrollWidth)) <= 320, 'no horizontal scroll at 320px');
+    check(r.page.errors.length === 0, 'no console errors: ' + r.page.errors.join('|'));
+    await r.ctx.close();
+  }
+
+  current = 'phone-basics: reduced motion';
+  {
+    const { ctx, page } = await newPage(browser);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    check(await G(page, () => window.__pw.rm()), 'rm() reads prefers-reduced-motion');
+    await startMap(page, 1);
+    await G(page, () => { const W = window.__pw; W.G.running = false; W.build('frost', 2, 2); });
+    const h1 = await tileHash(page, 2, 2, null);
+    await page.waitForTimeout(1000);
+    const h2 = await tileHash(page, 2, 2, null);
+    check(h1 === h2, `reduced motion: two renders 1s apart give the same frost tile (${h1} / ${h2})`);
+    check((await tileHash(page, 2, 2, 5)) === (await tileHash(page, 2, 2, 6.3)), 'reduced motion ignores the render clock');
+    const zap = t => G(page, t => { const W = window.__pw, g = W.G; g.fx = [{ k: 'zap', pts: [{ x: 2.5, y: 4.3 }, { x: 5.5, y: 5.5 }], t, dur: 1e9, seed: 7 }]; return true; }, t);
+    await zap(0); const z1 = await tileHash(page, 3, 4, 1);
+    await zap(0.5); const z2 = await tileHash(page, 3, 4, 1);
+    check(z1 === z2, 'reduced motion: lightning is one static bolt');
+    const parts = await G(page, () => { const W = window.__pw, g = W.G; g.fx = []; g.wave = 1; W.spawn('grunt', 3); W.hurtAll(1e9); return g.fx.filter(f => f.k === 'p').length; });
+    check(parts === 4, 'reduced motion: a kill bursts half the particles (' + parts + ')');
+    check((await page.$eval('#toast', el => getComputedStyle(el).transitionDuration)).split(',').every(d => parseFloat(d) === 0), 'reduced motion: toast does not slide');
+
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    check(!(await G(page, () => window.__pw.rm())), 'rm() follows the setting live');
+    check((await tileHash(page, 2, 2, 5)) !== (await tileHash(page, 2, 2, 6.3)), 'full motion: the frost crystal turns');
+    await zap(0); const z3 = await tileHash(page, 3, 4, 1);
+    await zap(0.5); const z4 = await tileHash(page, 3, 4, 1);
+    check(z3 !== z4, 'full motion: lightning re-jitters');
+    const parts2 = await G(page, () => { const W = window.__pw, g = W.G; g.fx = []; W.spawn('grunt', 3); W.hurtAll(1e9); return g.fx.filter(f => f.k === 'p').length; });
+    check(parts2 === 8, 'full motion: a kill bursts 8 particles (' + parts2 + ')');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'phone-basics: Space and Enter start the wave';
+  {
+    const { ctx, page } = await newPage(browser);
+    await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ saves: { meadow: { map: 'meadow', wave: 3, gold: 150, lives: 20, towers: [] } }, last: 'meadow' })));
+    await page.reload(); await page.waitForTimeout(250);
+    await page.click('#bContinue'); await page.waitForTimeout(50);
+    check((await G(page, () => window.__pw.G.wave === 3 && window.__pw.G.towers.length === 0)) && (await active(page)).tag === 'BODY', 'wave 3 save with no towers resumed, nothing focused');
+    await page.keyboard.press('Space');
+    check((await G(page, () => window.__pw.G.wave)) === 4, 'Space with no overlay starts the wave (G.wave 3 -> ' + (await G(page, () => window.__pw.G.wave)) + ')');
+    await page.keyboard.press('Space');
+    check((await G(page, () => window.__pw.G.wave)) === 4, 'Space does nothing while the wave button is disabled');
+    await G(page, () => { const W = window.__pw, g = W.G; g.running = false; while (g.spawnQ.length) W.step(1 / 30); W.refreshPanel(); });
+    await page.keyboard.press('Enter');
+    check((await G(page, () => window.__pw.G.wave)) === 5, 'Enter calls the next wave early');
+    await page.focus('#bSpeed');
+    const sp = await G(page, () => window.__pw.G.speed);
+    await page.keyboard.press('Space');
+    check((await G(page, () => window.__pw.G.speed)) !== sp && (await G(page, () => window.__pw.G.wave)) === 5, 'Space on a focused button clicks that button only');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------
   current = 'long run soak (30 waves, all roads)';
   for (let mi = 0; mi < 3; mi++) {
     const { ctx, page } = await newPage(browser);

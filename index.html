@@ -62,9 +62,10 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 /* Board */
 #stage{flex:1;min-height:0;position:relative;display:grid;place-items:center}
 #cv{display:block;touch-action:none;border-radius:6px;box-shadow:0 0 0 2px #0e140d,0 6px 24px rgba(0,0,0,.45)}
-#toast{position:absolute;left:50%;top:10px;transform:translate(-50%,-6px);opacity:0;pointer-events:none;
+/* Bottom of the board: row 13 cols 2-6 is grass on every road, so it hides no enemies. layout() sets bottom and max-width. */
+#toast{position:absolute;left:50%;bottom:10px;transform:translate(-50%,6px);opacity:0;pointer-events:none;
   background:rgba(20,26,18,.92);border:1px solid var(--line);color:var(--ink);padding:6px 12px;border-radius:999px;
-  font-weight:700;font-size:13px;white-space:nowrap;transition:opacity .2s,transform .2s}
+  font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity .2s,transform .2s}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 #toast.bad{color:#ffd2c9;border-color:#7a3a30}
 
@@ -136,8 +137,14 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .how b{color:var(--ink)}
 .result{font-family:var(--font-display);font-size:15px;color:var(--muted);margin:0}
 .result b{color:var(--ink);font-size:22px}
-.foot{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted)}
-.link{color:var(--muted);text-decoration:underline;font-size:12px}
+.foot{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted)}
+.pills{display:flex;flex-wrap:wrap;gap:8px}
+.pill{height:44px;padding:0 14px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);font-weight:700;font-size:13px;
+  display:inline-flex;align-items:center;gap:6px;color:var(--ink);white-space:nowrap}
+.pill svg{width:16px;height:16px;flex:none}
+.pill .i-off,.pill.off .i-on{display:none}
+.pill.off .i-off{display:inline}
+.pill.off{color:var(--muted)}
 
 @media (prefers-reduced-motion:reduce){#toast{transition:none}}
 /* Short landscape screens: board on the left, HUD and controls stacked on the right. */
@@ -155,14 +162,14 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 <body>
 <div id="app">
   <header id="hud">
-    <div class="stat" id="sLives" title="Lives"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 17.5S2.5 12.8 2.5 7.4A3.9 3.9 0 0 1 10 5.3a3.9 3.9 0 0 1 7.5 2.1c0 5.4-7.5 10.1-7.5 10.1z" fill="#e3644f" stroke="#2a1410" stroke-width="1.3"/></svg><span>20</span></div>
-    <div class="stat" id="sGold" title="Gold"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="#e3ad45" stroke="#3a2a0b" stroke-width="1.3"/><circle cx="10" cy="10" r="4" fill="none" stroke="#9b6f1d" stroke-width="1.3"/></svg><span>200</span></div>
+    <div class="stat" id="sLives" title="Lives" role="img" aria-label="20 lives"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 17.5S2.5 12.8 2.5 7.4A3.9 3.9 0 0 1 10 5.3a3.9 3.9 0 0 1 7.5 2.1c0 5.4-7.5 10.1-7.5 10.1z" fill="#e3644f" stroke="#2a1410" stroke-width="1.3"/></svg><span>20</span></div>
+    <div class="stat" id="sGold" title="Gold" role="img" aria-label="200 gold"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="#e3ad45" stroke="#3a2a0b" stroke-width="1.3"/><circle cx="10" cy="10" r="4" fill="none" stroke="#9b6f1d" stroke-width="1.3"/></svg><span>200</span></div>
     <div class="stat" id="sWave">Wave&nbsp;<b>0</b>/30</div>
     <div class="hud-sp"></div>
-    <button class="hbtn" id="bSpeed" aria-label="Game speed">1×</button>
+    <button class="hbtn" id="bSpeed" aria-label="Game speed 1×">1×</button>
     <button class="hbtn" id="bPause" aria-label="Pause"><svg viewBox="0 0 16 16"><rect x="3" y="2" width="3.6" height="12" rx="1" fill="currentColor"/><rect x="9.4" y="2" width="3.6" height="12" rx="1" fill="currentColor"/></svg></button>
   </header>
-  <div id="stage"><canvas id="cv" aria-label="Game board"></canvas><div id="toast"></div></div>
+  <div id="stage"><canvas id="cv" role="img" aria-label="Game board"></canvas><div id="toast" role="status" aria-live="polite"></div></div>
   <footer id="panel">
     <div id="phead"><div id="info"></div><button id="bWave">Start wave 1</button></div>
     <div id="pbody">
@@ -180,9 +187,9 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   </footer>
 </div>
 
-<div class="ov" id="menu">
+<div class="ov" id="menu" role="dialog" aria-modal="true" aria-labelledby="menuTitle">
   <div class="card">
-    <h1 class="title">Path<span>warden</span></h1>
+    <h1 class="title" id="menuTitle">Path<span>warden</span></h1>
     <p class="sub">Hold the road for 30 waves. Build on the grass, upgrade what works, and don't let anything reach the keep.</p>
     <button class="big" id="bContinue" hidden>Continue</button>
     <p class="eyebrow">Choose a road</p>
@@ -192,20 +199,20 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
       <li><b>Tap a tower</b> to upgrade, sell, or change its target.</li>
       <li>Fliers ignore the Mortar. Bosses arrive every 10 waves.</li>
     </ul>
-    <div class="foot"><button class="link" id="bMute">Sound: on</button><span>Saves after every wave</span></div>
+    <div class="foot"><div class="pills"><button class="pill" id="bMute"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h2.6L8.2 3v10L4.6 10H2z" fill="currentColor"/><path class="i-on" d="M10.6 5.6a3.4 3.4 0 0 1 0 4.8M12.6 3.6a6.2 6.2 0 0 1 0 8.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="i-off" d="M10.8 6l3.6 4M14.4 6l-3.6 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Sound: on</span></button><button class="pill" id="bVibe" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="2" width="6" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path class="i-on" d="M2.4 5.5v5M13.6 5.5v5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="i-off" d="M2.5 2.5l11 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Vibration: on</span></button></div><span>Saves after every wave</span></div>
   </div>
 </div>
 
-<div class="ov" id="pauseOv" hidden>
+<div class="ov" id="pauseOv" role="dialog" aria-modal="true" aria-labelledby="pauseTitle" hidden>
   <div class="card">
-    <h2 class="title" style="font-size:30px">Paused</h2>
+    <h2 class="title" style="font-size:30px" id="pauseTitle">Paused</h2>
     <button class="big" id="bResume">Resume</button>
     <div class="row2"><button class="ghost" id="bRestart">Restart road</button><button class="ghost" id="bMenu">Main menu</button></div>
-    <div class="foot"><button class="link" id="bMute2">Sound: on</button><span id="pauseInfo"></span></div>
+    <div class="foot"><div class="pills"><button class="pill" id="bMute2"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6h2.6L8.2 3v10L4.6 10H2z" fill="currentColor"/><path class="i-on" d="M10.6 5.6a3.4 3.4 0 0 1 0 4.8M12.6 3.6a6.2 6.2 0 0 1 0 8.8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="i-off" d="M10.8 6l3.6 4M14.4 6l-3.6 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Sound: on</span></button><button class="pill" id="bVibe2" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="2" width="6" height="12" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path class="i-on" d="M2.4 5.5v5M13.6 5.5v5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path class="i-off" d="M2.5 2.5l11 11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span>Vibration: on</span></button></div><span id="pauseInfo"></span></div>
   </div>
 </div>
 
-<div class="ov" id="endOv" hidden>
+<div class="ov" id="endOv" role="dialog" aria-modal="true" aria-labelledby="endTitle" hidden>
   <div class="card">
     <h2 class="title" style="font-size:30px" id="endTitle">The keep has fallen</h2>
     <p class="result" id="endText"></p>
@@ -255,6 +262,9 @@ const clamp=(v,a,b)=>v<a?a:v>b?b:v;
 const round5=v=>Math.round(v/5)*5;
 function rr(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath()}
 function circle(g,x,y,r){g.beginPath();g.arc(x,y,r,0,Math.PI*2)}
+// Reduced motion: anything that spins, bobs, pulses, shakes or rises checks rm().
+const RM=window.matchMedia?matchMedia('(prefers-reduced-motion: reduce)'):{matches:false};
+const rm=()=>RM.matches;
 
 function makePath(pts){
   const P=pts.map(([c,r])=>({x:c+0.5,y:r+0.5}));
@@ -344,7 +354,7 @@ function sfx(name){
 }
 
 /* ---------- game state ---------- */
-let G=null,speedPref=1;
+let G=null,speedPref=[1,2,3].includes(S.speed)?S.speed:1;
 function newGame(map,save){
   G={map,grid:map.grid.slice(),wave:0,gold:CFG.startGold,lives:20,towers:[],enemies:[],projs:[],fx:[],spawnQ:[],W:{},time:0,
      speed:speedPref,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,sellArm:false,sellArmAt:0,gateFlash:0,running:true};
@@ -352,7 +362,7 @@ function newGame(map,save){
     G.wave=save.wave;G.cleared=save.wave;G.gold=save.gold;G.lives=save.lives;G.won=!!save.won;
     for(const t of save.towers)placeTower(t.type,t.c,t.r,t.level,t.spent,t.mode);
   }
-  $('#bSpeed').textContent=G.speed+'×';
+  syncSpeed();
   layout();refreshPanel();updateHud(true);
 }
 function placeTower(type,c,r,level,spent,mode){
@@ -437,11 +447,12 @@ function kill(e){
 }
 function leak(e){
   e.dead=true;G.lives=Math.max(0,G.lives-e.d.lives);G.gateFlash=0.6;sfx('leak');
-  try{navigator.vibrate&&navigator.vibrate(e.d.boss?[60,40,60]:30)}catch(x){}
+  if(S.vibe!==false){try{navigator.vibrate&&navigator.vibrate(e.d.boss?[60,40,60]:30)}catch(x){}}
   if(G.lives<=0){gameOver();return}
   waveDone(e.w);
 }
 function burst(x,y,color,n,fly){
+  if(rm())n=Math.ceil(n/2);
   for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,s=0.6+Math.random()*1.6;
     G.fx.push({k:'p',x,y:y-(fly?0.25:0),vx:Math.cos(a)*s,vy:Math.sin(a)*s,t:0,dur:0.35+Math.random()*0.3,c:color,r:0.04+Math.random()*0.05})}
 }
@@ -559,7 +570,7 @@ function showEnd(win){
     ?`All <b>${FINAL_WAVE}</b> waves cleared on ${G.map.name} with <b>${G.lives}</b> lives left. Keep going for endless waves, or head back to try another road.`
     :`You held <b>${G.cleared}</b> wave${G.cleared===1?'':'s'} on ${G.map.name}. Best here: <b>${S.best[G.map.id]||0}</b>.`;
   $('#bEndMain').textContent=win?'Keep going':'Try again';
-  $('#endOv').hidden=false;
+  $('#endOv').hidden=false;syncOv();
   if(win){G.paused=true}
 }
 
@@ -607,6 +618,9 @@ function layout(){
   DPR=Math.min(3,window.devicePixelRatio||1);
   cv.style.width=COLS*T+'px';cv.style.height=ROWS*T+'px';
   cv.width=Math.round(COLS*T*DPR);cv.height=Math.round(ROWS*T*DPR);
+  // The toast sits 10px above the board's bottom edge, even when #stage is taller than the board.
+  const tst=$('#toast'),sr=$('#stage').getBoundingClientRect(),cr=cv.getBoundingClientRect();
+  tst.style.maxWidth=`${COLS*T-24}px`;tst.style.bottom=(sr.bottom-cr.bottom+10)+'px';
   bg=buildBG(G.map,T,DPR);
 }
 function drawTower(g,type,lv,x,y,s,ang,flash,time){
@@ -712,7 +726,7 @@ function drawGates(g,s,time){
 }
 function render(time){
   if(!G||!bg)return;
-  const g=ctx,s=T;
+  const g=ctx,s=T,still=rm();
   g.setTransform(DPR,0,0,DPR,0,0);
   g.drawImage(bg,0,0,COLS*s,ROWS*s);
   const showRange=(x,y,r,ok)=>{
@@ -729,7 +743,7 @@ function render(time){
   }
   if(G.selTower){const t=G.selTower;showRange(t.x,t.y,tstats(t.type,t.level).range,true)}
   for(const t of G.towers){
-    const age=G.time-t.born,sc=age<0.25?0.6+0.4*(age/0.25):1;
+    const age=G.time-t.born,sc=still||age>=0.25?1:0.6+0.4*(age/0.25);
     if(sc<1){g.save();g.translate(t.x*s,t.y*s);g.scale(sc,sc);g.translate(-t.x*s,-t.y*s)}
     drawTower(g,t.type,t.level,t.x*s,t.y*s,s,t.ang,t.flash,time);
     if(sc<1)g.restore();
@@ -754,7 +768,7 @@ function render(time){
     else if(f.k==='ring'){g.globalAlpha=(1-k)*0.85;g.strokeStyle=f.c;g.lineWidth=Math.max(1,s*0.08*(1-k));circle(g,f.x*s,f.y*s,f.r*s*(0.4+0.6*k));g.stroke();g.globalAlpha=1}
     else if(f.k==='tracer'){g.globalAlpha=1-k;g.strokeStyle='#ffe3b0';g.lineWidth=Math.max(1,s*0.06*(1-k));g.beginPath();g.moveTo(f.x1*s,f.y1*s);g.lineTo(f.x2*s,f.y2*s);g.stroke();g.globalAlpha=1}
     else if(f.k==='zap'){
-      const rnd=mulberry32((f.seed|0)+Math.floor(f.t*40));
+      const rnd=mulberry32((f.seed|0)+(still?0:Math.floor(f.t*40)));
       g.globalAlpha=1-k;g.lineJoin='round';
       for(const [w,c] of [[0.12,'rgba(164,135,255,.45)'],[0.04,'#f2edff']]){
         g.strokeStyle=c;g.lineWidth=Math.max(1,s*w);g.beginPath();g.moveTo(f.pts[0].x*s,f.pts[0].y*s);
@@ -764,8 +778,8 @@ function render(time){
       }
       g.globalAlpha=1;
     }
-    else if(f.k==='text'){g.globalAlpha=1-k;g.font=`800 ${Math.round(s*0.34)}px ${FONT_DISPLAY}`;
-      g.textAlign='center';g.lineWidth=3;g.strokeStyle='rgba(30,24,10,.8)';g.strokeText(f.s,f.x*s,(f.y-k*0.5)*s);g.fillStyle='#f3d27a';g.fillText(f.s,f.x*s,(f.y-k*0.5)*s);g.globalAlpha=1}
+    else if(f.k==='text'){g.globalAlpha=1-k;g.font=`800 ${Math.round(s*0.34)}px ${FONT_DISPLAY}`;const ty=(still?f.y:f.y-k*0.5)*s;
+      g.textAlign='center';g.lineWidth=3;g.strokeStyle='rgba(30,24,10,.8)';g.strokeText(f.s,f.x*s,ty);g.fillStyle='#f3d27a';g.fillText(f.s,f.x*s,ty);g.globalAlpha=1}
   }
 }
 
@@ -833,6 +847,7 @@ function updateHud(force){
   if(!force&&v.l===hudCache.l&&v.g===hudCache.g&&v.w===hudCache.w)return;
   const goldChanged=v.g!==hudCache.g;hudCache=v;
   $('#sLives span').textContent=G.lives;$('#sGold span').textContent=G.gold;
+  $('#sLives').setAttribute('aria-label',`${G.lives} ${G.lives===1?'life':'lives'}`);$('#sGold').setAttribute('aria-label',`${G.gold} gold`);
   $('#sWave').innerHTML=G.wave>FINAL_WAVE?`Wave&nbsp;<b>${G.wave}</b>`:`Wave&nbsp;<b>${G.wave}</b>/${FINAL_WAVE}`;
   if(goldChanged||force)refreshPanel();
 }
@@ -877,7 +892,8 @@ $('#bSell').addEventListener('click',()=>{
   deselect();refreshPanel();updateHud(true);saveRunIfCalm();
 });
 $('#bWave').addEventListener('click',()=>{audioInit();startWave();updateHud(true)});
-$('#bSpeed').addEventListener('click',()=>{if(!G)return;G.speed=speedPref=G.speed===1?2:G.speed===2?3:1;$('#bSpeed').textContent=G.speed+'×'});
+$('#bSpeed').addEventListener('click',()=>{if(!G)return;G.speed=speedPref=G.speed===1?2:G.speed===2?3:1;S.speed=G.speed;persist();syncSpeed()});
+function syncSpeed(){const b=$('#bSpeed');b.textContent=G.speed+'×';b.setAttribute('aria-label',`Game speed ${G.speed}×`)}
 function setPause(p){
   if(!G||G.over)return;G.paused=p;$('#pauseOv').hidden=!p;disarmRestart();
   if(p){
@@ -885,6 +901,8 @@ function setPause(p){
     // Leaving mid-wave goes back to the last cleared wave, so say so.
     $('#bMenu').innerHTML=activeWaves()||G.spawnQ.length?`Main menu<small>Wave ${G.wave} restarts</small>`:'Main menu';
   }
+  syncOv();
+  if(!p)focusEl($('#bPause'));
 }
 $('#bPause').addEventListener('click',()=>setPause(true));
 $('#bResume').addEventListener('click',()=>setPause(false));
@@ -894,18 +912,59 @@ function disarmRestart(){clearTimeout(restartTimer);const b=$('#bRestart');b.cla
 $('#bRestart').addEventListener('click',()=>{
   const b=$('#bRestart');
   if(!b.classList.contains('armed')){disarmRestart();b.classList.add('armed');b.textContent='Tap again to restart';restartTimer=setTimeout(disarmRestart,3500);return}
-  disarmRestart();const m=G.map;delete S.saves[m.id];persist();$('#pauseOv').hidden=true;newGame(m);
+  disarmRestart();const m=G.map;delete S.saves[m.id];persist();$('#pauseOv').hidden=true;newGame(m);syncOv();focusEl($('#bPause'));
 });
 $('#bMenu').addEventListener('click',()=>{saveRunIfCalm();disarmRestart();$('#pauseOv').hidden=true;showMenu()});
 function saveRunIfCalm(){if(G&&G.running&&!G.over&&!activeWaves()&&!G.spawnQ.length)saveRun()}
 $('#bEndMain').addEventListener('click',()=>{
-  $('#endOv').hidden=true;
+  $('#endOv').hidden=true;syncOv();pushGame();
   if(G.won&&!G.over){G.paused=false;refreshPanel();return}
   newGame(G.map);
 });
 $('#bEndAlt').addEventListener('click',()=>{$('#endOv').hidden=true;showMenu()});
-function syncMute(){const t=`Sound: ${AU.on?'on':'off'}`;$('#bMute').textContent=t;$('#bMute2').textContent=t}
+// Sound and vibration pills. The label text is the state ('Sound: on'); the icon swaps with class 'off'.
+function syncPill(id,label,on){const b=$(id);b.classList.toggle('off',!on);b.querySelector('span').textContent=`${label}: ${on?'on':'off'}`}
+function syncMute(){for(const id of ['#bMute','#bMute2'])syncPill(id,'Sound',AU.on)}
+function syncVibe(){for(const id of ['#bVibe','#bVibe2']){$(id).hidden=!('vibrate' in navigator);syncPill(id,'Vibration',S.vibe!==false)}}
 for(const id of ['#bMute','#bMute2'])$(id).addEventListener('click',()=>{AU.on=!AU.on;S.muted=!AU.on;persist();syncMute();audioInit()});
+for(const id of ['#bVibe','#bVibe2'])$(id).addEventListener('click',()=>{S.vibe=S.vibe===false;persist();syncVibe()});
+
+// Overlays are modal dialogs: the game behind is inert and focus moves into the open one.
+// The focus ring shows only when the last input was a key, so a tap never leaves a ring behind.
+let keyNav=false;
+document.addEventListener('keydown',()=>{keyNav=true},true);
+document.addEventListener('pointerdown',()=>{keyNav=false},true);
+function focusEl(el){el.focus({preventScroll:true,focusVisible:keyNav})}
+function syncOv(){
+  const open=document.querySelector('.ov:not([hidden])');
+  $('#app').inert=!!open;
+  if(open&&!open.contains(document.activeElement)){
+    const b=[...open.querySelectorAll('button')].find(x=>x.getClientRects().length);
+    if(b)focusEl(b);
+  }
+}
+document.addEventListener('keydown',e=>{
+  if(!G||e.repeat||e.ctrlKey||e.metaKey||e.altKey)return;
+  const k=e.key,ovOpen=!!document.querySelector('.ov:not([hidden])');
+  if(k==='Escape'||k==='p'||k==='P'){
+    if($('#menu').hidden&&$('#endOv').hidden&&G.running&&!G.over){e.preventDefault();setPause(!G.paused)}
+  }else if(k===' '||k==='Enter'){
+    // A focused button gets its native click.
+    if(ovOpen||(e.target.closest&&e.target.closest('button')))return;
+    e.preventDefault();const b=$('#bWave');if(!b.disabled)b.click();
+  }else if(k>='1'&&k<='5'&&k.length===1&&!ovOpen)onPalette(TKEYS[+k-1]);
+});
+
+// Back gesture: a run owns one history entry {pw:'game'}. Back pauses (or resumes) instead of leaving.
+let skipPop=false;
+function pushGame(){if(history.state?.pw!=='game'){try{history.pushState({pw:'game'},'')}catch(e){}}}
+window.addEventListener('popstate',()=>{
+  const live=G&&$('#menu').hidden&&$('#endOv').hidden&&G.running&&!G.over;
+  // Our own history.back() from showMenu. If a run started before it landed, take the entry back.
+  if(skipPop){skipPop=false;if(live)pushGame();return}
+  if(!live)return;
+  setPause(!G.paused);pushGame();
+});
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden||!G||!G.running||G.over||!$('#menu').hidden)return;
   saveRunIfCalm();if(!G.paused)setPause(true);
@@ -923,20 +982,21 @@ function showMenu(){
     txt.innerHTML=`<div class="mn">${m.name}<span class="tag ${m.diff}">${m.diff}</span></div>${md}`;
     b.append(c,txt);box.append(b);
     // A road with a saved run resumes it. Starting over is Pause > Restart road.
-    b.addEventListener('click',()=>{audioInit();$('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true});
+    b.addEventListener('click',()=>{audioInit();$('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true;pushGame();syncOv()});
     requestAnimationFrame(()=>{const dpr=Math.min(3,window.devicePixelRatio||1),ts=5;const img=buildBG(m,ts,dpr);
       c.width=img.width;c.height=img.height;c.getContext('2d').drawImage(img,0,0)});
   }
   const sm=continueMap(),cont=$('#bContinue');
   cont.hidden=!sm;
   if(sm)cont.textContent=`Continue · ${sm.name}, wave ${S.saves[sm.id].wave+1}`;
-  syncMute();$('#menu').hidden=false;
+  syncMute();syncVibe();$('#menu').hidden=false;syncOv();
+  if(history.state?.pw==='game'){skipPop=true;try{history.back()}catch(e){skipPop=false}}
 }
 // The road Continue resumes: the one saved most recently, else the first road with a save.
 function continueMap(){return MAPS.find(m=>m.id===S.last&&S.saves[m.id])||MAPS.find(m=>S.saves[m.id])}
 $('#bContinue').addEventListener('click',()=>{
   audioInit();const m=continueMap();if(!m)return;
-  $('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true;
+  $('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true;pushGame();syncOv();
 });
 
 /* ---------- loop ---------- */
@@ -945,7 +1005,7 @@ function frame(now){
   const dt=Math.min(0.05,(now-last)/1000);last=now;
   if(G&&G.running&&!G.paused&&!G.over){for(let i=0;i<G.speed;i++){step(dt);if(G.over)break}}
   if(G&&G.sellArm&&now-G.sellArmAt>3500){G.sellArm=false;refreshPanel()}
-  if(G){render(now/1000);updateHud(false)}
+  if(G){render(rm()?0:now/1000);updateHud(false)}
   requestAnimationFrame(frame);
 }
 let rz=0;
@@ -962,7 +1022,7 @@ paintIcons();showMenu();requestAnimationFrame(frame);
 window.__pw={get G(){return G},get S(){return S},ED,buildWave,refreshPanel,step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
   CFG,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
-  hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},render:()=>render(performance.now()/1000),spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
+  hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},render:t=>render(rm()?0:(t??performance.now()/1000)),rm,syncOv,spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
 
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
   window.addEventListener('load',()=>{try{navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){}});
