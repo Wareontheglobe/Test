@@ -17,10 +17,11 @@ An original tower defense game for phones. It is one HTML file with no outside d
 (iPhone's Files app previews HTML without running scripts, so on iPhone use the install route above.)
 
 ## How to play
-- Tap a grass tile, pick a tower, then tap it again to build.
-- Tap a tower to upgrade it (up to level 3), sell it (70% back, tap twice), or change who it targets.
+- Tap a grass tile, pick a tower, then tap it again to build. Or pick the tower first, then tap a grass tile twice. It stays picked, so the next one takes two taps.
+- Tap a tower to upgrade it (up to level 3), sell it (tap twice), or change who it targets. Selling gives a full refund until the next wave starts, then 70%.
 - **Start wave** sends the next wave. Once a wave has fully arrived you can call the next one early for bonus gold.
-- Survive 30 waves to win, then keep going in endless mode. Progress saves after every cleared wave.
+- Survive 30 waves to win, then keep going in endless mode.
+- Each road keeps its own saved run, saved after every cleared wave. Tap a road to pick up its run. To start a road over, use Pause > Restart road (tap twice).
 
 | Tower | Cost | Notes |
 |---|---|---|

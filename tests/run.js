@@ -41,9 +41,18 @@ async function tapTile(page, c, r) {
 }
 const text = (page, sel) => page.$eval(sel, el => el.textContent.trim());
 const hidden = (page, sel) => page.$eval(sel, el => el.hidden || getComputedStyle(el).display === 'none');
-async function startMap(page, i) { await page.click(`.mapbtn >> nth=${i}`); await page.waitForTimeout(80); }
-// Tap the wave button. At wave 0 with no towers the wave-1 guard only warns ('Send anyway?'), so tap it a second time.
-async function sendWave(page) { await page.click('#bWave'); if ((await text(page, '#bWave')) === 'Send anyway?') await page.click('#bWave'); }
+// Right after Main menu, road cards and Continue ignore taps for 350ms (a double tap must not land on a card). Wait that out.
+const menuReady = page => G(page, () => new Promise(r => setTimeout(r, window.__pw.menuGuardLeft())));
+async function startMap(page, i) { await menuReady(page); await page.click(`.mapbtn >> nth=${i}`); await page.waitForTimeout(80); }
+// Tap the wave button. At wave 0 with no towers the wave-1 guard only warns ('Send anyway?'), so tap it a second time,
+// as a separate tap: the second half of a quick double tap is ignored.
+async function sendWave(page) { await page.click('#bWave'); if ((await text(page, '#bWave')) === 'Send anyway?') { await page.waitForTimeout(450); await page.click('#bWave'); } }
+// Touch-tap the centre of an element twice, `gap` ms apart.
+async function doubleTap(page, sel, gap = 90) {
+  const p = await page.$eval(sel, el => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await page.touchscreen.tap(p.x, p.y); await page.waitForTimeout(gap); await page.touchscreen.tap(p.x, p.y);
+  return p;
+}
 async function runUntilCalm(page, maxSec = 400) {
   return G(page, max => { const W = window.__pw; let t = 0; while ((W.G.spawnQ.length || W.G.enemies.length) && !W.G.over && t < max) { W.step(1 / 30); t += 1 / 30; } return t; }, maxSec);
 }
@@ -482,7 +491,7 @@ let BASE;
     await page.click('#bEndAlt');
     check((await card(page, 1)).includes('In progress · wave 6') && (await card(page, 0)).includes('In progress · wave 3') && !(await card(page, 2)).includes('In progress'), 'cards reflect the remaining runs');
     check((await text(page, '#bContinue')) === 'Continue · Long Switchback, wave 3', 'Continue falls back to the first road with a save (' + (await text(page, '#bContinue')) + ')');
-    await page.click('#bContinue');
+    await menuReady(page); await page.click('#bContinue');
     check((await G(page, () => window.__pw.G.map.id === 'switch' && window.__pw.G.wave === 2)), 'Continue resumes the fallback road');
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
@@ -500,10 +509,76 @@ let BASE;
     await ctx.close();
   }
 
+  current = 'save-safety: after early calls, Main menu names every wave that restarts, and the best wave is kept';
+  {
+    const { ctx, page } = await newPage(browser, { viewport: { width: 320, height: 568 } });
+    await startMap(page, 1);
+    const st = await G(page, () => {
+      const W = window.__pw, g = W.G; g.running = false; // no towers, so nothing dies unless the test kills it
+      W.startWave(); let t = 0; while ((g.spawnQ.length || g.enemies.length) && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; }
+      W.startWave(); while (g.spawnQ.length) W.step(1 / 30);
+      W.startWave(); while (g.spawnQ.length) W.step(1 / 30); // wave 3 called early
+      for (const e of g.enemies) if (e.w === 2) e.hp = 0.1;
+      W.hurtAll(0.5); // wave 2 clears while wave 3 is still on the road, so the board is never calm
+      g.running = true;
+      return { wave: g.wave, cleared: g.cleared, active: Object.keys(g.W).join(), slot: W.S.saves.meadow.wave, best: JSON.parse(localStorage.getItem('pathwarden.v1')).best.meadow };
+    });
+    check(st.wave === 3 && st.cleared === 2 && st.active === '3' && st.slot === 1, 'wave 2 cleared during an early-called wave 3; the saved run is still at wave 1 ' + JSON.stringify(st));
+    check(st.best === 2, 'the best wave is recorded as soon as wave 2 clears, even with wave 3 still on the road (' + st.best + ')');
+    await page.click('#bPause');
+    check((await text(page, '#bMenu')) === 'Main menuWaves 2-3 restart', 'Main menu warns "Waves 2-3 restart", the waves really lost (' + (await text(page, '#bMenu')) + ')');
+    const fit = await page.$eval('#bMenu', b => ({ h: b.getBoundingClientRect().height, sh: b.scrollHeight, ch: b.clientHeight, sw: b.scrollWidth, cw: b.clientWidth }));
+    check(fit.h === 46 && fit.sh <= fit.ch && fit.sw <= fit.cw, 'the longer note fits the 46px button at 320px ' + JSON.stringify(fit));
+    await page.click('#bMenu');
+    check((await card(page, 1)).includes('In progress · wave 2'), 'the Meadow card then resumes before wave 2, as the note said (' + (await card(page, 1)) + ')');
+    check((await stored(page)).best.meadow === 2, 'best wave 2 survives leaving mid-wave');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'save-safety: empty runs are not restored';
+  {
+    const { ctx, page } = await newPage(browser);
+    // 1.0 saved wave 0 with no towers whenever you left for the menu; a slot like that is an empty run too.
+    await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ save: { map: 'meadow', wave: 0, gold: 200, lives: 20, towers: [] }, saves: { switch: { map: 'switch', wave: 0, gold: 150, lives: 20, towers: [] }, quarry: { map: 'quarry', wave: 0, gold: 150, lives: 20, towers: [{ type: 'bolt', c: 2, r: 2 }] } }, last: 'switch' })));
+    await page.reload(); await page.waitForTimeout(250);
+    const sv = await G(page, () => ({ keys: Object.keys(window.__pw.S.saves).join(), old: 'save' in window.__pw.S }));
+    check(sv.keys === 'quarry' && !sv.old, 'empty wave-0 runs (old single save and slot) are dropped; a wave-0 run with a tower is kept ' + JSON.stringify(sv));
+    check((await card(page, 1)).includes('Not yet played') && !(await card(page, 0)).includes('In progress'), 'Meadow and Switchback show no run in progress (' + (await card(page, 1)) + ' / ' + (await card(page, 0)) + ')');
+    check((await text(page, '#bContinue')) === 'Continue · Quarry Run, wave 1', 'Continue offers only the real run (' + (await text(page, '#bContinue')) + ')');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'save-safety: a double tap on Main menu stays on the menu';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 0);
+    await page.click('#bPause');
+    const p = await doubleTap(page, '#bMenu');
+    await page.waitForTimeout(100);
+    const under = await page.evaluate(p => { const el = document.elementFromPoint(p.x, p.y); return !!(el && el.closest('.mapbtn,#bContinue')); }, p);
+    check(under, 'the second tap lands where a road card or Continue now sits');
+    check(!(await hidden(page, '#menu')) && (await G(page, () => !window.__pw.G.running && window.__pw.G.map.id === 'switch')), 'pause > Main menu tapped twice 90ms apart: the menu stays up and no road starts');
+    await page.waitForTimeout(300);
+    await page.touchscreen.tap(p.x, p.y);
+    check(await hidden(page, '#menu') && (await G(page, () => window.__pw.G.running)), 'a tap there after 350ms opens the road as usual');
+    // The game-over overlay's Main menu gets the same guard.
+    await G(page, () => { const W = window.__pw, g = W.G; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); for (let i = 0; i < 30 && !g.over; i++) W.step(1 / 30); });
+    check(!(await hidden(page, '#endOv')), 'run lost');
+    await doubleTap(page, '#bEndAlt');
+    await page.waitForTimeout(100);
+    check(!(await hidden(page, '#menu')) && (await G(page, () => !window.__pw.G.running)), 'game over > Main menu tapped twice: the menu stays up');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
   // ---------------------------------------------------------------
   // phone-basics: reduced motion, toast at the bottom, dialogs and focus, keys, back gesture, remembered speed, toggles, labels.
   const rect = (page, sel) => page.$eval(sel, el => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; });
   const active = page => G(page, () => { const a = document.activeElement; return { id: a.id, tag: a.tagName, inMenu: !!a.closest('#menu'), inPause: !!a.closest('#pauseOv'), inEnd: !!a.closest('#endOv'), ring: a.matches(':focus-visible') }; });
+  // What the frame loop itself drew on a tile (no render call): wait two frames, then hash that tile.
+  const frameHash = (page, c, r) => G(page, ([c, r]) => new Promise(res => requestAnimationFrame(() => requestAnimationFrame(() => { const W = window.__pw, cv = document.querySelector('#cv'), T = cv.width / W.COLS; const d = cv.getContext('2d').getImageData(Math.round(c * T), Math.round(r * T), Math.round(T), Math.round(T)).data; let h = 2166136261; for (let i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 16777619); } res(h >>> 0); }))), [c, r]);
   const tileHash = (page, c, r, t) => G(page, ([c, r, t]) => { const W = window.__pw; W.render(t === null ? undefined : t); const cv = document.querySelector('#cv'); const T = cv.width / W.COLS; const d = cv.getContext('2d').getImageData(Math.round(c * T), Math.round(r * T), Math.round(T), Math.round(T)).data; let h = 2166136261; for (let i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 16777619); } return h >>> 0; }, [c, r, t]);
 
   current = 'phone-basics: toast, dialogs, focus and keys';
@@ -685,10 +760,18 @@ let BASE;
     const parts = await G(page, () => { const W = window.__pw, g = W.G; g.fx = []; g.wave = 1; W.spawn('grunt', 3); W.hurtAll(1e9); return g.fx.filter(f => f.k === 'p').length; });
     check(parts === 4, 'reduced motion: a kill bursts half the particles (' + parts + ')');
     check((await page.$eval('#toast', el => getComputedStyle(el).transitionDuration)).split(',').every(d => parseFloat(d) === 0), 'reduced motion: toast does not slide');
+    // The same through real frames, with no render hook involved: frame() must not spin the frost either.
+    const fr1 = await frameHash(page, 2, 2);
+    await page.waitForTimeout(1000);
+    const fr2 = await frameHash(page, 2, 2);
+    check(fr1 === fr2, `reduced motion: real frames 1s apart draw the same frost tile (${fr1} / ${fr2})`);
 
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     check(!(await G(page, () => window.__pw.rm())), 'rm() follows the setting live');
     check((await tileHash(page, 2, 2, 5)) !== (await tileHash(page, 2, 2, 6.3)), 'full motion: the frost crystal turns');
+    const fr3 = await frameHash(page, 2, 2);
+    await page.waitForTimeout(1000);
+    check(fr3 !== (await frameHash(page, 2, 2)), 'full motion: real frames 1s apart show the frost turning');
     await zap(0); const z3 = await tileHash(page, 3, 4, 1);
     await zap(0.5); const z4 = await tileHash(page, 3, 4, 1);
     check(z3 !== z4, 'full motion: lightning re-jitters');
@@ -716,6 +799,53 @@ let BASE;
     const sp = await G(page, () => window.__pw.G.speed);
     await page.keyboard.press('Space');
     check((await G(page, () => window.__pw.G.speed)) !== sp && (await G(page, () => window.__pw.G.wave)) === 5, 'Space on a focused button clicks that button only');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'phone-basics: while enemies are out the toast covers no road';
+  for (const vp of [{ width: 320, height: 568 }, { width: 844, height: 390 }, { width: 390, height: 780 }]) {
+    const { ctx, page } = await newPage(browser, { viewport: vp });
+    await startMap(page, 1);
+    const msgs = ['Called early · +40 gold', 'Called early · +123 gold', 'Wave 27 cleared · +69 gold', 'Wave 100 cleared · +215 gold', 'Need 180 more gold', 'New record · wave 30'];
+    const res = await G(page, msgs => {
+      const W = window.__pw, el = document.querySelector('#toast'), out = [];
+      for (let mi = 0; mi < 3; mi++) {
+        W.newGame(mi); W.G.wave = 5; W.spawn('grunt', 3);
+        const cv = document.querySelector('#cv').getBoundingClientRect(), T = cv.width / W.COLS, map = W.G.map;
+        for (const m of msgs) {
+          W.toast(m); el.style.transition = 'none'; void el.offsetWidth;
+          const r = el.getBoundingClientRect(), road = [];
+          el.style.transition = '';
+          for (let rr = 0; rr < W.ROWS; rr++) for (let c = 0; c < W.COLS; c++) {
+            if (map.grid[rr * W.COLS + c] !== 1) continue;
+            const x0 = cv.left + c * T, y0 = cv.top + rr * T;
+            if (r.right > x0 + 0.5 && r.left < x0 + T - 0.5 && r.bottom > y0 + 0.5 && r.top < y0 + T - 0.5) road.push(c + ',' + rr);
+          }
+          const inside = r.left >= cv.left && r.right <= cv.right && r.bottom <= cv.bottom;
+          if (road.length || !inside || el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) out.push(`${map.id} "${m}" ${Math.round(r.width)}x${Math.round(r.height)} road ${road.join(' ')} inside ${inside} text ${el.scrollWidth}x${el.scrollHeight}/${el.clientWidth}x${el.clientHeight}`);
+        }
+      }
+      // With the board calm the toast is the full-width pill again, centred on the board.
+      W.G.enemies = []; W.toast('Changed your mind? Full refund until the next wave.');
+      const cv = document.querySelector('#cv').getBoundingClientRect();
+      return { bad: out, calm: el.style.maxWidth === (cv.width - 24) + 'px' && el.style.left === '' && !el.classList.contains('safe') };
+    }, msgs);
+    check(res.bad.length === 0, `${vp.width}x${vp.height}: with enemies out, every toast stays off the road on all three roads, inside the board, text uncut ` + JSON.stringify(res.bad.slice(0, 4)));
+    check(res.calm, `${vp.width}x${vp.height}: a toast with no enemies out is the full-width centred pill`);
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+  {
+    // In play: grunts on Meadow's last stretch, then 'Call N early'. None of them is under the toast.
+    const { ctx, page } = await newPage(browser, { viewport: { width: 320, height: 568 } });
+    await startMap(page, 1);
+    await G(page, () => { const W = window.__pw, g = W.G; g.running = false; W.startWave(); while (g.spawnQ.length) W.step(1 / 30); for (const e of g.enemies) e.dist = g.map.path.len - 0.6 - 0.45 * g.enemies.indexOf(e) % 3.5; W.step(1 / 60); W.refreshPanel(); });
+    await page.click('#bWave');
+    await page.waitForTimeout(300);
+    const hid = await G(page, () => { const W = window.__pw, el = document.querySelector('#toast'), r = el.getBoundingClientRect(), cv = document.querySelector('#cv').getBoundingClientRect(), T = cv.width / W.COLS;
+      return { toast: el.textContent, show: el.classList.contains('show'), n: W.G.enemies.length, under: W.G.enemies.filter(e => { const x = cv.left + e.x * T, y = cv.top + e.y * T; return x > r.left && x < r.right && y > r.top && y < r.bottom; }).length }; });
+    check(hid.show && hid.toast.startsWith('Called early') && hid.n > 3 && hid.under === 0, "320px: 'Called early' with grunts walking to the keep hides none of them " + JSON.stringify(hid));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -830,7 +960,7 @@ let BASE;
     // Single-enemy boards: one grunt, killed by hurtAll. The wave stays open (rem 99) so no clear cue plays.
     const killAt = (at, rnd) => G(page, ([at, rnd]) => { const W = window.__pw, g = W.G; window.__at = at; Math.random = () => rnd; W.spawn('grunt', 3); W.hurtAll(1e9); return { combo: W.AU.combo, n: g.enemies.length }; }, [at, rnd]);
     const dieStarts = async () => (await recs(page, 'triangle')).filter(r => r.v >= 380 && r.v <= 760).map(r => r.v);
-    await G(page, () => { const g = window.__pw.G; g.running = false; g.enemies = []; g.towers = []; g.projs = []; g.wave = 1; g.W = { 1: { rem: 99, alive: 0 } }; });
+    await G(page, () => { const g = window.__pw.G; g.running = false; g.enemies = []; g.towers = []; g.projs = []; g.wave = 1; g.W = { 1: { rem: 99, alive: 0 } }; window.__mr = Math.random; });
     await clearRec(page);
     for (let i = 0; i < 4; i++) await killAt(10 + i * 0.1, 0.5);
     let d = await dieStarts();
@@ -847,6 +977,11 @@ let BASE;
     await clearRec(page);
     await killAt(30, 0.5); await killAt(30.03, 0.5); await killAt(30.07, 0.5);
     check((await dieStarts()).length === 2, 'die is throttled to one voice per 0.06s');
+    // The combo keeps its first kill's jitter, so it climbs even when the next random draw is far lower.
+    await clearRec(page);
+    await killAt(35, 0.999); await killAt(35.1, 0); await killAt(35.2, 0); await killAt(35.3, 0.5);
+    d = await dieStarts();
+    check(d.length === 4 && d.every((x, i) => i === 0 || x > d[i - 1]) && Math.abs(d[0] - 420 * (0.94 + 0.999 * 0.12)) < 0.5 && Math.abs(d[3] - d[0] * Math.pow(1.0595, 3)) < 0.5, 'a combo starting at the top of the jitter (random 0.999, then 0) still climbs a semitone a kill ' + JSON.stringify(d.map(x => +x.toFixed(1))));
 
     // Jitter: j = 0.94 + random*0.12 on bolt, frost and die, and on the boom filter.
     let c = await cue(page, 'bolt', 40); const lo = c.rec.find(r => r.type === 'square' && r.dt === 0);
@@ -874,6 +1009,12 @@ let BASE;
     const nk = await plays('no', [70, 70.03, 70.07], 'square', 160);
     check(nk === '101', 'other cues keep the 0.06s throttle: 70 plays, 70.03 dropped, 70.07 plays (' + nk + ')');
     check((await G(page, () => window.__pw.AU.gap.tink)) === 0.12, 'AU.gap = {tink: 0.12}');
+    // Last, as the audio clock only moves forward: real jitter, no stub.
+    const realCombos = await G(page, () => { const W = window.__pw; Math.random = window.__mr; let bad = 0, at = 200;
+      for (let k = 0; k < 60; k++) { window.__rec = []; for (let i = 0; i < 4; i++) { window.__at = at; at += 0.1; W.spawn('grunt', 3); W.hurtAll(1e9); } at += 1;
+        const d = window.__rec.filter(r => r.type === 'triangle' && r.v >= 380 && r.v <= 760).map(r => r.v); if (d.length !== 4 || !d.every((x, i) => i === 0 || x > d[i - 1])) bad++; }
+      return bad; });
+    check(realCombos === 0, 'with the real Math.random, 60 combos of 4 kills 100ms apart all climb (' + realCombos + ' did not)');
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -891,6 +1032,7 @@ let BASE;
     check(startsAt(c.flawless, 'sine', 784, 0.14) && startsAt(c.flawless, 'sine', 1047, 0.21), 'flawless: clear plus 1047 at +0.21');
     check(startsAt(c.horn, 'sawtooth', 98, 0) && startsAt(c.horn, 'sawtooth', 147, 0) && c.horn.filt.length === 2 && c.horn.filt.every(f => f.type === 'lowpass' && f.f === 600), 'horn: two sawtooth voices (98, 147) through 600Hz lowpass filters ' + JSON.stringify(c.horn.filt));
     check(startsAt(c.bossdown, 'triangle', 392, 0) && startsAt(c.bossdown, 'sine', 523, 0.25) && startsAt(c.bossdown, 'sine', 659, 0.32) && startsAt(c.bossdown, 'sine', 784, 0.39) && c.bossdown.filt.some(f => f.f === 400), 'bossdown: triangle 392->98, 400Hz noise, then 523/659/784 at 0.25/0.32/0.39');
+    check((await G(page, () => window.__pw.AU.noise.duration)) >= 0.5, "the noise buffer is long enough for bossdown's 0.5s noise (" + (await G(page, () => window.__pw.AU.noise.duration)) + 's)');
     check(startsAt(c.tink, 'square', 2600, 0) && startsAt(c.tink, 'square', 2000, 0.035), 'tink: square 2600->2000 over 0.035s');
     check(startsAt(c.lose, 'triangle', 392, 0) && startsAt(c.lose, 'triangle', 311, 0.25) && startsAt(c.lose, 'triangle', 262, 0.5), 'lose: triangle 392, 311, 262 at 0, 0.25, 0.5');
     check(startsAt(c.win, 'sine', 523, 0) && startsAt(c.win, 'sine', 659, 0.1) && startsAt(c.win, 'sine', 784, 0.2) && startsAt(c.win, 'sine', 1047, 0.3), 'win: sine 523, 659, 784, 1047 at 0, 0.1, 0.2, 0.3');
@@ -956,6 +1098,7 @@ let BASE;
     await page.waitForTimeout(300); await tapTile(page, 2, 5);
     check((await G(page, () => window.__pw.G.towers.length)) === 1 && (await G(page, () => window.__pw.G.pending)) === 'bolt', "tapTile(2,5), wait 300ms, tapTile(2,5): towers.length === 1 and G.pending === 'bolt'");
     check((await G(page, () => window.__pw.G.sel)) === null && (await cls(page, '.tw[data-t="bolt"]', 'armed')), 'after the build only the tile clears; Bolt stays armed');
+    check((await text(page, '#info')).startsWith('Next: ') && !(await text(page, '#info')).includes('ready'), 'a tower kept armed after a build leaves #info to the wave preview (' + (await text(page, '#info')) + ')');
     await tapTile(page, 4, 5); await page.waitForTimeout(300); await tapTile(page, 4, 5);
     check((await G(page, () => window.__pw.G.towers.length)) === 2, 'tapTile(4,5), wait 300ms, tapTile(4,5): towers.length === 2');
 
@@ -979,6 +1122,56 @@ let BASE;
     await page.click('.tw[data-t="bolt"]');
     await G(page, () => document.querySelector('#stage').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
     check((await G(page, () => window.__pw.G.pending)) === null && !(await cls(page, '.tw[data-t="bolt"]', 'armed')), 'tapping beside the board disarms');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+  {
+    // A kept arm never hides the wave preview: between waves, while a wave marches in, and once it is cleared.
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await page.click('.tw[data-t="bolt"]'); await tapTile(page, 6, 5); await page.waitForTimeout(300); await tapTile(page, 6, 5);
+    check((await G(page, () => window.__pw.G.towers.length === 1 && window.__pw.G.pending === 'bolt')), 'built with Bolt kept armed');
+    await page.click('#bWave');
+    check((await text(page, '#info')) === 'Wave 1 is marching in.' && (await cls(page, '.tw[data-t="bolt"]', 'armed')), 'during the wave #info says the wave is marching in, and the palette still shows Bolt armed (' + (await text(page, '#info')) + ')');
+    await G(page, () => { const W = window.__pw, g = W.G; g.running = false; let t = 0; while ((g.spawnQ.length || g.enemies.length) && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; } g.running = true; });
+    await page.waitForTimeout(100);
+    check((await text(page, '#info')).startsWith('Next: ') && (await G(page, () => window.__pw.G.pending)) === 'bolt', 'after the wave the next-wave preview is back (' + (await text(page, '#info')) + ')');
+    await tapTile(page, 2, 5);
+    check((await text(page, '#info')).startsWith('Bolt · ') && (await text(page, '#info')).includes('Tap again to build.'), 'a grass tap with the kept arm shows the placing line');
+    await page.waitForTimeout(300); await tapTile(page, 2, 5);
+    check((await G(page, () => window.__pw.G.towers.length)) === 2, 'and a second tap builds the next Bolt');
+    await page.click('.tw[data-t="frost"]');
+    check((await text(page, '#info')).startsWith('Frost ready. Tap grass to place it.'), 'picking a tower on purpose shows its ready line (' + (await text(page, '#info')) + ')');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'build-flow-onboarding: the ready line fits narrow phones';
+  for (const vp of [{ width: 320, height: 568 }, { width: 360, height: 640 }, { width: 375, height: 667 }, { width: 390, height: 780 }]) {
+    const { ctx, page } = await newPage(browser, { viewport: vp });
+    await startMap(page, 1);
+    const res = await G(page, () => {
+      const W = window.__pw, g = W.G, info = document.querySelector('#info'), bw = document.querySelector('#bWave'), out = [];
+      g.running = false; g.gold = 500;
+      const states = {
+        'Start wave 1': () => { g.wave = 0; g.W = {}; g.spawnQ = []; g.sendArmAt = 0; },
+        'Send anyway?': () => { g.wave = 0; g.W = {}; g.spawnQ = []; g.sendArmAt = performance.now(); },
+        'Start wave 12': () => { g.wave = 11; g.W = {}; g.spawnQ = []; g.sendArmAt = 0; },
+        'Call 12 early': () => { g.wave = 11; g.W = { 11: { rem: 0, alive: 1 } }; g.spawnQ = []; },
+      };
+      const trait = { bolt: 'Dmg 11', mortar: 'Ground only', frost: 'Slow 42%', arc: 'Chains 3', long: 'Dmg 78' };
+      for (const [label, set] of Object.entries(states)) for (const k of Object.keys(W.TD)) {
+        set(); g.sel = null; g.pending = null; document.querySelector(`.tw[data-t=${k}]`).click();
+        const tx = info.textContent, head = `${W.TD[k].name} ready. Tap grass to place it.`;
+        out.push({ label: bw.textContent, k, fits: info.scrollHeight <= info.clientHeight + 1, head: tx.startsWith(head), trait: tx.includes(trait[k]), stats: tx.slice(head.length) });
+      }
+      return out;
+    });
+    const bad = res.filter(r => !r.fits || !r.head || !r.trait);
+    check(bad.length === 0 && res.length === 20, `${vp.width}px: for every tower beside every wave button label, the ready line fits #info's 3 lines and keeps the tower's name, the instruction and its trait ` + JSON.stringify(bad.slice(0, 3)));
+    if (vp.width === 390) { const full = { bolt: 'Dmg 11 · Range 2.4 · 1.8/s', mortar: 'Dmg 30 · Range 2.4 · 0.7/s · Splash 0.9 · Ground only', frost: 'Dmg 5 · Range 2.0 · 1.0/s · Slow 42%', arc: 'Dmg 21 · Range 2.2 · 0.9/s · Chains 3', long: 'Dmg 78 · Range 4.6 · 0.5/s' };
+      check(res.filter(r => r.label === 'Start wave 1').every(r => r.stats === full[r.k]), '390px beside Start wave 1: the ready line is the full stat line in spec order ' + JSON.stringify(res.filter(r => r.label === 'Start wave 1').map(r => r.stats))); }
+    if (vp.width === 320) check(res.find(r => r.k === 'mortar' && r.label === 'Send anyway?').stats.startsWith('Ground only'), "320px: Mortar's line leads with 'Ground only' when the stats must be cut");
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -1120,6 +1313,31 @@ let BASE;
     check((await G(page, () => window.__pw.G.towers.length === 1 && !window.__pw.G.sendArmAt)) && (await text(page, '#bWave')) === 'Start wave 1', "building a tower clears the arm and the label reads 'Start wave 1'");
     await page.click('#bWave');
     check((await G(page, () => window.__pw.G.wave)) === 1, 'with a tower, one tap starts wave 1');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await doubleTap(page, '#bWave');
+    check((await G(page, () => window.__pw.G.wave)) === 0 && (await text(page, '#bWave')) === 'Send anyway?', "a double tap (90ms) on 'Start wave 1' with no towers only warns: G.wave stays 0");
+    await page.waitForTimeout(450);
+    await page.click('#bWave');
+    check((await G(page, () => window.__pw.G.wave)) === 1, 'a separate tap 450ms later sends wave 1');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+  {
+    // A returning player (no first-build tip) builds right after the warning: the warning goes away with the arm.
+    const { ctx, page } = await newPage(browser);
+    await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ refundTip: true, tutorialDone: true })));
+    await page.reload(); await page.waitForTimeout(250);
+    await startMap(page, 1);
+    await page.click('#bWave');
+    check((await text(page, '#toast')) === 'No towers yet. Enemies will walk straight in.' && (await cls(page, '#toast', 'show')), 'the warning toast is up');
+    await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    await page.waitForTimeout(300);
+    check((await G(page, () => window.__pw.G.towers.length)) === 1 && !(await cls(page, '#toast', 'show')) && (await text(page, '#bWave')) === 'Start wave 1', "building a tower takes down the 'No towers yet' toast along with the arm");
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }

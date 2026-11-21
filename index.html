@@ -70,6 +70,9 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 #toast.bad{color:#ffd2c9;border-color:#7a3a30}
 /* A toast too long for one line wraps to two instead of being cut off. toast() adds .wrap after measuring. */
 #toast.wrap{white-space:normal;width:max-content;text-align:center;text-wrap:balance;border-radius:14px;line-height:1.3}
+/* With enemies on the board the toast keeps to the grass block at cols 2-6, rows 12-13 (toast() narrows it), so it never hides the road near the keep.
+   On small boards that takes two compact lines. */
+#toast.safe.wrap{font-size:12px;line-height:1.15;padding:4px 10px;border-radius:12px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
 
 /* Control tray */
 #panel{padding-block:8px 10px;display:flex;flex-direction:column;gap:8px}
@@ -323,11 +326,13 @@ if(!S.best||typeof S.best!=='object'||Array.isArray(S.best))S.best={};
 // One saved run per road (S.saves[mapId]); S.last is the road saved most recently.
 {
   const raw=S.saves&&typeof S.saves==='object'&&!Array.isArray(S.saves)?S.saves:{};
+  // No empty runs, the same rule as saveRun: 1.0 saved wave 0 with no towers whenever you left for the menu.
+  const real=sv=>sv&&!(sv.wave===0&&!sv.towers.length);
   S.saves={};
-  for(const m of MAPS){const sv=validSave(raw[m.id]);if(sv&&sv.map===m.id)S.saves[m.id]=sv}
+  for(const m of MAPS){const sv=validSave(raw[m.id]);if(real(sv)&&sv.map===m.id)S.saves[m.id]=sv}
   // 1.0 kept a single S.save; move it into its road's slot if that slot is free.
   const old=validSave(S.save);
-  if(old&&!S.saves[old.map]){S.saves[old.map]=old;S.last=old.map}
+  if(real(old)&&!S.saves[old.map]){S.saves[old.map]=old;S.last=old.map}
   delete S.save;persist();
 }
 // Drop anything in a stored run that this version can't rebuild, rather than failing to start.
@@ -349,7 +354,8 @@ function persist(){try{localStorage.setItem(STORE,JSON.stringify(S))}catch(e){}}
 /* ---------- audio ---------- */
 // Every voice goes through one master gain and a limiter (AU.master -> AU.comp -> speakers), so a busy wave can't clip.
 // Each cue name is throttled to one voice per 0.06s, or AU.gap[name]. Kills inside 0.35s of each other climb a semitone, up to 8.
-const AU={ctx:null,on:S.muted!==true,last:{},noise:null,master:null,comp:null,gap:{tink:0.12},combo:0,comboAt:-9};
+// A combo keeps the pitch jitter of its first kill (comboJ), so each kill is exactly a semitone above the last.
+const AU={ctx:null,on:S.muted!==true,last:{},noise:null,master:null,comp:null,gap:{tink:0.12},combo:0,comboAt:-9,comboJ:1};
 function audioInit(){
   if(AU.ctx)return;
   try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const a=AU.ctx=new C();
@@ -357,7 +363,8 @@ function audioInit(){
     const k=AU.comp=a.createDynamicsCompressor();
     k.threshold.value=-14;k.knee.value=6;k.ratio.value=4;k.attack.value=0.003;k.release.value=0.15;
     AU.master.connect(k).connect(a.destination);
-    const b=a.createBuffer(1,a.sampleRate*0.4,a.sampleRate),d=b.getChannelData(0);
+    // 1s of fading noise: longer than any noise cue (bossdown's is 0.5s), so none is cut short.
+    const b=a.createBuffer(1,a.sampleRate,a.sampleRate),d=b.getChannelData(0);
     for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length);AU.noise=b;
   }catch(e){AU.ctx=null}
 }
@@ -386,8 +393,9 @@ function sfx(name){
     case 'arc':tone('sawtooth',260+Math.random()*120,900,0.08,0.03);break;
     case 'long':tone('square',220,90,0.12,0.05);noise(0.08,0.05,2500);break;
     case 'die':{
-      AU.combo=now-AU.comboAt<0.35?Math.min(8,AU.combo+1):0;AU.comboAt=now;
-      const m=j*Math.pow(1.0595,AU.combo);tone('triangle',420*m,140*m,0.09,0.035);break;
+      if(now-AU.comboAt<0.35)AU.combo=Math.min(8,AU.combo+1);else{AU.combo=0;AU.comboJ=j}
+      AU.comboAt=now;
+      const m=AU.comboJ*Math.pow(1.0595,AU.combo);tone('triangle',420*m,140*m,0.09,0.035);break;
     }
     case 'leak':tone('sawtooth',180,60,0.35,0.07);break;
     case 'build':tone('sine',520,880,0.12,0.06);break;
@@ -412,9 +420,10 @@ function sfx(name){
 let G=null,speedPref=[1,2,3].includes(S.speed)?S.speed:1;
 function newGame(map,save){
   // selAt: when a grass tile was picked with a tower already armed (double-tap guard). sendArmAt: when the wave-1 guard armed.
+  // armKept: the armed tower was kept after a build, not picked; it shows on the palette but leaves #info to the wave preview.
   // poorWas/upWas: last affordability shown, so refreshPanel pulses only on a real change from poor to affordable.
   G={map,grid:map.grid.slice(),wave:0,gold:CFG.startGold,lives:20,towers:[],enemies:[],projs:[],fx:[],spawnQ:[],W:{},time:0,
-     speed:speedPref,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,selAt:0,sellArm:false,sellArmAt:0,sendArmAt:0,
+     speed:speedPref,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,armKept:false,selAt:0,sellArm:false,sellArmAt:0,sendArmAt:0,
      poorWas:{},upWas:null,hintTiles:[],gateFlash:0,running:true};
   if(save){
     G.wave=save.wave;G.cleared=save.wave;G.gold=save.gold;G.lives=save.lives;G.won=!!save.won;
@@ -488,6 +497,8 @@ function waveDone(w){
   if(s.rem<=0&&s.alive<=0&&!G.over){
     delete G.W[w];
     const b=CFG.bonusA+CFG.bonusB*w;G.gold+=b;G.cleared=Math.max(G.cleared,w);
+    // The run only saves when the road is calm, so record a new best right away: leaving mid-wave must not lose it.
+    if(G.cleared>(S.best[G.map.id]||0))recordBest();
     toast(`Wave ${w} cleared · +${b} gold`);
     const calm=!activeWaves()&&!G.spawnQ.length,victory=calm&&G.cleared>=FINAL_WAVE&&!G.won;
     sfx(victory?'win':'clear');
@@ -687,7 +698,11 @@ function layout(){
   cv.width=Math.round(COLS*T*DPR);cv.height=Math.round(ROWS*T*DPR);
   // The toast sits 10px above the board's bottom edge, even when #stage is taller than the board.
   const tst=$('#toast'),sr=$('#stage').getBoundingClientRect(),cr=cv.getBoundingClientRect();
-  tst.style.maxWidth=`${COLS*T-24}px`;tst.style.bottom=(sr.bottom-cr.bottom+10)+'px';
+  tst.style.maxWidth=toastMaxW(tst.classList.contains('safe'));tst.style.left='';tst.style.bottom=(sr.bottom-cr.bottom+10)+'px';
+  // This road's widest run of columns that are grass in rows 12-13 (7 tiles on every road, away from the keep).
+  let run=[0,0];
+  for(let c=0,a=0;c<=COLS;c++){if(c<COLS&&!G.map.grid[12*COLS+c]&&!G.map.grid[13*COLS+c])continue;if(c-a>run[1]-run[0])run=[a,c];a=c+1}
+  toastRun={left:cr.left-sr.left+(run[0]+run[1])/2*T,w:(run[1]-run[0])*T-6};
   bg=buildBG(G.map,T,DPR);
 }
 function drawTower(g,type,lv,x,y,s,ang,flash,time){
@@ -793,7 +808,8 @@ function drawGates(g,s,time){
 }
 function render(time){
   if(!G||!bg)return;
-  const g=ctx,s=T,still=rm();
+  // Every use of time is decorative (spin, pulse, bob, flag), so reduced motion freezes the clock here, for every caller.
+  const g=ctx,s=T,still=rm();if(still)time=0;
   g.setTransform(DPR,0,0,DPR,0,0);
   g.drawImage(bg,0,0,COLS*s,ROWS*s);
   const showRange=(x,y,r,ok)=>{
@@ -880,24 +896,53 @@ function paintTvIcon(t){
   const g=c.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,sz,sz);drawTower(g,t.type,t.level,sz/2,sz/2+1,sz*0.95,-Math.PI/4,0,0);
 }
 let toastTimer=0;
+let toastRun={left:0,w:0};
 function toast(msg,bad,ms=1600){
-  const el=$('#toast');el.textContent=msg;el.classList.toggle('bad',!!bad);el.classList.remove('wrap');el.classList.add('show');
+  const el=$('#toast');el.textContent='';
+  // ' · ' stays with the word before it, so a wrapped toast never starts a line with the dot. textContent is still msg.
+  msg.split(' · ').forEach((p,i,a)=>{
+    if(i===a.length-1){el.append(p);return}
+    const k=p.lastIndexOf(' ')+1,d=document.createElement('span');d.style.whiteSpace='nowrap';d.textContent=p.slice(k)+' ·';el.append(p.slice(0,k),d,' ');
+  });
+  el.classList.toggle('bad',!!bad);el.classList.remove('wrap');el.classList.add('show');
+  // Rows 12-13 cols 2-6 are grass on every road (the keep is at col 1 or 7). While enemies are out, stay inside those 5 tiles,
+  // in two lines at most. If that still cuts the text (small boards), use this road's 7-tile grass run instead.
+  const safe=!!(G&&G.enemies.length);el.classList.toggle('safe',safe);el.style.maxWidth=toastMaxW(safe);el.style.left='';
   if(el.scrollWidth>el.clientWidth+1)el.classList.add('wrap');
+  if(safe&&el.scrollHeight>el.clientHeight+1&&toastRun.w>5*T){el.style.left=toastRun.left+'px';el.style.maxWidth=toastRun.w+'px'}
   clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),ms);
 }
+const toastMaxW=safe=>`${safe?5*T-6:COLS*T-24}px`;
+function hideToast(){clearTimeout(toastTimer);$('#toast').classList.remove('show')}
 // Add a class for ms milliseconds, restarting its animation if it is already on.
 function flashClass(el,cls,ms){
   el.classList.remove(cls);void el.offsetWidth;el.classList.add(cls);
   const k='_t_'+cls;clearTimeout(el[k]);el[k]=setTimeout(()=>el.classList.remove(cls),ms);
 }
 const goldShort=()=>flashClass($('#sGold'),'short',240);
-function statLine(type,lv){
+// Dmg, Range and rate, then the traits that set a tower apart.
+function statParts(type,lv){
   const st=tstats(type,lv),d=TD[type],parts=[`Dmg ${Math.round(st.dmg)}`,`Range ${st.range.toFixed(1)}`,`${(1/st.rate).toFixed(1)}/s`];
   if(d.splash&&type==='mortar')parts.push(`Splash ${st.splash.toFixed(1)}`);
   if(d.slow)parts.push(`Slow ${Math.round(st.slow*100)}%`);
   if(d.chain)parts.push(`Chains ${st.chain}`);
   if(!d.air)parts.push('Ground only');
-  return parts.join(' · ');
+  return parts;
+}
+const statLine=(type,lv)=>statParts(type,lv).join(' · ');
+// The ready line must fit #info's 3 lines beside whatever #bWave says. When the full stat line doesn't fit (narrow phones),
+// it leads with the traits ('Ground only' first) and drops parts from the end, the rate first. Cached per tower and width.
+let readyFit={key:''};
+function fitReady(info,k){
+  const key=k+':'+info.clientWidth;
+  if(readyFit.key===key){if(info.innerHTML!==readyFit.html)info.innerHTML=readyFit.html;return}
+  const head=`<b>${TD[k].name}</b> ready. Tap grass to place it.<br>`,parts=statParts(k,1),fits=()=>info.scrollHeight<=info.clientHeight+1;
+  info.innerHTML=head+parts.join(' · ');
+  if(!fits()){
+    const pri=[...parts.slice(3).reverse(),...parts.slice(0,3)];
+    for(let n=pri.length;n>=1;n--){info.innerHTML=head+pri.slice(0,n).join(' · ');if(fits())break}
+  }
+  readyFit={key,html:info.innerHTML};
 }
 function refreshPanel(){
   if(!G)return;
@@ -911,7 +956,7 @@ function refreshPanel(){
     if(G.poorWas[k]===true&&!poor)flashClass(b,'ready',600);
     G.poorWas[k]=poor;
   }
-  let coach=false;
+  let coach=false,ready=null;
   if(t){
     const nx=upCost(t),upPoor=t.level<3&&G.gold<nx;
     $('#tvName').textContent=`${TD[t.type].name} · Level ${t.level}`;
@@ -932,7 +977,7 @@ function refreshPanel(){
     G.upWas=null;
     if(G.sel&&G.pending){const d=TD[G.pending];info.innerHTML=`<b>${d.name}</b> · ${d.desc}<br>${G.gold>=d.cost?'Tap again to build.':'Not enough gold yet.'}`}
     else if(G.sel)info.innerHTML='Pick a tower to place here.';
-    else if(G.pending)info.innerHTML=`<b>${TD[G.pending].name}</b> ready. Tap grass to place it.<br>${statLine(G.pending,1)}`;
+    else if(G.pending&&!G.armKept)ready=G.pending; // written by fitReady once #bWave has its label
     else if(G.wave===0&&!G.towers.length){coach=true;info.innerHTML='<b>Build first:</b> tap a grass tile beside the road.'}
     else if(G.spawnQ.length)info.innerHTML=`Wave <b>${G.wave}</b> is marching in.`;
     else info.innerHTML=`Next: <b>${waveSummary(G.wave+1)}</b>`;
@@ -942,8 +987,10 @@ function refreshPanel(){
   if(G.spawnQ.length){bw.disabled=true;bw.textContent=`Wave ${G.wave}…`}
   else if(activeWaves()){bw.disabled=false;bw.textContent=`Call ${G.wave+1} early`}
   else{bw.disabled=false;bw.textContent=G.wave===0?(sendArmed()?'Send anyway?':'Start wave 1'):`Start wave ${G.wave+1}`}
+  if(ready)fitReady(info,ready);
 }
-// Wave-1 guard: the first tap on 'Start wave 1' with no towers only warns; a second tap within 3s sends it.
+// Wave-1 guard: the first tap on 'Start wave 1' with no towers only warns; a second tap 0.4s-3s later sends it.
+const NO_TOWERS='No towers yet. Enemies will walk straight in.',SEND_GAP=400;
 const sendArmed=()=>G.sendArmAt>0&&performance.now()-G.sendArmAt<3000;
 let hudCache={};
 function updateHud(force){
@@ -956,15 +1003,15 @@ function updateHud(force){
   $('#sWave').innerHTML=G.wave>FINAL_WAVE?`Wave&nbsp;<b>${G.wave}</b>`:`Wave&nbsp;<b>${G.wave}</b>/${FINAL_WAVE}`;
   if(goldChanged||force)refreshPanel();
 }
-function deselect(){G.sel=null;G.selTower=null;G.pending=null;G.sellArm=false}
+function deselect(){G.sel=null;G.selTower=null;G.pending=null;G.armKept=false;G.sellArm=false}
 // A tower can be armed before or after picking a tile. With no tile, tapping the armed tower again disarms it.
 function onPalette(k){
   audioInit();if(!G)return;
   if(!G.sel){
     if(G.pending===k)G.pending=null;else{G.selTower=null;G.sellArm=false;G.pending=k}
-    refreshPanel();return;
+    G.armKept=false;refreshPanel();return;
   }
-  if(G.pending===k)tryBuild();else{G.pending=k;G.selAt=0;refreshPanel()}
+  if(G.pending===k)tryBuild();else{G.pending=k;G.armKept=false;G.selAt=0;refreshPanel()}
 }
 function tryBuild(){
   const k=G.pending,{c,r}=G.sel,d=TD[k];
@@ -972,7 +1019,9 @@ function tryBuild(){
   G.gold-=d.cost;const t=placeTower(k,c,r);t.refund=isCalm()?d.cost:0;
   sfx('build');burst(c+0.5,r+0.6,'#d8c99f',6,false);
   // Keep the tower armed, so the next one of the same type is tile, tile.
-  G.sel=null;G.sendArmAt=0;
+  G.sel=null;G.armKept=true;
+  // A tower now stands, so the wave-1 warning no longer applies: take it down with the arm.
+  if(G.sendArmAt){G.sendArmAt=0;if($('#toast').textContent===NO_TOWERS)hideToast()}
   if(!S.tutorialDone||G.hintTiles.length){G.hintTiles=[];S.tutorialDone=true;persist()}
   if(!S.refundTip&&t.refund){S.refundTip=true;persist();toast('Changed your mind? Full refund until the next wave.',false,3000)}
   refreshPanel();updateHud(true);saveRunIfCalm();
@@ -1014,8 +1063,10 @@ $('#bSell').addEventListener('click',()=>{
 $('#bWave').addEventListener('click',()=>{
   audioInit();if(!G)return;
   if(G.wave===0&&!G.towers.length&&!sendArmed()){
-    G.sendArmAt=performance.now();toast('No towers yet. Enemies will walk straight in.',true,3000);sfx('no');refreshPanel();return;
+    G.sendArmAt=performance.now();toast(NO_TOWERS,true,3000);sfx('no');refreshPanel();return;
   }
+  // The confirming tap has to be its own tap: the second half of a quick double tap is ignored.
+  if(G.wave===0&&!G.towers.length&&performance.now()-G.sendArmAt<SEND_GAP)return;
   G.sendArmAt=0;startWave();updateHud(true);
 });
 $('#bSpeed').addEventListener('click',()=>{if(!G)return;G.speed=speedPref=G.speed===1?2:G.speed===2?3:1;S.speed=G.speed;persist();syncSpeed()});
@@ -1024,11 +1075,15 @@ function setPause(p){
   if(!G||G.over)return;G.paused=p;$('#pauseOv').hidden=!p;disarmRestart();
   if(p){
     $('#pauseInfo').textContent=`${G.map.name} · wave ${G.wave}`;
-    // Leaving mid-wave goes back to the last cleared wave, so say so.
-    $('#bMenu').innerHTML=activeWaves()||G.spawnQ.length?`Main menu<small>Wave ${G.wave} restarts</small>`:'Main menu';
+    // Leaving mid-wave resumes from the road's saved run, which is the last calm moment. After early calls that can be several waves back.
+    $('#bMenu').innerHTML=activeWaves()||G.spawnQ.length?`Main menu<small>${restartNote()}</small>`:'Main menu';
   }
   syncOv();
   if(!p)focusEl($('#bPause'));
+}
+function restartNote(){
+  const sv=S.saves[G.map.id],from=sv?sv.wave+1:1;
+  return from<G.wave?`Waves ${from}-${G.wave} restart`:`Wave ${G.wave} restarts`;
 }
 $('#bPause').addEventListener('click',()=>setPause(true));
 $('#bResume').addEventListener('click',()=>setPause(false));
@@ -1040,14 +1095,17 @@ $('#bRestart').addEventListener('click',()=>{
   if(!b.classList.contains('armed')){disarmRestart();b.classList.add('armed');b.textContent='Tap again to restart';restartTimer=setTimeout(disarmRestart,3500);return}
   disarmRestart();const m=G.map;delete S.saves[m.id];persist();$('#pauseOv').hidden=true;newGame(m);syncOv();focusEl($('#bPause'));
 });
-$('#bMenu').addEventListener('click',()=>{saveRunIfCalm();disarmRestart();$('#pauseOv').hidden=true;showMenu()});
+$('#bMenu').addEventListener('click',()=>{saveRunIfCalm();disarmRestart();$('#pauseOv').hidden=true;guardMenu();showMenu()});
 function saveRunIfCalm(){if(G&&G.running&&!G.over&&isCalm())saveRun()}
 $('#bEndMain').addEventListener('click',()=>{
   $('#endOv').hidden=true;syncOv();pushGame();
   if(G.won&&!G.over){G.paused=false;refreshPanel();return}
   newGame(G.map);
 });
-$('#bEndAlt').addEventListener('click',()=>{$('#endOv').hidden=true;showMenu()});
+$('#bEndAlt').addEventListener('click',()=>{$('#endOv').hidden=true;guardMenu();showMenu()});
+// Main menu sits where a road card opens. For 350ms after it is tapped, the cards and Continue ignore taps, so a double tap stays on the menu.
+let menuGuardAt=-1e9;
+const MENU_GUARD=350,guardMenu=()=>{menuGuardAt=performance.now()},menuGuardLeft=()=>Math.max(0,MENU_GUARD-(performance.now()-menuGuardAt));
 // Sound and vibration pills. The label text is the state ('Sound: on'); the icon swaps with class 'off'.
 function syncPill(id,label,on){const b=$(id);b.classList.toggle('off',!on);b.querySelector('span').textContent=`${label}: ${on?'on':'off'}`}
 function syncMute(){for(const id of ['#bMute','#bMute2'])syncPill(id,'Sound',AU.on)}
@@ -1108,7 +1166,7 @@ function showMenu(){
     txt.innerHTML=`<div class="mn">${m.name}<span class="tag ${m.diff}">${m.diff}</span></div>${md}`;
     b.append(c,txt);box.append(b);
     // A road with a saved run resumes it. Starting over is Pause > Restart road.
-    b.addEventListener('click',()=>{audioInit();$('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true;pushGame();syncOv()});
+    b.addEventListener('click',()=>{if(menuGuardLeft())return;audioInit();$('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true;pushGame();syncOv()});
     requestAnimationFrame(()=>{const dpr=Math.min(3,window.devicePixelRatio||1),ts=5;const img=buildBG(m,ts,dpr);
       c.width=img.width;c.height=img.height;c.getContext('2d').drawImage(img,0,0)});
   }
@@ -1121,7 +1179,7 @@ function showMenu(){
 // The road Continue resumes: the one saved most recently, else the first road with a save.
 function continueMap(){return MAPS.find(m=>m.id===S.last&&S.saves[m.id])||MAPS.find(m=>S.saves[m.id])}
 $('#bContinue').addEventListener('click',()=>{
-  audioInit();const m=continueMap();if(!m)return;
+  if(menuGuardLeft())return;audioInit();const m=continueMap();if(!m)return;
   $('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true;pushGame();syncOv();
 });
 
@@ -1132,7 +1190,7 @@ function frame(now){
   if(G&&G.running&&!G.paused&&!G.over){for(let i=0;i<G.speed;i++){step(dt);if(G.over)break}}
   if(G&&G.sellArm&&now-G.sellArmAt>3500){G.sellArm=false;refreshPanel()}
   if(G&&G.sendArmAt&&now-G.sendArmAt>3000){G.sendArmAt=0;refreshPanel()}
-  if(G){render(rm()?0:now/1000);updateHud(false)}
+  if(G){render(now/1000);updateHud(false)}
   requestAnimationFrame(frame);
 }
 let rz=0;
@@ -1149,7 +1207,7 @@ paintIcons();showMenu();requestAnimationFrame(frame);
 window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,refreshPanel,sellValue,hintTiles:i=>hintTiles(MAPS[i]),step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
   CFG,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
-  hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},render:t=>render(rm()?0:(t??performance.now()/1000)),rm,syncOv,spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
+  hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},render:t=>render(t??performance.now()/1000),rm,syncOv,toast,menuGuardLeft,spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
 
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
   window.addEventListener('load',()=>{try{navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){}});
