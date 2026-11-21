@@ -3690,6 +3690,34 @@ let BASE;
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
+  // At 320px the wave-6 preview wraps (Grunt, Scout and Brute, then the Wisp alone on a second row). The Scout's detail is 2 lines,
+  // so #info shrinks and re-centres in #phead, 9px lower. The spots were kept relative to #info, so a tap where the Wisp was showed
+  // the Grunt; one below the short detail fell outside #info. They are now kept relative to #phead, which listens for the taps.
+  {
+    const { ctx, page } = await newPage(browser, { viewport: { width: 320, height: 568 } });
+    await startMap(page, 0);
+    await G(page, () => window.__pw.build('long', 2, 2));
+    const tip = () => G(page, () => { const g = window.__pw.G, r = document.querySelector('#info').getBoundingClientRect(); return { type: g.chipTip && g.chipTip.type, msg: document.querySelector('#infoMsg').textContent, info: [Math.round(r.top), Math.round(r.bottom)] }; });
+    const tap = async (x, y) => { await page.touchscreen.tap(x, y); await page.waitForTimeout(60); return tip(); };
+    for (const st of ['calm', 'early']) {
+      const s = await G(page, st => { const W = window.__pw, g = W.G; g.running = false; W.S.seen = Object.keys(W.ED); g.wave = 5; g.spawnQ = []; g.W = st === 'early' ? { 5: { rem: 0, alive: 1 } } : {}; g.chipTip = null; W.refreshPanel();
+        const box = e => { const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, top: Math.round(r.top), bottom: Math.round(r.bottom) }; }, q = x => document.querySelector(x);
+        return { bw: q('#bWave').textContent, gap: (q('#info').getBoundingClientRect().right + q('#bWave').getBoundingClientRect().left) / 2, info: box(q('#info')), c: Object.fromEntries([...document.querySelectorAll('#chips .chip')].map(c => [c.dataset.t, box(c)])) }; }, st);
+      const c = s.c, rows = !!(c.wisp && c.grunt && c.scout && c.wisp.top >= c.grunt.bottom && c.scout.top === c.grunt.top);
+      check(rows, `320px, wave 6 ${st} ('${s.bw}'): the preview wraps, with the Wisp alone on a second row ` + JSON.stringify(c));
+      if (!rows) continue;
+      const a = await tap(c.scout.x, c.scout.y), b = await tap(c.wisp.x, c.wisp.y);
+      check(a.type === 'scout' && b.type === 'wisp' && b.msg.startsWith('Wisp ×'), `${st}: with the Scout's detail open (#info y ${a.info.join('-')}, was ${s.info.top}-${s.info.bottom}), a tap where the Wisp was shows the Wisp (it showed the Grunt) ` + JSON.stringify([a.type, b.type]));
+      const d = await tap(c.scout.x, c.scout.y), e = await tap(c.wisp.x, c.wisp.bottom - 2);
+      check(d.type === 'scout' && e.type === 'wisp', `${st}: so does a tap on the lower edge of where the Wisp was (y ${Math.round(c.wisp.bottom - 2)}), below the Scout's short detail (#info ends at ${d.info[1]}) ` + JSON.stringify([d.type, e.type]));
+      const f = await tap(c.grunt.x, c.grunt.y);
+      await page.mouse.click(s.gap, c.grunt.y); await page.waitForTimeout(60);
+      const h = await tip(), k = await tap(c.grunt.x, c.grunt.y);
+      check(f.type === 'grunt' && h.type === 'grunt' && k.type === null, `${st}: the Grunt shows, a click in the gap before the wave button leaves it, and a tap where the Grunt was closes it ` + JSON.stringify([f.type, h.type, k.type]));
+    }
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
 
   // Each tab read the store once and wrote all of it back, so a stale tab put old runs, bests and stars back over newer ones.
   current = 'release review: two tabs share one store';

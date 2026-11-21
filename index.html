@@ -1591,14 +1591,17 @@ function newLines(type){
 }
 // A chip shows its type in #info for 4s, then the chips come back. The detail is read out too (#sr).
 // Enter or Space on #chips picks the first chip; pressed again while a detail shows, the next one.
-// The detail takes the row's place, so the row's spots (spots: each chip's and tag's box, relative to #info, from when the row
-// last showed) are kept: a tap where another chip was shows that one, and a tap where this one was closes the detail.
+// The detail takes the row's place, so the row's spots (spots: each chip's and tag's box from when the row last showed) are kept:
+// a tap where another chip was shows that one, and a tap where this one was closes the detail.
+// The spots are relative to #phead, not #info: #phead is always 50px tall, while #info is centred in it and shrinks to its content,
+// so a 2-line detail (the Scout's) under a two-row preview moves #info's top down 9px and would shift every spot with it.
 const TIP_MS=4000;
+const chipSpots=()=>{const pb=$('#phead').getBoundingClientRect();
+  return [...$('#chips').querySelectorAll('.chip,.theme[data-t]')].map(c=>{const r=c.getBoundingClientRect();
+    return {t:c.dataset.t,l:r.left-pb.left,r:r.right-pb.left,top:r.top-pb.top,b:r.bottom-pb.top}}).filter(x=>x.r>x.l)};
 function showTip(type){
   if(!G||G.over||!BLURB[type])return;
-  const chips=$('#chips'),ib=$('#info').getBoundingClientRect(),open=G.chipTip&&G.chipTip.key===chipKey;
-  const spots=(open&&G.chipTip.spots)||[...chips.querySelectorAll('.chip,.theme[data-t]')].map(c=>{const r=c.getBoundingClientRect();
-    return {t:c.dataset.t,l:r.left-ib.left,r:r.right-ib.left,top:r.top-ib.top,b:r.bottom-ib.top}}).filter(x=>x.r>x.l);
+  const open=G.chipTip&&G.chipTip.key===chipKey,spots=(open&&G.chipTip.spots)||chipSpots();
   G.modeTip=null;G.chipTip={type,key:chipKey,until:performance.now()+TIP_MS,spots};refreshPanel();
   say(chipDetail(type)[0].replace(/<[^>]+>/g,''));
 }
@@ -1795,18 +1798,18 @@ cv.addEventListener('focus',()=>{if(G){const p=curTile();if(cv.matches(':focus-v
 $('#stage').addEventListener('pointerdown',ev=>{if(ev.target!==cv)onBoardTap(-1,-1)});
 // A tap on a chip picks it, and a tap on the theme tag the type the theme is built on (its data-t, see syncChips). A tap elsewhere
 // on the row picks the one nearest the finger: the chips are only 16px tall. While a detail shows (the row folded away under it),
-// a tap anywhere on #info goes to the chip that was nearest there: another chip shows its detail, the same one closes it.
+// a tap anywhere over #info's column of #phead goes to the chip that was nearest there: another chip shows its detail, the same one
+// closes it. That includes the strip above or below a detail shorter than the row, where a second-row chip was.
 const nearest=(list,x,y)=>{let best=null,bd=1e9;
   for(const b of list){const dx=Math.max(b.l-x,0,x-b.r),dy=Math.max(b.top-y,0,y-b.b),d=dx*dx+dy*dy;if(d<bd){bd=d;best=b}}return best};
-$('#info').addEventListener('click',ev=>{
-  if(!G)return;
-  const hit=ev.target.closest&&ev.target.closest('#chips .chip,#chips .theme');if(hit){if(hit.dataset.t)showTip(hit.dataset.t);return}
-  const ib=$('#info').getBoundingClientRect(),x=ev.clientX-ib.left,y=ev.clientY-ib.top,tip=G.chipTip&&G.chipTip.key===chipKey?G.chipTip:null;
-  if(tip&&!$('#chips').hidden){const b=nearest(tip.spots||[],x,y);if(!b||b.t===tip.type)closeTip();else showTip(b.t);return}
-  if(!ev.target.closest||!ev.target.closest('#chips'))return;
-  const b=nearest([...$('#chips').querySelectorAll('.chip,.theme[data-t]')].map(c=>{const r=c.getBoundingClientRect();
-    return {t:c.dataset.t,l:r.left-ib.left,r:r.right-ib.left,top:r.top-ib.top,b:r.bottom-ib.top}}).filter(x=>x.r>x.l),x,y);
-  if(b)showTip(b.t);
+$('#phead').addEventListener('click',ev=>{
+  if(!G||!ev.target.closest||ev.target.closest('#bWave'))return;
+  const hit=ev.target.closest('#chips .chip,#chips .theme');if(hit){if(hit.dataset.t)showTip(hit.dataset.t);return}
+  const pb=$('#phead').getBoundingClientRect(),x=ev.clientX-pb.left,y=ev.clientY-pb.top,tip=G.chipTip&&G.chipTip.key===chipKey?G.chipTip:null;
+  if(tip&&!$('#chips').hidden){if(ev.clientX>$('#info').getBoundingClientRect().right)return;
+    const b=nearest(tip.spots||[],x,y);if(!b||b.t===tip.type)closeTip();else showTip(b.t);return}
+  if(!ev.target.closest('#chips'))return;
+  const b=nearest(chipSpots(),x,y);if(b)showTip(b.t);
 });
 $('#chips').addEventListener('keydown',ev=>{
   if(ev.key!=='Enter'&&ev.key!==' ')return;ev.preventDefault();if(ev.repeat||!G)return;
