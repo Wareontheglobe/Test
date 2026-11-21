@@ -69,6 +69,11 @@ button{touch-action:manipulation}
 .counts b{margin-left:auto;font-family:var(--f-mono);font-weight:500;font-variant-numeric:tabular-nums}
 .sw{width:9px;height:9px;border-radius:50%;flex:none}
 #spark{width:100%;height:38px;display:block}
+/* the census news line: a rival trait that is spreading (brass while fresh), else the most common rival. In the wide HUD
+   a fixed two-line box: the panel is 232 px, 'Most common rival: Micromonas simplex (26)' takes two lines and a short
+   name one, so a free line made the field refit as the names changed. One line with an ellipsis in the compact layouts */
+#dominant{height:2.7em;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;transition:color .4s}
+#dominant.fresh{color:var(--brass)}
 .toasts{position:fixed;left:50%;transform:translateX(-50%);top:80px;display:grid;justify-items:center;gap:6px;pointer-events:none;width:min(92vw,420px);z-index:3}
 .toast{font-size:13px;background:var(--panel-solid);color:var(--ink);border:1px solid var(--line);padding:6px 12px;border-radius:99px;animation:tin .25s ease-out;text-align:center}
 @keyframes tin{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
@@ -164,6 +169,8 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .up:disabled .cost::after{display:none}
   #burst{width:auto;min-height:44px}
   .hide-sm{display:none}
+  /* one 11 px line (13.2 px): on short phones the Census panel then stays no taller than the Specimen panel */
+  #dominant{display:block;height:auto;white-space:nowrap;text-overflow:ellipsis;font-size:11px;line-height:1.2}
 }
 @media (max-width:560px){
   .panel{padding:9px 10px;gap:5px}
@@ -235,9 +242,15 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .top>.panel:first-child,.top>.panel:last-child{flex:none;width:auto}
   .tray{grid-template-columns:repeat(3,minmax(0,1fr))}
   #burst{grid-column:span 2}
+  /* the news line shares the Census head's row with Pause (the eyebrow is hidden here), so the stacked panels are no
+     taller than before it and the field stays limited by the width */
+  .top>.panel:last-child{grid-template-columns:minmax(0,1fr) auto}
+  .top>.panel:last-child>*{grid-column:1/-1}
+  .top>.panel:last-child>.panel-head{grid-column:2;grid-row:1}
+  .top>.panel:last-child>#dominant{grid-column:1;grid-row:1;align-self:center}
 }
 @media (hover:none) and (pointer:coarse){.up kbd,#burst small{display:none}#burst.low>.blow{display:block}}
-@media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}.up.nope{animation:none}
+@media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}.up.nope{animation:none}#dominant{transition:none}
   #burst.nope{animation:none}#burst .bcd{transition:none}#burst.fired{animation:firedRM .4s step-end} /* a static brief tint */}
 </style>
 <style>body{margin:0}</style>
@@ -264,7 +277,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
         <div><span class="sw" style="background:var(--hud-kin)"></span>Your kin<b id="nK">0</b></div>
       </div>
       <canvas id="spark" aria-hidden="true"></canvas>
-      <div class="small hide-sm" id="dominant">Most common rival: none yet</div>
+      <div class="small" id="dominant">Most common rival: none yet</div>
     </section>
   </div>
   <div class="tray" id="tray">
@@ -366,6 +379,9 @@ const cam={x:0,y:0,v:430,ang:0};
 let dna=0,gen=1,kills=0,lineT=0,heirs=0,maxSeen={},won=false,paused=false,hints=0,migrantT=45,saveT=8,booted=false;
 let hist=[],histT=0,hudT=0,nextId=1;
 let errN=0,updErr=false; // frame errors so far; true while the last update() threw (saves are skipped then)
+// the census news line (news()): its two texts (wide HUD, compact HUD) and the lineT it came at; lastRivalNews: the lineT
+// of the last rival-evolution item. maxSeen (saved): per gene, the highest rival level announced so far
+let newsTxt='',newsSm='',newsT=-1e9,lastRivalNews=0;
 
 function binomial(g,r){
   const i=clamp(Math.floor((r-6)/7),0,4);
@@ -415,6 +431,8 @@ function initWorld(){
   for(let i=0;i<300;i++)spawnAlgae();
   for(let i=0;i<34;i++)cells.push(newAI(false));
   for(let i=0;i<7;i++)cells.push(newAI(true));
+  // staggered ages: from age 0 the age>8 breeding gate released all 41 at t=8 s together (life spans are 100-170 s)
+  for(const c of cells)c.age=rand(0,8);
   maxSeen={};GENES.forEach(k=>maxSeen[k]=Math.max(...cells.map(c=>c.g[k])));
 }
 function applyLv(p){
@@ -427,7 +445,7 @@ function startLineage(){
   if(mode==='play'&&player)recordBest(gen,lineT);
   else{const sv=loadSave();if(sv&&sv.v===1)recordBest(sv.gen||0,sv.lineT||0)}
   initWorld();
-  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=0;migrantT=45;clearSave();
+  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=0;migrantT=45;lastRivalNews=0;newsT=-1e9;clearSave();
   lastCensus=census();histT=1.5;
   let x=0,y=0;
   for(let i=0;i<80;i++){const b=blooms[i%blooms.length];x=b.x+rand(-60,60);y=b.y+rand(-60,60);if(i>40)[x,y]=randInDish(150);if(cells.every(c=>!c.g.jaws||Math.hypot(c.x-x,c.y-y)>380))break}
@@ -437,7 +455,7 @@ function startLineage(){
   cam.x=x;cam.y=y;cam.v=viewR();
   mode='play';paused=false;
   showOnly(null);
-  toast('Eat the green algae to fill your energy.');
+  toast('Eat the green algae to fill your energy.',{pri:2,ms:5000});
   refreshHud(true);
 }
 function viewR(){return player?150+player.r*6+player.g.eye*45:430}
@@ -451,7 +469,7 @@ function spawnMigrant(){
   const g={speed:clamp(player.g.speed-(Math.random()<.5?1:0),0,MAX.speed),jaws:r>25?2:1,spikes:Math.random()<.3?1:0,armor:clamp(Math.floor(r/14),0,3),photo:0,eye:1};
   const c=makeCell(x,y,r,g,rand(285,315),{announce:5,stalk:30,migrant:true});
   c.en=c.maxEn*.4;cells.push(c);
-  toast('A larger hunter has drifted into the dish.');
+  toast('A larger hunter has drifted into the dish.',{pri:2});
 }
 
 /* ---------- save & resume ---------- */
@@ -491,9 +509,12 @@ function restore(sv){
     const okB=Array.isArray(sv.blooms)&&sv.blooms.length&&sv.blooms.every(b=>b&&fin([b.x,b.y,b.s,b.vx,b.vy]));
     const nb=okB?sv.blooms.map(({x,y,s,vx,vy})=>({x,y,s,vx,vy})):blooms;
     const nh=Array.isArray(sv.hist)?sv.hist.filter(p=>p&&fin([p.g,p.h,p.k])).slice(-80):[];
+    // maxSeen: the highest rival level announced. A gene the save lacks starts from what the rivals already carry, as a
+    // new dish does (initWorld), so that isn't announced as news; a saved level is kept as it is (raising it to the live
+    // maximum would skip the news of a level one rival carries but that hasn't spread yet)
     const ms={};
-    for(const k of GENES){let m=num(sv.maxSeen&&sv.maxSeen[k],0);for(const c of nc)if(!c.isPlayer&&!c.kin&&c.g[k]>m)m=c.g[k];ms[k]=m}
-    cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;maxSeen=ms;
+    for(const k of GENES){let m=0;for(const c of nc)if(!c.isPlayer&&!c.kin&&c.g[k]>m)m=c.g[k];ms[k]=clamp(Math.round(num(sv.maxSeen&&sv.maxSeen[k],m)),0,MAX[k])}
+    cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;maxSeen=ms;lastRivalNews=0;newsT=-1e9;
     dna=num(sv.dna,0);gen=Math.max(1,num(sv.gen,1));kills=num(sv.kills,0);lineT=num(sv.lineT,0);heirs=num(sv.heirs,0);won=!!sv.won;hints=num(sv.hints,0)|0;migrantT=num(sv.migrantT,45);
     player.shield=2;cam.x=player.x;cam.y=player.y;cam.v=viewR();
     mode='play';paused=false;lastCensus=census();
@@ -525,7 +546,6 @@ function offspring(p){
   const ch=makeCell(p.x+Math.cos(a)*p.r*1.3,p.y+Math.sin(a)*p.r*1.3,r,g,hue,{kin});
   ch.vx=Math.cos(a)*50;ch.vy=Math.sin(a)*50;
   cells.push(ch);
-  if(!kin&&mode==='play') for(const k of GENES) if(g[k]>maxSeen[k]){maxSeen[k]=g[k];toast(`Rivals evolved ${GNAME[k]} ${ROMAN[g[k]]}`)}
   return ch;
 }
 function divide(){
@@ -535,7 +555,7 @@ function divide(){
   if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5}
   floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);
   askPersist();
-  if(!(hints&2)){hints|=2;toast('You divided. Spend DNA in the tray to evolve.')}
+  if(!(hints&2)){hints|=2;toast('You divided. Spend DNA in the tray to evolve.',{pri:2,ms:5000})}
 }
 function kill(c,killer){
   if(c.dead)return;c.dead=true;
@@ -557,7 +577,7 @@ function recordBest(g,tm){
 function onPlayerDeath(){
   let best=null,bd=Infinity;
   for(const k of cells) if(k.kin&&!k.dead){const d=Math.hypot(k.x-player.x,k.y-player.y);if(d<bd){bd=d;best=k}}
-  if(best){const shrank=player.lv.size>0;takeover(best);heirs++;toast(shrank?'Your lineage lives on in your offspring. Membrane −1.':'Your lineage lives on in your offspring.')}
+  if(best){const shrank=player.lv.size>0;takeover(best);heirs++;toast(shrank?'Your lineage lives on in your offspring. Membrane −1.':'Your lineage lives on in your offspring.',{pri:2})}
   else{
     const final=binomial(player.g,player.r);
     player=null;mode='over';clearSave();
@@ -837,9 +857,9 @@ function update(dt){
     cam.ang+=dt*.05;const tx=Math.cos(cam.ang)*520,ty=Math.sin(cam.ang*1.3)*420;
     cam.x+=(tx-cam.x)*Math.min(1,dt*.5);cam.y+=(ty-cam.y)*Math.min(1,dt*.5);cam.v+=(430-cam.v)*Math.min(1,dt);
   }
-  if(mode==='play'&&player){const lo=player.en<player.maxEn*.15;if(lo&&!player.warned){player.warned=true;toast(player.g.jaws?'Starving. Hunt something or eat algae.':'Starving. Find algae soon.')}else if(player.en>player.maxEn*.4)player.warned=false}
+  if(mode==='play'&&player){const lo=player.en<player.maxEn*.15;if(lo&&!player.warned){player.warned=true;toast(player.g.jaws?'Starving. Hunt something or eat algae.':'Starving. Find algae soon.',{pri:2})}else if(player.en>player.maxEn*.4)player.warned=false}
   if(mode==='play'&&player){migrantT-=dt;if(migrantT<=0){migrantT=rand(70,110);spawnMigrant()}}
-  if(mode==='play'&&player&&!(hints&1)&&lineT>9){hints|=1;toast('Violet cells are hunters. Big ones can eat you.')}
+  if(mode==='play'&&player&&!(hints&1)&&lineT>9){hints|=1;toast('Violet cells are hunters. Big ones can eat you.',{pri:2,ms:5000})}
   histT-=dt;
   if(histT<=0){histT=1.5;sample()}
 }
@@ -854,6 +874,27 @@ function sample(){
   lastCensus=census();
   hist.push(lastCensus);if(hist.length>80)hist.shift();
   drawSpark();
+  rivalNews();
+}
+// Rival evolution is news only once a new level has spread: the next level of a gene (above the highest announced)
+// carried by 5+ grazers or 5+ hunters, or by 12%+ of that class (Jaws: hunters only), and always by 3 or more: the
+// hunters are often under 10, so 12% alone would announce a single mutant. Migrants don't count: they drift in with
+// Eyespot I and Plating already. One item per 25 s, none in a lineage's first 30 s, on the census news line (a single
+// mutant used to toast at once: 4-5 of them in the first 12 s)
+const SNAME={...GNAME,photo:'Chloro'}; // the compact HUD's trait names, as in the compact tray
+function rivalNews(){
+  if(mode!=='play'||!(lineT>30)||lineT-lastRivalNews<=25)return;
+  const C=lastCensus,ok=(n,of)=>n>=3&&(n>=5||n>=of*.12);
+  for(const k of GENES){
+    const L=(maxSeen[k]||0)+1;if(L>MAX[k])continue;
+    let ng=0,nh=0;for(const c of cells)if(!c.isPlayer&&!c.kin&&!c.migrant&&c.g[k]>=L){if(c.g.jaws)nh++;else ng++}
+    const okG=k!=='jaws'&&ok(ng,C.g),okH=ok(nh,C.h);if(!okG&&!okH)continue;
+    const h=okH&&!(okG&&ng>=nh),n=h?nh:ng,cls=h?'hunters':'grazers'; // both classes: the one with more carriers
+    maxSeen[k]=L;lastRivalNews=lineT;
+    news(`${GNAME[k]} ${ROMAN[L]} is spreading among ${cls} (${n})`,`${SNAME[k]} ${ROMAN[L]} · ${n} ${cls}`);
+    if(k==='jaws')toast('Hunters with Jaws '+ROMAN[L]+' are spreading. Their bites hurt more.',{pri:1});
+    return;
+  }
 }
 
 /* ---------- rendering ---------- */
@@ -1108,7 +1149,7 @@ function buy(i){
   if(dna<c){bumpEl($('dnaBox'),'nope');bumpEl(upBtns[i],'nope');bumpEl($('dna2'),'bad');return}
   const before=stageName(player);
   dna-=c;player.lv[u.k]++;applyLv(player);
-  if(u.k==='jaws'&&player.lv.jaws===1)toast('Jaws: you can eat cells 12% smaller than you.');
+  if(u.k==='jaws'&&player.lv.jaws===1)toast('Jaws: you can eat cells 12% smaller than you.',{pri:2,ms:5000});
   const after=stageName(player);
   if(after!==before)toast('Stage reached: '+after);
   if(player.lv.size>=9&&!won){won=true;paused=true;$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));showOnly('ovWin');$('contBtn').focus()}
@@ -1156,12 +1197,23 @@ function refreshHud(force){
   }
   setT('dna',dna);setT('dna2','DNA '+dna);
   const c=lastCensus;setT('nG',c.g);setT('nH',c.h);setT('nK',c.k);
-  setT('dominant',c.dom?`Most common rival: ${c.dom} (${c.dn})`:'Most common rival: none yet');
+  // the news line: an item for 8 s of play (brass for the first 2.5 s), then the most common rival. The compact HUD has
+  // one short line: 'Rival:' and the genus as an initial ('M. simplex'), news in its short form
+  const cm=COMPACT.matches,age=mode==='play'?lineT-newsT:1e9,fresh=age<2.5;
+  setT('dominant',age<8?(cm?newsSm:newsTxt):(cm?'Rival: ':'Most common rival: ')+(c.dom?`${cm?c.dom.replace(/^(\w)\w* /,'$1. '):c.dom} (${c.dn})`:'none yet'));
+  if(hudC.fresh!==fresh){hudC.fresh=fresh;hEl('dominant').classList.toggle('fresh',fresh)}
 }
-let toastQ=0;
-function toast(msg){
-  const box=$('toasts'),el=document.createElement('div');el.className='toast';el.textContent=msg;box.appendChild(el);
-  while(box.children.length>3)box.firstChild.remove();setTimeout(()=>el.remove(),3400);
+// msg on the census news line (the wide HUD), sm in the compact HUD
+function news(msg,sm=msg){newsTxt=msg;newsSm=sm;newsT=lineT;refreshHud()}
+// o.ms: how long it shows (3400 ms). o.pri: 0 minor, 1 normal, 2 coaching or danger (also the takeover and the error
+// notice: a pri-1 toast is dropped at once while two pri-2 ones, say starving and a larger hunter, fill a phone's slots).
+// At most 2 show on phones, 3 elsewhere: while there are more, the oldest of the lowest priority goes, so a pri-2 toast
+// only ever makes way for another pri-2 one (and a new toast below everything on screen is dropped at once)
+function toast(msg,o={}){
+  const box=$('toasts'),el=document.createElement('div'),pri=o.pri??1;
+  el.className='toast';el.textContent=msg;el.dataset.pri=pri;box.appendChild(el);
+  for(const cap=COMPACT.matches?2:3;box.children.length>cap;){let v=null;for(const e of box.children)if(!v||+e.dataset.pri<+v.dataset.pri)v=e;v.remove()}
+  setTimeout(()=>el.remove(),o.ms||3400);
 }
 /* ---------- installed app: Back pauses, the screen stays awake, the save is kept ---------- */
 // Installed to the home screen. Never in a frame: display-mode is the top window's (F11 fullscreen counts), so without
@@ -1288,7 +1340,7 @@ let last=performance.now();
 // keep drawing for ms of real time even while paused, for an effect that must play out behind a card
 const wake=ms=>{wakeUntil=Math.max(wakeUntil,performance.now()+ms)};
 // The first error is rethrown outside the loop so it still reaches the console; a persistent one is reported once.
-function onErr(e){if(++errN===1)setTimeout(()=>{throw e});if(errN===60)toast('Something went wrong. Your last autosave is kept.')}
+function onErr(e){if(++errN===1)setTimeout(()=>{throw e});if(errN===60)toast('Something went wrong. Your last autosave is kept.',{pri:2})}
 function frame(now){
   requestAnimationFrame(frame); // re-arm first: an exception below can never stop the loop
   if(!booted)return;
