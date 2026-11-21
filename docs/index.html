@@ -72,7 +72,13 @@ button{touch-action:manipulation}
 .dna span:last-child{font-family:var(--f-display);font-size:24px;font-weight:700;color:var(--brass);font-variant-numeric:tabular-nums}
 .dna.nope{animation:shake .3s}
 @keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
-.ups{display:flex;gap:6px;overflow-x:auto;min-width:0;pointer-events:auto;scrollbar-width:thin;padding-bottom:2px}
+/* an unaffordable trait tap: the colour flashes are animations only, so nothing stays red afterwards */
+.up.nope{animation:shake .3s}
+.up.nope .cost{animation:bad .6s}
+.dna-sm.bad{animation:bad .6s}
+@keyframes bad{0%,45%{color:var(--danger)}}
+.ups{display:flex;gap:6px;overflow-x:auto;min-width:0;pointer-events:auto;scrollbar-width:thin;padding-bottom:2px;
+  padding-inline:4px;margin-inline:-4px} /* room for a shaking end button, so it can't flash a scrollbar */
 button{font:inherit;color:inherit}
 .up{pointer-events:auto;flex:0 0 auto;width:120px;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 9px;display:grid;gap:4px;cursor:pointer;transition:border-color .15s,background .15s}
 .up:hover:not(:disabled){background:#18252b}
@@ -112,6 +118,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 .actions{display:flex;gap:8px;flex-wrap:wrap;position:sticky;bottom:-22px;margin-bottom:-22px;padding-block:12px 22px;background:var(--panel-solid);border-top:1px solid var(--line)}
 .btn{border:1px solid var(--brass);border-radius:8px;padding:10px 16px;font-weight:600;font-size:14px;cursor:pointer;background:transparent;color:var(--brass)}
 .btn.primary{background:var(--brass);color:var(--brass-ink)}
+.btn.armed{border-color:var(--danger);color:var(--danger)}
 .btn:hover{filter:brightness(1.08)}
 @media (max-width:560px),(max-height:520px){
   .tray{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
@@ -148,7 +155,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   #spark{display:none}
   .small{font-size:10.5px}
 }
-@media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}}
+@media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}.up.nope{animation:none}}
 </style>
 <style>body{margin:0}</style>
 </head>
@@ -236,6 +243,7 @@ const cv=$('dish'),ctx=cv.getContext('2d');
 const rs=getComputedStyle(document.documentElement);
 const tok=n=>rs.getPropertyValue(n).trim();
 const COL={stage:tok('--stage'),field:tok('--field'),edge:tok('--field-edge'),fink:tok('--field-ink'),algae:tok('--algae'),meat:tok('--meat'),danger:tok('--danger'),brass:tok('--brass'),dim:tok('--ink-dim'),eyespot:tok('--eyespot'),line:tok('--line'),g:tok('--hud-grazer'),h:tok('--hud-hunter'),k:tok('--hud-kin')};
+const INK_BRASS='#7a5714'; // brass text on the bright field: 5.58:1 on --field (raw --brass is 2.01:1)
 const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const TAU=Math.PI*2;
 
@@ -263,6 +271,8 @@ const gauss=()=>{let u=0;while(!u)u=Math.random();return Math.sqrt(-2*Math.log(u
 const angDiff=(a,b)=>Math.atan2(Math.sin(b-a),Math.cos(b-a));
 const fmt=s=>{s=Math.floor(s);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 const hsl=(h,s,l,a)=>`hsla(${h},${s}%,${l}%,${a})`;
+// restart a one-shot CSS animation class (remove, force a reflow, add back)
+const bumpEl=(el,c)=>{if(!el)return;el.classList.remove(c);void el.offsetWidth;el.classList.add(c)};
 
 let W=0,H=0,DPR=1,FR=200,CX=0,CY=0;
 let algae=[],meat=[],cells=[],parts=[],blooms=[],player=null,mode='title',t=0,algaeAcc=0;
@@ -346,9 +356,11 @@ function startLineage(){
 }
 function viewR(){return player?150+player.r*6+player.g.eye*45:430}
 function spawnMigrant(){
-  const a=rand(TAU),d=cam.v*1.35+40;
-  let x=player.x+Math.cos(a)*d,y=player.y+Math.sin(a)*d;const dd=Math.hypot(x,y);
-  if(dd>DISH-60){x*=(DISH-60)/dd;y*=(DISH-60)/dd}
+  // Always just outside the view: pick a random direction whose spawn point lies in the dish. Clamping a point past
+  // the wall back inside pulled it toward a player near the wall, into view. If no direction fits, aim inward.
+  const d=cam.v*1.35+40,lim=DISH-60;let x=0,y=0,ok=false;
+  for(let i=0;i<24&&!ok;i++){const a=rand(TAU);x=player.x+Math.cos(a)*d;y=player.y+Math.sin(a)*d;ok=Math.hypot(x,y)<=lim}
+  if(!ok){const a=Math.atan2(-player.y,-player.x)+rand(-.5,.5);x=player.x+Math.cos(a)*d;y=player.y+Math.sin(a)*d;const dd=Math.hypot(x,y);if(dd>lim){x*=lim/dd;y*=lim/dd}}
   const r=clamp(player.r*rand(1.18,1.38),12,44);
   const g={speed:clamp(player.g.speed-(Math.random()<.5?1:0),0,MAX.speed),jaws:r>25?2:1,spikes:Math.random()<.3?1:0,armor:clamp(Math.floor(r/14),0,3),photo:0,eye:1};
   const c=makeCell(x,y,r,g,rand(285,315),{announce:5,stalk:30,migrant:true});
@@ -405,6 +417,7 @@ function restore(sv){
 function saveGame(){if(updErr)return;const sv=snapshot();if(!sv)return;try{localStorage.setItem(SAVE_KEY,JSON.stringify(sv))}catch(e){}}
 function clearSave(){try{localStorage.removeItem(SAVE_KEY)}catch(e){}}
 function loadSave(){try{return JSON.parse(localStorage.getItem(SAVE_KEY)||'null')}catch(e){return null}}
+const saveGen=sv=>Math.max(1,Number.isFinite(sv.gen)?sv.gen:1); // the generation restore() will resume at
 
 /* ---------- offspring & death ---------- */
 function offspring(p){
@@ -434,7 +447,7 @@ function divide(){
   p.en=p.maxEn*.45;gen++;
   const gain=3+Math.floor(p.lv.size/3);dna+=gain;
   if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5}
-  floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass);
+  floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);
   if(!(hints&2)){hints|=2;toast('You divided. Spend DNA in the tray to evolve.')}
 }
 function kill(c,killer){
@@ -445,7 +458,7 @@ function kill(c,killer){
   if(killer&&killer.isPlayer){
     const gain=1+Math.floor(c.r/10);dna+=gain;kills++;
     if(kills===1)toast(`First kill · +${gain} DNA`);
-    floater(c.x,c.y,`+${gain} DNA`,COL.brass);
+    floater(c.x,c.y,`+${gain} DNA`,COL.brass,13,600);
   }
   if(c.isPlayer)onPlayerDeath();
 }
@@ -657,7 +670,7 @@ function feed(){
   meat=meat.filter(m=>!m.dead&&m.life>0);
 }
 function pop(x,y,col){for(let i=0;i<3;i++){const a=rand(TAU),s=rand(10,30);parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.35,max:.35,col,r:1.1})}}
-function floater(x,y,txt,col){parts.push({x,y,vx:0,vy:-18,life:1.4,max:1.4,txt,col})}
+function floater(x,y,txt,col,fs=12,fw=500){parts.push({x,y,vx:0,vy:-18,life:1.4,max:1.4,txt,col,fs,fw})}
 
 function update(dt){
   t+=dt;
@@ -837,7 +850,10 @@ function drawCells(px){
 function drawParts(px){
   for(const p of parts){
     if(!inView(p.x,p.y,40))continue;ctx.globalAlpha=Math.min(1,p.life/p.max*1.5);
-    if(p.txt){ctx.font=`500 ${12*px}px "IBM Plex Mono",ui-monospace,monospace`;ctx.textAlign='center';ctx.fillStyle=COL.fink;ctx.fillText(p.txt,p.x,p.y)}
+    if(p.txt){ // in the floater's own colour (brass darkened to stay readable), over a field-coloured halo
+      ctx.font=`${p.fw||500} ${(p.fs||12)*px}px "IBM Plex Mono",ui-monospace,monospace`;ctx.textAlign='center';
+      ctx.lineJoin='round';ctx.lineWidth=3*px;ctx.strokeStyle=COL.field;ctx.strokeText(p.txt,p.x,p.y);
+      ctx.fillStyle=p.col===COL.brass?INK_BRASS:p.col||COL.fink;ctx.fillText(p.txt,p.x,p.y)}
     else{ctx.fillStyle=p.col;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,TAU);ctx.fill()}
   }
   ctx.globalAlpha=1;
@@ -908,7 +924,9 @@ function buy(i){
   if(mode!=='play'||!player||paused)return;
   const u=UP[i],lv=player.lv[u.k];if(lv>=MAX[u.k])return;
   const c=cost(u);
-  if(dna<c){const b=$('dnaBox');b.classList.remove('nope');void b.offsetWidth;b.classList.add('nope');return}
+  // can't afford it: shake the DNA box (wide tray) and the tapped trait, and flash its cost and the small DNA readout
+  // red (#dnaBox is hidden on phones, so the trait button and #dna2 carry the "no" there)
+  if(dna<c){bumpEl($('dnaBox'),'nope');bumpEl(upBtns[i],'nope');bumpEl($('dna2'),'bad');return}
   const before=stageName(player);
   dna-=c;player.lv[u.k]++;applyLv(player);
   if(u.k==='jaws'&&player.lv.jaws===1)toast('Jaws: you can eat cells 12% smaller than you.');
@@ -950,9 +968,20 @@ function togglePause(){
   if(!$('ovWin').hidden)return;
   paused=!paused;showOnly(paused?'ovPause':null);if(paused)$('resumeBtn').focus();
 }
-$('startBtn').addEventListener('click',startLineage);
+// Starting over when that would discard a lineage takes two taps: the first only arms the button for 4 s and says
+// what it would discard; a second tap within 4 s starts over. need() gives that label, or '' when nothing is lost.
+function twoTap(id,need){
+  const b=$(id);let until=0,tm=0,label='';
+  const disarm=()=>{clearTimeout(tm);until=0;if(label){b.textContent=label;label=''}b.classList.remove('armed')};
+  b.addEventListener('click',()=>{
+    const msg=performance.now()<until?'':need();
+    if(msg){if(!label)label=b.textContent;until=performance.now()+4000;b.textContent=msg;b.classList.add('armed');clearTimeout(tm);tm=setTimeout(disarm,4100);return}
+    disarm();startLineage();
+  });
+}
+twoTap('startBtn',()=>{const sv=loadSave();return sv&&sv.v===1?`Tap again to discard generation ${saveGen(sv)}`:''});
+twoTap('newBtn',()=>mode==='play'&&player?'Tap again to start over':''); // the won lineage is still alive here
 $('againBtn').addEventListener('click',startLineage);
-$('newBtn').addEventListener('click',startLineage);
 $('contBtn').addEventListener('click',()=>{paused=false;showOnly(null)});
 $('resumeBtn').addEventListener('click',togglePause);
 $('pauseBtn').addEventListener('click',e=>{togglePause();if(e.detail>0)e.currentTarget.blur()});
@@ -968,7 +997,7 @@ function boot(data){
   else{
     const sv=loadSave();
     if(sv&&sv.v===1){
-      const b=$('resumeSaveBtn');b.hidden=false;b.textContent=`Continue lineage · generation ${sv.gen}`;
+      const b=$('resumeSaveBtn');b.hidden=false;b.textContent=`Continue lineage · generation ${saveGen(sv)}`;
       $('startBtn').classList.remove('primary');$('startBtn').textContent='Begin a new lineage';
       b.addEventListener('click',()=>{if(restore(loadSave())){showOnly(null);toast('Welcome back. Your lineage picks up where it left off.')}else{clearSave();startLineage()}refreshHud(true)});
     }
