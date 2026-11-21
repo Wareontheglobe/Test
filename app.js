@@ -14,6 +14,11 @@ const KEY = DEMO ? "blogquest.demo" : "blogquest.v1";
 const LESSON_SIZE = 5;
 const XP = { answer: 10, high: 5, note: 5, source: 5, later: 2 };
 const SEV_ORDER = { high: 0, medium: 1, low: 2 };
+const FINE_REASONS = [
+  ["first_hand", "I know first-hand"],
+  ["source_wrong", "The source is wrong or out of date"],
+  ["different_thing", "It's about something else"],
+];
 const TYPE_ICON = { closed: "🚪", price: "💲", hours: "🕒", show: "🎭", link: "🔗", rule: "📋", other: "🔍" };
 
 const DEFAULTS = {
@@ -94,7 +99,8 @@ function allCards() {
 function openCards() {
   return allCards()
     .filter((c) => !S.answers[c.id] && !S.later.includes(c.id))
-    .sort((a, b) => (SEV_ORDER[a.severity] ?? 3) - (SEV_ORDER[b.severity] ?? 3));
+    .sort((a, b) => (SEV_ORDER[a.severity] ?? 3) - (SEV_ORDER[b.severity] ?? 3)
+      || (a.confidence === "strong" ? 0 : 1) - (b.confidence === "strong" ? 0 : 1));
 }
 function laterCards() { const all = allCards(); return S.later.map((id) => all.find((c) => c.id === id)).filter(Boolean); }
 function posts() {
@@ -316,6 +322,7 @@ function recordAnswer(card, decision, extra) {
     type: card.type,
     severity: card.severity,
     claim_quote: card.claim?.quote || "",
+    fine_reason: decision.kind === "post_is_fine" ? (extra.fineReason || "") : "",
     decision: decision.kind,                         // "apply_option" | "post_is_fine" | "other"
     option: decision.option || null,                 // {id, label, action, new_text} when apply_option
     note: extra.note || "",
@@ -437,6 +444,9 @@ function lessonView() {
       ${(c.also_in || []).length ? `<div class="small muted" style="margin-top:6px">📌 Also in this post: ${c.also_in.map(esc).join(" · ")}. Any fix gets applied there too.</div>` : ""}
       <div class="think">${pip("think", 58)}<div class="bubble">${esc(c.summary)}</div></div>
       <div class="label-sm">What I found</div>
+      ${c.confidence ? `<div class="evidence ${c.confidence === "strong" ? "strong" : "check"}">
+          <b>${c.confidence === "strong" ? "✅ Strong evidence" : "⚠️ Worth a look before you decide"}</b>
+          ${c.evidence ? `<span>${esc(c.evidence)}</span>` : ""}</div>` : ""}
       ${(c.sources || []).map((s, n) => `<div class="source">
           <b>${n + 1}. ${esc(s.label)}</b>
           ${s.quote ? `<q>${esc(s.quote)}</q>` : ""}
@@ -444,10 +454,15 @@ function lessonView() {
             ${safeUrl(s.url) ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">Open source ↗</a>` : ""}
             ${s.retrieved ? `<span>checked ${esc(s.retrieved)}</span>` : ""}
             ${s.via === "search snippet" ? `<span>from search preview</span>` : ""}
+            ${s.via === "owner" ? `<span>✔ confirmed first-hand</span>` : ""}
           </div></div>`).join("")}
       ${!navigator.onLine ? `<div class="tip">📴 You're offline — the quotes above were saved for you. Links will open when you're back online.</div>` : ""}
       <div class="label-sm">What should we do?</div>
       ${options.map((o) => `<button class="opt ${sel === o.id ? "sel" : ""}" data-opt="${esc(o.id)}"><span class="k">${o.key}</span><span>${esc(o.label)}${o.sub ? `<small>${esc(o.sub)}</small>` : ""}</span></button>`).join("")}
+      ${sel === "fine" ? `<div class="reasons" role="group" aria-label="Why is the post right?">
+          <span class="small muted">Why? (helps Pip check better next time)</span>
+          ${FINE_REASONS.map(([id, label]) => `<button class="reason ${lesson.fineReason === id ? "on" : ""}" data-reason="${id}">${label}</button>`).join("")}
+        </div>` : ""}
       ${sel === "other" ? `<textarea id="note" placeholder="What should change? (dictate with the 🎤 on your keyboard)">${esc(lesson.note || "")}</textarea>`
         : `<details class="extra" ${lesson.note || lesson.source ? "open" : ""}><summary>+ Add a note or your own source (bonus miles)</summary>
             <textarea id="note" placeholder="Anything we should know?">${esc(lesson.note || "")}</textarea>
@@ -495,7 +510,7 @@ function checkAnswer() {
     decision = { kind: "apply_option", option: o ? { id: o.id, label: o.label, action: o.action, new_text: o.new_text ?? "" } : null };
   }
   lesson.undo = snapshot(c);
-  const earned = recordAnswer(c, decision, { note: lesson.note, source: lesson.source });
+  const earned = recordAnswer(c, decision, { note: lesson.note, source: lesson.source, fineReason: lesson.fineReason });
   lesson.earned += earned; lesson.answered++; lesson.undo.earned = earned; lesson.undo.kind = "answer";
   chime("ok"); buzz(20);
   showSheet({ earned, title: pick(PRAISE) });
@@ -534,7 +549,7 @@ function undoLast() {
 }
 
 function nextCard() {
-  lesson.i++; lesson.selected = null; lesson.note = ""; lesson.source = ""; lesson.undo = null;
+  lesson.i++; lesson.selected = null; lesson.note = ""; lesson.source = ""; lesson.undo = null; lesson.fineReason = "";
   if (lesson.i >= lesson.cards.length) return finishLesson();
   render();
 }
@@ -675,9 +690,13 @@ function bind() {
     startLesson(laterCards().filter((c) => c.id === b.dataset.laterid));
   }));
   document.querySelectorAll("[data-opt]").forEach((b) => b.addEventListener("click", () => {
-    readExtras(); lesson.selected = b.dataset.opt; buzz(8);
+    readExtras(); lesson.selected = b.dataset.opt; if (lesson.selected !== "fine") lesson.fineReason = ""; buzz(8);
     const y = window.scrollY; render(); window.scrollTo(0, y);
     if (lesson.selected === "other") $("#note")?.focus();
+  }));
+  document.querySelectorAll("[data-reason]").forEach((b) => b.addEventListener("click", () => {
+    readExtras(); lesson.fineReason = lesson.fineReason === b.dataset.reason ? "" : b.dataset.reason; buzz(8);
+    const y = window.scrollY; render(); window.scrollTo(0, y);
   }));
   document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => act(b.dataset.act)));
 }

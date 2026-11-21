@@ -15,6 +15,7 @@
   --sky-dark: #2C7FB8;
   --quote: #FFF4D6;
   --sel: #E3F6F4;
+  --ok-bg: #DDF4E8; --ok-ink: #0C5B3F; --warn-bg: #FFF0C7; --warn-ink: #6B4C00;
   --shadow: 0 2px 0 rgba(30, 42, 68, .06);
   --r: 18px;
   font-family: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -23,12 +24,12 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #141A28; --surface: #1D2536; --surface-2: #252F44; --ink: #F3F5FA; --ink-2: #A9B3C9;
-    --line: #2F3A52; --quote: #3A3424; --sel: #163B3A; color-scheme: dark;
+    --line: #2F3A52; --quote: #3A3424; --sel: #163B3A; --ok-bg: #154434; --ok-ink: #C8F3DF; --warn-bg: #4A3C10; --warn-ink: #FFE7A3; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #141A28; --surface: #1D2536; --surface-2: #252F44; --ink: #F3F5FA; --ink-2: #A9B3C9;
-  --line: #2F3A52; --quote: #3A3424; --sel: #163B3A; color-scheme: dark;
+  --line: #2F3A52; --quote: #3A3424; --sel: #163B3A; --ok-bg: #154434; --ok-ink: #C8F3DF; --warn-bg: #4A3C10; --warn-ink: #FFE7A3; color-scheme: dark;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -222,3 +223,13 @@ nav.tabs .dot { position: absolute; top: 2px; right: 10px; background: var(--cor
 @keyframes rise { from { transform: translateY(30px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .modal-card { animation: none; } }
 :focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
+
+/* evidence strength + "why is the post right?" */
+.evidence { display: flex; flex-direction: column; gap: 2px; border-radius: 14px; padding: 10px 14px; margin-bottom: 10px; font-size: 15px; }
+.evidence span { font-size: 14px; }
+.evidence.strong { background: var(--ok-bg); color: var(--ok-ink); }
+.evidence.check { background: var(--warn-bg); color: var(--warn-ink); }
+.reasons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: -2px 0 12px; }
+.reasons .small { width: 100%; }
+.reason { border: 2px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 12px; font-weight: 700; font-size: 14px; cursor: pointer; }
+.reason.on { border-color: var(--teal); background: var(--sel); color: var(--teal-dark); }
