@@ -86,10 +86,27 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 /* Control tray */
 #panel{padding-block:8px 10px;display:flex;flex-direction:column;gap:8px}
 #phead{display:flex;align-items:center;gap:10px;height:50px}
-#info{flex:1;min-width:0;font-size:12.5px;color:var(--muted);line-height:1.3;max-height:50px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
-#info.coach{color:var(--ink)}
-#pbody{height:96px;display:flex;flex-direction:column;justify-content:center}
+/* #info: a message (#infoMsg) over the next wave's chips (#chips). The message clamps to 3 lines with the chips hidden,
+   1 line beside two rows of chips, and 2 lines beside one row (the 'New' intro and the first-run coach line). */
+#info{flex:1;min-width:0;font-size:12.5px;color:var(--muted);line-height:1.3;max-height:50px;overflow:hidden}
+#infoMsg{overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3}
+#infoMsg.l2{-webkit-line-clamp:2}
+/* One 16px line over two 16px rows of chips 2px apart: exactly the 50px #info has. */
+#infoMsg.l1{-webkit-line-clamp:1;line-height:16px}
+#infoMsg.coach{color:var(--ink)}
 #info b{color:var(--ink);font-weight:700}
+#chips{display:flex;flex-wrap:wrap;gap:2px 8px;line-height:16px;max-height:34px;overflow:hidden;border-radius:4px}
+#chips.one{max-height:16px}
+/* A tapped chip's detail takes the row's place. Collapsed rather than hidden, so keyboard focus stays on it. */
+#chips.off{max-height:0}
+#chips:focus-visible{outline:2px solid var(--brass);outline-offset:-2px}
+.chip{display:inline-flex;align-items:center;gap:2px;height:16px;font-size:12px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;cursor:pointer}
+.chip canvas{width:16px;height:16px;flex:none;border-radius:4px}
+/* Drawn inside the 16px box, so the chips row clips none of it. */
+.chip.air canvas{outline:1px solid #8fd0ff;outline-offset:-1px}
+.chip.armor canvas{outline:1px solid #d6dbe0;outline-offset:-1px}
+.chip.boss canvas{outline:1px solid #a487ff;outline-offset:-1px}
+#pbody{height:96px;display:flex;flex-direction:column;justify-content:center}
 #bWave{flex:none;height:42px;padding:0 16px;border-radius:12px;background:var(--brass);color:var(--brass-ink);
   font-family:var(--font-display);font-weight:800;font-size:15px;box-shadow:0 3px 0 #8f6a22;white-space:nowrap}
 #bWave:active{transform:translateY(2px);box-shadow:0 1px 0 #8f6a22}
@@ -197,7 +214,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   </header>
   <div id="stage"><canvas id="cv" role="img" aria-label="Game board"></canvas><div id="toast" role="status" aria-live="polite"></div><div id="sr" class="vh" role="status" aria-live="polite"></div></div>
   <footer id="panel">
-    <div id="phead"><div id="info"></div><button id="bWave">Start wave 1</button></div>
+    <div id="phead"><div id="info"><div id="infoMsg"></div><div id="chips" role="button" tabindex="0" hidden></div></div><button id="bWave">Start wave 1</button></div>
     <div id="pbody">
     <div id="palette"></div>
     <div id="tview" hidden>
@@ -262,12 +279,13 @@ const MAPS=[
   {id:'quarry',name:'Quarry Run',diff:'Hard',hp:1.05,pts:[[4,-1],[4,3],[1,3],[1,8],[7,8],[7,14]],
    theme:{g1:'#79814f',g2:'#717948',path:'#cfc2a4',edge:'#8c8166',deco:'#5a613e',flower:'#d9d3c1'}},
 ];
+// desc: what sets a tower apart. key: the same trait in a word or two, for lines too narrow for desc.
 const TD={
-  bolt:  {name:'Bolt',cost:50, range:2.4,rate:0.55,dmg:11,air:true, color:'#d39a45',desc:'Fast shots. Hits fliers.'},
-  mortar:{name:'Mortar',cost:90,range:2.4,rate:1.5, dmg:30,splash:0.95,air:false,color:'#79808c',desc:'Splash damage. Ground only.'},
-  frost: {name:'Frost',cost:70,range:2.0,rate:1.0, dmg:5, splash:0.75,slow:0.42,slowDur:1.6,air:true,color:'#8fd6ea',desc:'Slows groups. Hits fliers.'},
-  arc:   {name:'Arc',cost:130,range:2.2,rate:1.1, dmg:21,chain:3,air:true, color:'#a487ff',desc:'Lightning jumps between foes.'},
-  long:  {name:'Longshot',cost:120,range:4.6,rate:2.1,dmg:78,pierce:true,air:true,color:'#cf5547',desc:'Huge range. Ignores armor.'},
+  bolt:  {name:'Bolt',cost:50, range:2.4,rate:0.55,dmg:11,air:true, color:'#d39a45',desc:'Fast shots. Hits fliers.',key:'Hits fliers'},
+  mortar:{name:'Mortar',cost:90,range:2.4,rate:1.5, dmg:30,splash:0.95,air:false,color:'#79808c',desc:'Splash damage. Ground only.',key:'Ground only'},
+  frost: {name:'Frost',cost:70,range:2.0,rate:1.0, dmg:5, splash:0.75,slow:0.42,slowDur:1.6,air:true,color:'#8fd6ea',desc:'Slows groups. Hits fliers.',key:'Slows'},
+  arc:   {name:'Arc',cost:130,range:2.2,rate:1.1, dmg:21,chain:3,air:true, color:'#a487ff',desc:'Lightning jumps between foes.',key:'Chains'},
+  long:  {name:'Longshot',cost:120,range:4.6,rate:2.1,dmg:78,pierce:true,air:true,color:'#cf5547',desc:'Huge range. Ignores armor.',key:'Ignores armor'},
 };
 const TKEYS=Object.keys(TD);
 const ED={
@@ -353,7 +371,15 @@ if(!S.best||typeof S.best!=='object'||Array.isArray(S.best))S.best={};
   // 1.0 kept a single S.save; move it into its road's slot if that slot is free.
   const old=validSave(S.save);
   if(real(old)&&!S.saves[old.map]){S.saves[old.map]=old;S.last=old.map}
-  delete S.save;persist();
+  delete S.save;
+  // Enemy types the player has met (startWave adds each wave's). A player from before 1.1 has met everything up to their best wave,
+  // so they are not introduced to it again. Every type is in waves 1-10, so the walk stops at 60 even if a best is corrupt.
+  if(Array.isArray(S.seen))S.seen=[...new Set(['grunt',...S.seen.filter(t=>Object.keys(ED).includes(t))])];
+  else{
+    const top=Math.min(60,Math.max(0,...Object.values(S.best).filter(Number.isFinite)));S.seen=['grunt'];
+    for(let w=1;w<=top;w++)for(const [t] of buildWave(w))if(!S.seen.includes(t))S.seen.push(t);
+  }
+  persist();
 }
 // Drop anything in a stored run that this version can't rebuild, rather than failing to start.
 function validSave(sv){
@@ -443,9 +469,10 @@ function newGame(map,save){
   // armKept: the armed tower was kept after a build, not picked; it shows on the palette but leaves #info to the wave preview.
   // poorWas/upWas: last affordability shown, so refreshPanel pulses only on a real change from poor to affordable.
   // banner: the one big line on the board ({s, sub, c, t, dur}); bannerNext waits behind 'WARLORD DOWN'. bossBar: the pinned Warlord bar. shakeT: board shake left (real time).
+  // chipTip: a tapped wave chip's detail in #info ({type, key, until}), shown until performance.now() passes until.
   G={map,grid:map.grid.slice(),wave:0,gold:CFG.startGold,lives:20,towers:[],enemies:[],projs:[],fx:[],spawnQ:[],W:{},time:0,
      speed:speedPref,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,armKept:false,selAt:0,sellArm:false,sellArmAt:0,sendArmAt:0,
-     poorWas:{},upWas:null,hintTiles:[],gateFlash:0,hurtT:0,hurtDur:0.45,banner:null,bannerNext:null,bossBar:null,shakeT:0,running:true};
+     poorWas:{},upWas:null,hintTiles:[],gateFlash:0,hurtT:0,hurtDur:0.45,banner:null,bannerNext:null,bossBar:null,shakeT:0,chipTip:null,running:true};
   if(save){
     G.wave=save.wave;G.cleared=save.wave;G.gold=save.gold;G.lives=save.lives;G.won=!!save.won;
     for(const t of save.towers)placeTower(t.type,t.c,t.r,t.level,t.spent,t.mode);
@@ -486,15 +513,28 @@ function buildWave(w){
   if(w>=7&&w%2===1)g.push(['splitter',2+Math.floor(w/4),1.1,1.6]);
   return g;
 }
+// How many of each type wave w sends, in the order it sends them.
+function waveCounts(w){const m={};for(const [t,c] of buildWave(w))m[t]=(m[t]||0)+c;return m}
 function waveSummary(w){
-  const m={};for(const [t,c] of buildWave(w))m[t]=(m[t]||0)+c;
-  return Object.entries(m).map(([t,c])=>`${c} ${ED[t].name}${c>1?'s':''}${ED[t].fly?' (air)':''}`).join(', ');
+  return Object.entries(waveCounts(w)).map(([t,c])=>`${c} ${ED[t].name}${c>1?'s':''}${ED[t].fly?' (air)':''}`).join(', ');
 }
 const activeWaves=()=>Object.keys(G.W).length;
 const isCalm=()=>!activeWaves()&&!G.spawnQ.length;
 const bossWave=w=>buildWave(w).some(([t])=>ED[t].boss);
-// The small line under 'WAVE N'. Later items add more (new enemy types, wave themes).
-function bannerSub(w){return bossWave(w)?'A Warlord is coming':''}
+// Types wave w brings that the player has not met yet (S.seen), in the order the game introduces them.
+const INTRO=['grunt','scout','brute','wisp','splitter','boss'];
+function newTypes(w){const m=waveCounts(w);return INTRO.filter(t=>m[t]&&!S.seen.includes(t))}
+// What #info says about a type the first time it comes (plain copy), and in a tapped chip's detail.
+const BLURB={grunt:'Grunt. Steady and common.',scout:'Scout. Fast and fragile.',brute:'Brute. Armored, so small hits do less. Longshot ignores armor. Costs 2 lives.',
+  wisp:"Wisp. Flies. Mortars can't hit it.",splitter:'Splitter. Bursts into 2 Scouts.',boss:'Warlord. Heavy armor. Costs 5 lives.'};
+// The small line under 'WAVE N', parts joined with ' · '. A Warlord's first wave already says it is coming, so it is not 'New' as well.
+function bannerSub(w){
+  const parts=[];if(bossWave(w))parts.push('A Warlord is coming');
+  const nt=newTypes(w).filter(t=>!ED[t].boss);if(nt.length)parts.push('New: '+nt.map(t=>ED[t].name).join(', '));
+  return parts.join(' · ');
+}
+// Every type in wave w is met once it starts.
+function markSeen(w){let add=false;for(const t of Object.keys(waveCounts(w)))if(!S.seen.includes(t)){S.seen.push(t);add=true}if(add)persist()}
 // One banner at a time: a newer one replaces it (and anything waiting behind it).
 // b.say is its line for screen readers (the banner is only drawn), read out when the banner shows.
 function setBanner(b){G.banner={sub:'',...b,t:0};G.bannerNext=null;say(b.say)}
@@ -512,7 +552,7 @@ function startWave(){
   for(const [type,cnt,iv,delay] of buildWave(w)){t+=delay;for(let i=0;i<cnt;i++){G.spawnQ.push({at:t,type,w});t+=iv;count++}}
   G.W[w]={rem:count,alive:0,leaked:0};
   if(early){const b=10+w;G.gold+=b;toast(`Called early · +${b} gold`);goldGain()}
-  const sub=bannerSub(w);
+  const sub=bannerSub(w);markSeen(w); // the sub names what is new, so it is worked out before the wave counts as met
   setBanner({s:`WAVE ${w}`,sub,c:bossWave(w)?'#a487ff':'#f0e9d2',dur:1.3,say:`Wave ${w}${sub?'. '+sub:''}`});
   sfx('wave');refreshPanel();
 }
@@ -879,8 +919,9 @@ const enemyScale=s=>clamp(30/s,1,1.2);
 // Each type has its own outline: Grunt a ball, Scout a teardrop, Splitter twin lobes, Brute a block, Wisp a winged ball, Warlord a spiked crown.
 // Draws at the caller's globalAlpha (render fades enemies near the keep), so its own see-through parts scale from a0.
 // The HP bar is not drawn here (render draws all bars in one pass); this returns the sprite's top edge in px for it.
-function drawEnemy(g,e,s,time,still){
-  const x=e.x*s,d=e.d,a0=g.globalAlpha,r=e.r*s*enemyScale(s),lw=Math.max(1.5,s*0.06),lj=g.lineJoin;
+// lwMin: the thinnest outline (1.5px on the board; the 16px wave chips use 1px, or the outline would swallow the crown and wings).
+function drawEnemy(g,e,s,time,still,lwMin=1.5){
+  const x=e.x*s,d=e.d,a0=g.globalAlpha,r=e.r*s*enemyScale(s),lw=Math.max(lwMin,s*0.06),lj=g.lineJoin;
   const m=Math.hypot(e.dx,e.dy)||1,ux=e.dx/m,uy=e.dy/m,px=-uy,py=ux,ang=Math.atan2(uy,ux);
   let y=e.y*s;
   if(e.fly){
@@ -1206,23 +1247,60 @@ function statParts(type,lv){
   return parts;
 }
 const statLine=(type,lv)=>statParts(type,lv).join(' · ');
-// The ready line must fit #info's 3 lines beside whatever #bWave says. When the full stat line doesn't fit (narrow phones),
+// The ready line must fit #infoMsg's 3 lines beside whatever #bWave says. When the full stat line doesn't fit (narrow phones),
 // it leads with the traits ('Ground only' first) and drops parts from the end, the rate first. Cached per tower and width.
 let readyFit={key:''};
-function fitReady(info,k){
-  const key=k+':'+info.clientWidth;
-  if(readyFit.key===key){if(info.innerHTML!==readyFit.html)info.innerHTML=readyFit.html;return}
-  const head=`<b>${TD[k].name}</b> ready. Tap grass to place it.<br>`,parts=statParts(k,1),fits=()=>info.scrollHeight<=info.clientHeight+1;
-  info.innerHTML=head+parts.join(' · ');
+function fitReady(msg,k){
+  const key=k+':'+msg.clientWidth;
+  if(readyFit.key===key){if(msg.innerHTML!==readyFit.html)msg.innerHTML=readyFit.html;return}
+  const head=`<b>${TD[k].name}</b> ready. Tap grass to place it.<br>`,parts=statParts(k,1),fits=()=>msg.scrollHeight<=msg.clientHeight+1;
+  msg.innerHTML=head+parts.join(' · ');
   if(!fits()){
     const pri=[...parts.slice(3).reverse(),...parts.slice(0,3)];
-    for(let n=pri.length;n>=1;n--){info.innerHTML=head+pri.slice(0,n).join(' · ');if(fits())break}
+    for(let n=pri.length;n>=1;n--){msg.innerHTML=head+pri.slice(0,n).join(' · ');if(fits())break}
   }
-  readyFit={key,html:info.innerHTML};
+  readyFit={key,html:msg.innerHTML};
+}
+// The next wave as chips: each type's icon (drawEnemy on a stub, centred) and how many come. refreshPanel runs on every gold
+// change, so the chips are rebuilt only when the road or the wave changes (chipKey). A resize clears the key, as the DPR may change.
+let chipKey='';
+function syncChips(){
+  const w=G.wave+1,key=`${G.map.id}:${w}`;if(chipKey===key)return;chipKey=key;
+  const box=$('#chips'),dpr=Math.min(3,window.devicePixelRatio||1);
+  box.textContent='';box.setAttribute('aria-label','Next wave: '+waveSummary(w));
+  for(const [type,n] of Object.entries(waveCounts(w))){
+    const d=ED[type],ch=document.createElement('span'),c=document.createElement('canvas'),num=document.createElement('span');
+    // The canvas outline marks fliers (blue), armor (steel) and the Warlord (purple).
+    ch.className='chip'+(d.fly?' air':d.boss?' boss':d.armor?' armor':'');ch.dataset.t=type;
+    c.width=c.height=Math.round(16*dpr);
+    // About 6.5px from the centre to the sprite's edge: the Warlord's spikes reach 1.22r and the Wisp's wings 1.6r, and drawEnemy
+    // draws 1.2x on a scale this small (enemyScale), so that is divided out too.
+    const g=c.getContext('2d'),k=c.width/16,s=Math.min(16,6.5/(d.r*(d.boss?1.22:d.fly?1.6:1)*enemyScale(16)));
+    g.setTransform(k,0,0,k,0,0);g.translate(8-0.5*s,8-0.5*s);
+    drawEnemy(g,{type,d,x:0.5,y:0.5,dx:1,dy:0,r:d.r,bob:0,hp:1,max:1,armor:0,fly:false,slow:0,hitT:0},s,0,true,1);
+    num.textContent=`×${n}`;ch.append(c,num);box.append(ch);
+  }
+}
+// A tapped chip: the type in the next wave, with its numbers and what to know about it. Where that is too long for 3 lines
+// (the Brute on a phone), the blurb drops sentences from the front: first its name (the line already starts with it), then
+// 'Armored, so small hits do less.' (the line says 'Armor 3'), so 'Longshot ignores armor. Costs 2 lives.' still shows.
+function chipDetail(type){
+  const w=G.wave+1,d=ED[type],n=waveCounts(w)[type]||0,hp=Math.round(d.hp*hpScale(w)*G.map.hp);
+  const speed=d.spd<0.8?'Slow':d.spd>1.3?'Fast':'Normal';
+  const head=`<b>${d.name}</b> ×${n} · ${hp} HP · ${speed}${d.armor?` · Armor ${(d.armor*(1+(w-1)*0.03)).toFixed(0)}`:''}. `;
+  const sent=BLURB[type].split('. ').map((x,i,a)=>i<a.length-1?x+'.':x);
+  return sent.map((x,i)=>head+sent.slice(i).join(' '));
+}
+// A chip shows its type in #info for 4s, then the chips come back. The detail is read out too (#sr).
+// Enter or Space on #chips picks the first chip; pressed again while a detail shows, the next one.
+const TIP_MS=4000;
+function showTip(type){
+  if(!G||G.over||!BLURB[type])return;G.chipTip={type,key:chipKey,until:performance.now()+TIP_MS};refreshPanel();
+  say(chipDetail(type)[0].replace(/<[^>]+>/g,''));
 }
 function refreshPanel(){
   if(!G)return;
-  const info=$('#info');
+  const msg=$('#infoMsg'),chips=$('#chips');
   const t=G.selTower;
   $('#palette').hidden=!!t;$('#tview').hidden=!t;
   // The palette is kept current even while hidden, so a button pulses only when it really becomes affordable.
@@ -1232,7 +1310,6 @@ function refreshPanel(){
     if(G.poorWas[k]===true&&!poor)flashClass(b,'ready',600);
     G.poorWas[k]=poor;
   }
-  let coach=false,ready=null,place=null;
   if(t){
     const nx=upCost(t),upPoor=t.level<3&&G.gold<nx;
     $('#tvName').textContent=`${TD[t.type].name} · Level ${t.level}`;
@@ -1248,37 +1325,71 @@ function refreshPanel(){
     sell.firstChild.textContent=G.sellArm?'Confirm':undo?'Undo':'Sell';
     sell.querySelector('small').textContent=`+${sellValue(t)}`;
     paintTvIcon(t);
-    info.innerHTML=t.level<3?`Next level: <b>${statLine(t.type,t.level+1)}</b>`:`<b>${TD[t.type].desc}</b>`;
-  }else{
-    G.upWas=null;
-    if(G.sel&&G.pending){
-      // How much road this spot covers, then what a second tap does. fitPlace drops the description if that doesn't fit.
-      const d=TD[G.pending],cov=coverage(G.sel.c,G.sel.r,tstats(G.pending,1).range);
-      const tail=`Covers ${cov.toFixed(1)} tiles of road. ${G.gold>=d.cost?'Tap again to build.':'Not enough gold yet.'}`;
-      place=[`<b>${d.name}</b> · ${d.desc}<br>${tail}`,`<b>${d.name}</b><br>${tail}`,`<b>${d.name}</b> · ${tail}`];info.innerHTML=place[0];
-    }
-    else if(G.sel)info.innerHTML='Pick a tower to place here.';
-    else if(G.pending&&!G.armKept)ready=G.pending; // written by fitReady once #bWave has its label
-    else if(G.wave===0&&!G.towers.length){coach=true;info.innerHTML='<b>Build first:</b> tap a grass tile beside the road.'}
-    else if(G.spawnQ.length)info.innerHTML=`Wave <b>${G.wave}</b> is marching in.`;
-    else info.innerHTML=`Next: <b>${waveSummary(G.wave+1)}</b>`;
+  }else G.upWas=null;
+  // The chips show unless a tile is selected or a tower was armed on purpose: placing uses all of #info, as before.
+  // A tower kept armed after a build still leaves #info to the wave preview.
+  syncChips();
+  const armed=!!G.pending&&!G.armKept;
+  let chipsOn=!G.sel&&!armed,lines=1,oneRow=false,coach=false,ready=null,place=null,next=null,tipLines=null,marching=false,nt;
+  const tip=chipsOn&&G.chipTip&&G.chipTip.key===chipKey?G.chipTip:null;
+  if(tip){lines=3;tipLines=chipDetail(tip.type);msg.innerHTML=tipLines[0]}
+  else if(t)next=t; // written by fitNext, on one line
+  else if(G.sel&&G.pending){
+    // How much road this spot covers, then what a second tap does. fitFirst drops that instruction first, then shortens the trait.
+    const d=TD[G.pending],cov=`Covers ${coverage(G.sel.c,G.sel.r,tstats(G.pending,1).range).toFixed(1)} tiles of road.`;
+    const tail=G.gold>=d.cost?'Tap again to build.':'Not enough gold yet.',nm=`<b>${d.name}</b>`;
+    place=[`${nm} · ${d.desc}<br>${cov} ${tail}`,`${nm} · ${d.desc}<br>${cov}`,`${nm} · ${d.key}<br>${cov} ${tail}`,`${nm} · ${d.key}<br>${cov}`,`${nm} · ${d.key} · ${cov}`];
+    lines=3;msg.innerHTML=place[0];
   }
-  info.classList.toggle('coach',coach);
+  else if(G.sel){lines=3;msg.innerHTML='Pick a tower to place here.'}
+  else if(armed){lines=3;ready=G.pending} // written by fitReady once #bWave has its label
+  // The coach line and the 'New' intro get 2 lines over one row of chips.
+  else if(G.wave===0&&!G.towers.length){coach=true;lines=2;oneRow=true;msg.innerHTML='<b>Build first:</b> tap a grass tile beside the road.'}
+  else if((nt=newTypes(G.wave+1)).length){lines=2;oneRow=true;msg.innerHTML=`<b>New:</b> ${BLURB[nt[nt.length-1]]}`}
+  else if(G.spawnQ.length){marching=true;msg.innerHTML=`Wave <b>${G.wave}</b> is marching in. Next:`}
+  else msg.innerHTML='Next wave:';
+  chips.hidden=!chipsOn;chips.classList.toggle('one',oneRow);chips.classList.toggle('off',!!tip);
+  msg.classList.toggle('l1',lines===1);msg.classList.toggle('l2',lines===2);msg.classList.toggle('coach',coach);
   const bw=$('#bWave');
   if(G.spawnQ.length){bw.disabled=true;bw.textContent=`Wave ${G.wave}…`}
   else if(activeWaves()){bw.disabled=false;bw.textContent=`Call ${G.wave+1} early`}
   else{bw.disabled=false;bw.textContent=G.wave===0?(sendArmed()?'Send anyway?':'Start wave 1'):`Start wave ${G.wave+1}`}
-  if(ready)fitReady(info,ready);
-  if(place)fitPlace(info,place);
+  if(ready)fitReady(msg,ready);
+  if(place)fitFirst(msg,place,placeFit);
+  if(tipLines)fitFirst(msg,tipLines,tipFit);
+  if(next)fitNext(msg,next);
+  // On a narrow phone 'Wave 12 is marching in. Next:' runs past one line. When the chips need only one row, it gets a second line;
+  // under two rows it becomes 'Next wave:' (#bWave already reads 'Wave 12…').
+  if(marching&&msg.scrollHeight>msg.clientHeight+1){
+    if(chips.scrollHeight<=17){msg.classList.replace('l1','l2');chips.classList.add('one')}else msg.innerHTML='Next wave:';
+  }
 }
-// The placing line must fit #info's 3 lines too. Where the spec line doesn't (narrow phones, longer descriptions), it keeps
-// the tower's name, the coverage and the instruction and drops the description, then also the line break. Cached per line and width.
-let placeFit={key:''};
-function fitPlace(info,lines){
-  const key=lines[0]+':'+info.clientWidth;
-  if(placeFit.key===key){if(info.innerHTML!==placeFit.html)info.innerHTML=placeFit.html;return}
-  for(const h of lines){info.innerHTML=h;if(info.scrollHeight<=info.clientHeight+1)break}
-  placeFit={key,html:info.innerHTML};
+// Writes the first of lines that fits #infoMsg (the last one if none does), cached per first line and width.
+// The placing line: the tower's name, its trait and the coverage stay. Where the spec line doesn't fit (narrow phones, longer
+// descriptions), 'Tap again to build.' (or 'Not enough gold yet.') goes first, as the armed palette button already says it;
+// then the description shortens to the trait's key phrase ('Ground only', 'Ignores armor').
+const placeFit={key:''},tipFit={key:''};
+function fitFirst(msg,lines,cache){
+  const key=lines[0]+':'+msg.clientWidth;
+  if(cache.key===key){if(msg.innerHTML!==cache.html)msg.innerHTML=cache.html;return}
+  for(const h of lines){msg.innerHTML=h;if(msg.scrollHeight<=msg.clientHeight+1)break}
+  cache.key=key;cache.html=msg.innerHTML;
+}
+// A selected tower's line, on one line beside the chips. 'Next level' drops 'Ground only' first (it never changes with level, and
+// #tvStats shows it), then the rate, then the range (the board's next-level ring shows that), then parts from the end; whatever is
+// left still ellipsizes. At max level: its description, or its key phrase where that is too long. Cached per tower, level and width.
+let nextFit={key:''};
+function fitNext(msg,t){
+  const key=`${t.type}:${t.level}:${msg.clientWidth}`;
+  if(nextFit.key===key){if(msg.innerHTML!==nextFit.html)msg.innerHTML=nextFit.html;return}
+  const d=TD[t.type],fits=()=>msg.scrollHeight<=msg.clientHeight+1;
+  if(t.level>=3){msg.innerHTML=`<b>${d.desc}</b>`;if(!fits())msg.innerHTML=`<b>${d.key}</b>`}
+  else{
+    let parts=statParts(t.type,t.level+1);const set=()=>{msg.innerHTML=`Next level: <b>${parts.join(' · ')}</b>`};set();
+    for(const f of [p=>p==='Ground only',p=>p.endsWith('/s'),p=>p.startsWith('Range ')]){if(fits())break;parts=parts.filter(p=>!f(p));set()}
+    while(!fits()&&parts.length>1){parts.pop();set()}
+  }
+  nextFit={key,html:msg.innerHTML};
 }
 // Wave-1 guard: the first tap on 'Start wave 1' with no towers only warns; a second tap 0.4s-3s later sends it.
 const NO_TOWERS='No towers yet. Enemies will walk straight in.',SEND_GAP=400;
@@ -1299,6 +1410,7 @@ function deselect(){G.sel=null;G.selTower=null;G.pending=null;G.armKept=false;G.
 // A tower can be armed before or after picking a tile. With no tile, tapping the armed tower again disarms it.
 function onPalette(k){
   audioInit();if(!G||G.over)return;
+  G.chipTip=null;
   if(!G.sel){
     if(G.pending===k)G.pending=null;else{G.selTower=null;G.sellArm=false;G.pending=k}
     G.armKept=false;refreshPanel();return;
@@ -1320,6 +1432,7 @@ function tryBuild(){
 }
 function onBoardTap(c,r){
   audioInit();if(!G||G.over)return;
+  G.chipTip=null;
   if(c<0||r<0||c>=COLS||r>=ROWS){deselect();refreshPanel();return}
   const t=towerAt(c,r);
   if(t){if(G.selTower===t){deselect()}else{deselect();G.selTower=t}refreshPanel();return}
@@ -1340,6 +1453,20 @@ cv.addEventListener('pointerdown',ev=>{
 });
 // A tap beside the board (where #stage is bigger than it) clears the selection and disarms, like a tap off the grid.
 $('#stage').addEventListener('pointerdown',ev=>{if(ev.target!==cv)onBoardTap(-1,-1)});
+// A tap on a chip picks it. A tap elsewhere on the row picks the chip nearest the finger: the chips are only 16px tall.
+$('#chips').addEventListener('click',ev=>{
+  const hit=ev.target.closest&&ev.target.closest('.chip');if(hit){showTip(hit.dataset.t);return}
+  let best=null,bd=1e9;
+  for(const c of $('#chips').querySelectorAll('.chip')){const r=c.getBoundingClientRect();if(!r.width)continue;
+    const dx=Math.max(r.left-ev.clientX,0,ev.clientX-r.right),dy=Math.max(r.top-ev.clientY,0,ev.clientY-r.bottom),d=dx*dx+dy*dy;if(d<bd){bd=d;best=c}}
+  if(best)showTip(best.dataset.t);
+});
+$('#chips').addEventListener('keydown',ev=>{
+  if(ev.key!=='Enter'&&ev.key!==' ')return;ev.preventDefault();if(ev.repeat||!G)return;
+  const list=[...$('#chips').querySelectorAll('.chip')];if(!list.length)return;
+  const cur=G.chipTip&&G.chipTip.key===chipKey?list.findIndex(c=>c.dataset.t===G.chipTip.type):-1;
+  showTip(list[(cur+1)%list.length].dataset.t);
+});
 // The panel's handlers check G.over as well as #app.inert: a key or a script click still reaches a button in an inert tree.
 $('#bUp').addEventListener('click',()=>{
   const t=G.selTower;if(!t||t.level>=3||G.over)return;const c=upCost(t);
@@ -1431,8 +1558,8 @@ document.addEventListener('keydown',e=>{
   if(k==='Escape'||k==='p'||k==='P'){
     if($('#menu').hidden&&$('#endOv').hidden&&G.running&&!G.over){e.preventDefault();setPause(!G.paused)}
   }else if(k===' '||k==='Enter'){
-    // A focused button gets its native click.
-    if(ovOpen||(e.target.closest&&e.target.closest('button')))return;
+    // A focused button gets its native click (and #chips, a role=button, its own handler).
+    if(ovOpen||(e.target.closest&&e.target.closest('button,[role=button]')))return;
     e.preventDefault();const b=$('#bWave');if(!b.disabled)b.click();
   }else if(k>='1'&&k<='5'&&k.length===1&&!ovOpen)onPalette(TKEYS[+k-1]);
 });
@@ -1488,6 +1615,7 @@ function frame(now){
   if(G&&G.running&&!G.paused&&!G.over){for(let i=0;i<G.speed;i++){step(dt);if(G.over)break}}
   if(G&&G.sellArm&&now-G.sellArmAt>3500){G.sellArm=false;refreshPanel()}
   if(G&&G.sendArmAt&&now-G.sendArmAt>3000){G.sendArmAt=0;refreshPanel()}
+  if(G&&G.chipTip&&now>G.chipTip.until){G.chipTip=null;refreshPanel()}
   // The leak vignette fades in real time: the same at 1x and 3x, and still fading after game over or while paused.
   if(G&&G.hurtT>0)G.hurtT=Math.max(0,G.hurtT-dt);
   // So does the Warlord shake, so it settles even if the run pauses (a wave-30 win) right after.
@@ -1498,8 +1626,8 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 let rz=0;
-// refreshPanel refits the placing and ready lines to #info's new width (a rotation changes it).
-function onResize(){clearTimeout(rz);rz=setTimeout(()=>{layout();paintIcons();refreshPanel()},60)}
+// refreshPanel refits the placing, ready and tower lines to #info's new width (a rotation changes it) and repaints the chips.
+function onResize(){clearTimeout(rz);rz=setTimeout(()=>{layout();paintIcons();chipKey='';refreshPanel()},60)}
 window.addEventListener('resize',onResize);
 window.addEventListener('orientationchange',onResize);
 
@@ -1509,7 +1637,7 @@ newGame(MAPS[1]);G.running=false;
 G.gold=200;G.hintTiles=[];
 paintIcons();showMenu();requestAnimationFrame(frame);
 
-window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,refreshPanel,sellValue,hintTiles:i=>hintTiles(MAPS[i]),step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
+window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,refreshPanel,bannerSub:w=>bannerSub(w),newTypes:w=>newTypes(w),BLURB,TIP_MS,sellValue,hintTiles:i=>hintTiles(MAPS[i]),step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
   CFG,tstats,coverage,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
   hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},hurt:(e,d,p,src)=>hurt(e,d,p,src),LIFT,

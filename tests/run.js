@@ -1088,8 +1088,8 @@ let BASE;
 
     await page.click('.tw[data-t="bolt"]');
     check((await G(page, () => window.__pw.G.pending)) === 'bolt' && (await cls(page, '.tw[data-t="bolt"]', 'armed')), "tap Bolt with nothing selected: G.pending === 'bolt' and it has .armed");
-    const ready = await text(page, '#info');
-    check(ready.startsWith('Bolt ready. Tap grass to place it.') && ready.endsWith('Dmg 11 · Range 2.4 · 1.8/s') && (await page.$eval('#info', el => el.innerHTML.includes('<b>Bolt</b> ready.') && el.innerHTML.includes('<br>'))), '#info: "<b>Bolt</b> ready. Tap grass to place it.<br>" and the Bolt stats (' + ready + ')');
+    const ready = await text(page, '#infoMsg');
+    check(ready.startsWith('Bolt ready. Tap grass to place it.') && ready.endsWith('Dmg 11 · Range 2.4 · 1.8/s') && (await page.$eval('#infoMsg', el => el.innerHTML.includes('<b>Bolt</b> ready.') && el.innerHTML.includes('<br>'))), '#infoMsg: "<b>Bolt</b> ready. Tap grass to place it.<br>" and the Bolt stats (' + ready + ')');
     await G(page, () => new Promise(res => { let n = 0; const f = () => { if (n % 15 === 0) window.__pw.G.gold = 100 + n; if (++n < 120) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); }));
     await page.waitForTimeout(100);
     check((await text(page, '#info')).includes('ready') && (await G(page, () => window.__pw.G.gold)) === 205, 'gold set 8 times over 120 frames: #info still includes "ready" (' + (await text(page, '#info')) + ')');
@@ -1106,7 +1106,7 @@ let BASE;
     await page.waitForTimeout(300); await tapTile(page, 2, 5);
     check((await G(page, () => window.__pw.G.towers.length)) === 1 && (await G(page, () => window.__pw.G.pending)) === 'bolt', "tapTile(2,5), wait 300ms, tapTile(2,5): towers.length === 1 and G.pending === 'bolt'");
     check((await G(page, () => window.__pw.G.sel)) === null && (await cls(page, '.tw[data-t="bolt"]', 'armed')), 'after the build only the tile clears; Bolt stays armed');
-    check((await text(page, '#info')).startsWith('Next: ') && !(await text(page, '#info')).includes('ready'), 'a tower kept armed after a build leaves #info to the wave preview (' + (await text(page, '#info')) + ')');
+    check((await text(page, '#infoMsg')) === 'Next wave:' && !(await hidden(page, '#chips')), 'a tower kept armed after a build leaves #info to the wave preview: "Next wave:" and the chips (' + (await text(page, '#infoMsg')) + ')');
     await tapTile(page, 4, 5); await page.waitForTimeout(300); await tapTile(page, 4, 5);
     check((await G(page, () => window.__pw.G.towers.length)) === 2, 'tapTile(4,5), wait 300ms, tapTile(4,5): towers.length === 2');
 
@@ -1140,10 +1140,10 @@ let BASE;
     await page.click('.tw[data-t="bolt"]'); await tapTile(page, 6, 5); await page.waitForTimeout(300); await tapTile(page, 6, 5);
     check((await G(page, () => window.__pw.G.towers.length === 1 && window.__pw.G.pending === 'bolt')), 'built with Bolt kept armed');
     await page.click('#bWave');
-    check((await text(page, '#info')) === 'Wave 1 is marching in.' && (await cls(page, '.tw[data-t="bolt"]', 'armed')), 'during the wave #info says the wave is marching in, and the palette still shows Bolt armed (' + (await text(page, '#info')) + ')');
+    check((await text(page, '#infoMsg')) === 'Wave 1 is marching in. Next:' && !(await hidden(page, '#chips')) && (await cls(page, '.tw[data-t="bolt"]', 'armed')), 'during the wave #infoMsg says the wave is marching in over the next-wave chips, and the palette still shows Bolt armed (' + (await text(page, '#infoMsg')) + ')');
     await G(page, () => { const W = window.__pw, g = W.G; g.running = false; let t = 0; while ((g.spawnQ.length || g.enemies.length) && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; } g.running = true; });
     await page.waitForTimeout(100);
-    check((await text(page, '#info')).startsWith('Next: ') && (await G(page, () => window.__pw.G.pending)) === 'bolt', 'after the wave the next-wave preview is back (' + (await text(page, '#info')) + ')');
+    check((await text(page, '#infoMsg')) === 'Next wave:' && !(await hidden(page, '#chips')) && (await G(page, () => window.__pw.G.pending)) === 'bolt', 'after the wave the next-wave preview is back (' + (await text(page, '#infoMsg')) + ')');
     await tapTile(page, 2, 5);
     check((await text(page, '#info')).startsWith('Bolt · ') && (await text(page, '#info')).includes('Tap again to build.'), 'a grass tap with the kept arm shows the placing line');
     await page.waitForTimeout(300); await tapTile(page, 2, 5);
@@ -1159,7 +1159,7 @@ let BASE;
     const { ctx, page } = await newPage(browser, { viewport: vp });
     await startMap(page, 1);
     const res = await G(page, () => {
-      const W = window.__pw, g = W.G, info = document.querySelector('#info'), bw = document.querySelector('#bWave'), out = [];
+      const W = window.__pw, g = W.G, info = document.querySelector('#infoMsg'), bw = document.querySelector('#bWave'), out = [];
       g.running = false; g.gold = 500;
       const states = {
         'Start wave 1': () => { g.wave = 0; g.W = {}; g.spawnQ = []; g.sendArmAt = 0; },
@@ -1176,7 +1176,7 @@ let BASE;
       return out;
     });
     const bad = res.filter(r => !r.fits || !r.head || !r.trait);
-    check(bad.length === 0 && res.length === 20, `${vp.width}px: for every tower beside every wave button label, the ready line fits #info's 3 lines and keeps the tower's name, the instruction and its trait ` + JSON.stringify(bad.slice(0, 3)));
+    check(bad.length === 0 && res.length === 20, `${vp.width}px: for every tower beside every wave button label, the ready line fits #infoMsg's 3 lines and keeps the tower's name, the instruction and its trait ` + JSON.stringify(bad.slice(0, 3)));
     if (vp.width === 390) { const full = { bolt: 'Dmg 11 · Range 2.4 · 1.8/s', mortar: 'Dmg 30 · Range 2.4 · 0.7/s · Splash 0.9 · Ground only', frost: 'Dmg 5 · Range 2.0 · 1.0/s · Slow 42%', arc: 'Dmg 21 · Range 2.2 · 0.9/s · Chains 3', long: 'Dmg 78 · Range 4.6 · 0.5/s' };
       check(res.filter(r => r.label === 'Start wave 1').every(r => r.stats === full[r.k]), '390px beside Start wave 1: the ready line is the full stat line in spec order ' + JSON.stringify(res.filter(r => r.label === 'Start wave 1').map(r => r.stats))); }
     if (vp.width === 320) check(res.find(r => r.k === 'mortar' && r.label === 'Send anyway?').stats.startsWith('Ground only'), "320px: Mortar's line leads with 'Ground only' when the stats must be cut");
@@ -1239,8 +1239,8 @@ let BASE;
     const { ctx, page } = await newPage(browser);
     check((await G(page, () => window.__pw.G.hintTiles.length)) === 0, 'the demo board behind the menu has no hint tiles');
     await startMap(page, 1);
-    const coach = await page.evaluate(() => { const i = document.querySelector('#info'); return { text: i.textContent, html: i.innerHTML, color: getComputedStyle(i).color }; });
-    check(coach.text === 'Build first: tap a grass tile beside the road.' && coach.html.startsWith('<b>Build first:</b>') && coach.color === 'rgb(240, 233, 210)', 'fresh storage: #info reads "Build first: tap a grass tile beside the road." in ink, not muted ' + JSON.stringify(coach));
+    const coach = await page.evaluate(() => { const i = document.querySelector('#infoMsg'); return { text: i.textContent, html: i.innerHTML, color: getComputedStyle(i).color }; });
+    check(coach.text === 'Build first: tap a grass tile beside the road.' && coach.html.startsWith('<b>Build first:</b>') && coach.color === 'rgb(240, 233, 210)', 'fresh storage: #infoMsg reads "Build first: tap a grass tile beside the road." in ink, not muted ' + JSON.stringify(coach));
     const hint = await G(page, () => {
       const W = window.__pw, g = W.G, m = g.map, pts = [];
       for (let i = 0; i <= Math.round(m.path.len * 10); i++) { const p = m.path.at(i / 10); if (p.x >= 0 && p.x < W.COLS && p.y >= 0 && p.y < W.ROWS) pts.push(p); }
@@ -1263,18 +1263,18 @@ let BASE;
     await page.emulateMedia({ reducedMotion: 'no-preference' });
 
     await page.click('.tw[data-t="bolt"]');
-    check(!(await text(page, '#info')).includes('Build first') && !(await cls(page, '#info', 'coach')), 'arming a tower replaces the coaching line');
+    check(!(await text(page, '#infoMsg')).includes('Build first') && !(await cls(page, '#infoMsg', 'coach')), 'arming a tower replaces the coaching line');
     await page.click('.tw[data-t="bolt"]');
     check((await text(page, '#info')).includes('Build first'), 'disarming brings it back');
     await tapTile(page, h0.c, h0.r);
-    check((await text(page, '#info')) === 'Pick a tower to place here.', 'a selected tile replaces it too');
+    check((await text(page, '#infoMsg')) === 'Pick a tower to place here.', 'a selected tile replaces it too');
     await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
     const after = await G(page, () => ({ hints: window.__pw.G.hintTiles.length, done: window.__pw.S.tutorialDone, tip: window.__pw.S.refundTip, towers: window.__pw.G.towers.length }));
     check(after.towers === 1 && after.hints === 0 && after.done === true, 'after the first build G.hintTiles is empty and S.tutorialDone === true ' + JSON.stringify(after));
     const ls = await stored(page);
     check(ls.tutorialDone === true && ls.refundTip === true, 'tutorialDone and refundTip are saved');
     check((await text(page, '#toast')) === 'Changed your mind? Full refund until the next wave.' && after.tip === true, 'the first build toasts "Changed your mind? Full refund until the next wave."');
-    check(!(await text(page, '#info')).includes('Build first') && !(await cls(page, '#info', 'coach')), 'the coaching line is gone once a tower stands');
+    check(!(await text(page, '#infoMsg')).includes('Build first') && !(await cls(page, '#infoMsg', 'coach')), 'the coaching line is gone once a tower stands');
     await G(page, () => { document.querySelector('#toast').textContent = ''; });
     await tapTile(page, 2, 2); await page.waitForTimeout(300); await tapTile(page, 2, 2);
     check((await G(page, () => window.__pw.G.towers.length)) === 2 && (await text(page, '#toast')) === '', 'a second build shows no tip');
@@ -2315,11 +2315,11 @@ let BASE;
     await G(page, () => { const g = window.__pw.G; g.running = false; g.hintTiles = []; });
     await tapTile(page, 4, 5); await page.click('.tw[data-t="bolt"]');
     await page.waitForTimeout(100);
-    const info = await page.$eval('#info', el => ({ text: el.textContent, html: el.innerHTML, fits: el.scrollHeight <= el.clientHeight + 1 }));
+    const info = await page.$eval('#infoMsg', el => ({ text: el.textContent, html: el.innerHTML, fits: el.scrollHeight <= el.clientHeight + 1 }));
     const want = await G(page, () => { const W = window.__pw, m = W.G.map, pts = []; for (let i = 0; i <= Math.round(m.path.len * 10); i++) { const p = m.path.at(i / 10); if (p.x >= 0 && p.x < W.COLS && p.y >= 0 && p.y < W.ROWS) pts.push(p); }
       const cov = pts.filter(p => Math.hypot(p.x - 4.5, p.y - 5.5) <= 2.4 + 1e-9).length * 0.1; return { cov, fn: W.coverage(4, 5, 2.4) }; });
-    check(/Covers \d+\.\d tiles of road/.test(info.text), '#info matches /Covers \\d+\\.\\d tiles of road/ (' + info.text + ')');
-    check(Math.abs(want.fn - want.cov) < 1e-9 && info.html === `<b>Bolt</b> · Fast shots. Hits fliers.<br>Covers ${want.cov.toFixed(1)} tiles of road. Tap again to build.` && info.fits, 'coverage() counts the on-board road samples (every 0.1 tile) within range; at 390px #info is the full spec line and fits (' + info.html + ')');
+    check(/Covers \d+\.\d tiles of road/.test(info.text), '#infoMsg matches /Covers \\d+\\.\\d tiles of road/ (' + info.text + ')');
+    check(Math.abs(want.fn - want.cov) < 1e-9 && info.html === `<b>Bolt</b> · Fast shots. Hits fliers.<br>Covers ${want.cov.toFixed(1)} tiles of road. Tap again to build.` && info.fits, 'coverage() counts the on-board road samples (every 0.1 tile) within range; at 390px #infoMsg is the full spec line and fits (' + info.html + ')');
     // Acceptance: tap (4,5), then Bolt, and render. Pixels are picked where the plain board (no selection) shows bare road colour.
     const pv = await G(page, () => {
       const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, Wd = cv.width;
@@ -2346,7 +2346,7 @@ let BASE;
       const p = q => [...c.getImageData(Math.floor(q[0]), Math.floor(q[1]), 1, 1).data].slice(0, 3); return { n, road: p(pin), out: p(pout) }; }, [ok, pv.pin, pv.pout]);
     const okD = await dash(true);
     await setGold(page, 10);
-    const poorInfo = await text(page, '#info'), poorD = await dash(false);
+    const poorInfo = await text(page, '#infoMsg'), poorD = await dash(false);
     check(okD.n > 120 && poorD.n > 120, 'the edge is dashed #fff6d8, or #ff9a85 when the tower is unaffordable ' + JSON.stringify({ ok: okD.n, poor: poorD.n }));
     check(/Covers \d+\.\d tiles of road\. Not enough gold yet\.$/.test(poorInfo), 'unaffordable: "Covers N tiles of road. Not enough gold yet." (' + poorInfo + ')');
     check(poorD.road[1] < poorD.out[1] - 30 && poorD.road[0] >= poorD.out[0] - 5 && okD.road[2] < okD.out[2], 'and the covered road turns red instead of gold ' + JSON.stringify({ ok: okD, poor: poorD }));
@@ -2354,23 +2354,24 @@ let BASE;
     await ctx.close();
   }
   for (const vp of [{ width: 320, height: 568 }, { width: 390, height: 780 }]) {
-    // The placing line beside every wave button label, for every tower, affordable or not: it fits #info and keeps the name, coverage and instruction.
+    // The placing line beside every wave button label, for every tower, affordable or not: it fits #infoMsg and keeps the name and coverage.
+    // (wave-intel: the instruction is the first thing dropped where space is short; see the 'placing line keeps each tower's trait' block.)
     const { ctx, page } = await newPage(browser, { viewport: vp });
     await startMap(page, 1);
     const res = await G(page, () => {
-      const W = window.__pw, g = W.G, info = document.querySelector('#info'), bw = document.querySelector('#bWave'), out = [];
+      const W = window.__pw, g = W.G, info = document.querySelector('#infoMsg'), bw = document.querySelector('#bWave'), out = [];
       g.running = false; g.hintTiles = [];
       const states = { 'Start wave 1': () => { g.wave = 0; g.W = {}; g.spawnQ = []; g.sendArmAt = 0; }, 'Send anyway?': () => { g.wave = 0; g.W = {}; g.spawnQ = []; g.sendArmAt = performance.now(); }, 'Call 12 early': () => { g.wave = 11; g.W = { 11: { rem: 0, alive: 1 } }; g.spawnQ = []; } };
       for (const gold of [9999, 0]) for (const [label, set] of Object.entries(states)) for (const k of Object.keys(W.TD)) {
         set(); g.gold = gold; g.selTower = null; g.sel = { c: 4, r: 5 }; g.pending = k; W.refreshPanel();
         const tx = info.textContent;
-        out.push({ label: bw.textContent, k, fits: info.scrollHeight <= info.clientHeight + 1, name: tx.startsWith(W.TD[k].name), cov: /Covers \d+\.\d tiles of road\. /.test(tx), end: tx.endsWith(gold ? 'Tap again to build.' : 'Not enough gold yet.'), full: tx.includes(W.TD[k].desc) });
+        out.push({ label: bw.textContent, k, fits: info.scrollHeight <= info.clientHeight + 1, name: tx.startsWith(W.TD[k].name), cov: /Covers \d+\.\d tiles of road\./.test(tx), full: tx.includes(W.TD[k].desc) });
       }
       g.sel = null; g.pending = null; g.W = {}; g.wave = 0; W.refreshPanel();
       return out;
     });
-    const bad = res.filter(r => !r.fits || !r.name || !r.cov || !r.end);
-    check(bad.length === 0 && res.length === 30, `${vp.width}px: for every tower and wave button label, the placing line fits #info and keeps the name, 'Covers N tiles of road.' and the instruction ` + JSON.stringify(bad.slice(0, 3)));
+    const bad = res.filter(r => !r.fits || !r.name || !r.cov);
+    check(bad.length === 0 && res.length === 30, `${vp.width}px: for every tower and wave button label, the placing line fits #infoMsg and keeps the name and 'Covers N tiles of road.' ` + JSON.stringify(bad.slice(0, 3)));
     if (vp.width === 390) check(res.filter(r => r.label === 'Start wave 1' && r.k !== 'long').every(r => r.full), '390px beside Start wave 1: the description is kept for every tower but Longshot');
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
@@ -2412,14 +2413,14 @@ let BASE;
   {
     const { ctx, page } = await newPage(browser, { viewport: { width: 667, height: 375 } });
     await startMap(page, 1);
-    const fit = () => page.$eval('#info', el => ({ sh: el.scrollHeight, ch: el.clientHeight, w: el.clientWidth, t: el.textContent }));
+    const fit = () => page.$eval('#infoMsg', el => ({ sh: el.scrollHeight, ch: el.clientHeight, w: el.clientWidth, t: el.textContent }));
     const rotate = async (w, h) => { await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(250); };
     await tapTile(page, 4, 5); await page.click('.tw[data-t="arc"]');
     const a = await fit();
-    check(a.sh <= a.ch + 1 && /Covers \d+\.\d tiles of road\./.test(a.t), 'landscape 667x375: the placing line fits #info ' + JSON.stringify(a));
+    check(a.sh <= a.ch + 1 && /Covers \d+\.\d tiles of road\./.test(a.t), 'landscape 667x375: the placing line fits #infoMsg ' + JSON.stringify(a));
     await rotate(375, 667);
     const b = await fit();
-    check(b.w !== a.w && b.sh <= b.ch + 1 && /Covers \d+\.\d tiles of road\. (Tap again to build|Not enough gold yet)\./.test(b.t), 'rotated to portrait 375x667: the placing line is refit to the new width, not cut off ' + JSON.stringify(b));
+    check(b.w !== a.w && b.sh <= b.ch + 1 && /^Arc · .*Covers \d+\.\d tiles of road\./.test(b.t), 'rotated to portrait 375x667: the placing line is refit to the new width, not cut off ' + JSON.stringify(b));
     await tapTile(page, 1, 0); await page.click('.tw[data-t="mortar"]');
     await rotate(844, 390);
     const c = await fit();
@@ -2427,6 +2428,290 @@ let BASE;
     await rotate(320, 568);
     const d = await fit();
     check(d.w < c.w && d.t.startsWith('Mortar ready') && d.sh <= d.ch + 1, 'rotated to a 320x568 portrait: the ready line is refit, not cut off ' + JSON.stringify(d));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------
+  // wave-intel: #info is a message (#infoMsg) over the next wave's chips (#chips): an icon and a count per enemy type. A tapped chip
+  // shows that type for 4s; a type's first wave gets a one-time 'New:' intro (S.seen); the placing line keeps each tower's trait.
+  // intel(page): #infoMsg's text and line classes, whether it fits, and the chips (shown, collapsed for a detail, one row, contents).
+  const intel = page => G(page, () => { const m = document.querySelector('#infoMsg'), c = document.querySelector('#chips'), i = document.querySelector('#info');
+    return { msg: m.textContent, html: m.innerHTML, l1: m.classList.contains('l1'), l2: m.classList.contains('l2'), coach: m.classList.contains('coach'), fits: m.scrollHeight <= m.clientHeight + 1,
+      chips: !c.hidden && c.getBoundingClientRect().height > 0, off: c.classList.contains('off'), one: c.classList.contains('one'), types: [...c.querySelectorAll('.chip')].map(x => x.dataset.t + x.textContent).join(' '), infoSH: i.scrollHeight }; });
+
+  current = 'wave-intel: next-wave chips with enemy icons';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    check(await page.$eval('#info', el => { const [m, c] = el.children; return el.children.length === 2 && m.id === 'infoMsg' && c.id === 'chips' && c.getAttribute('role') === 'button' && c.getAttribute('tabindex') === '0'; }), '#info holds <div id="infoMsg"> and <div id="chips" role="button" tabindex="0">');
+    const css = await page.evaluate(() => { const cs = s => getComputedStyle(document.querySelector(s)), i = cs('#info'), c = cs('#chips'); return { clamp: i.webkitLineClamp, disp: i.display, max: i.maxHeight, ov: i.overflow, cDisp: c.display, wrap: c.flexWrap, gap: c.rowGap + ' ' + c.columnGap, lh: c.lineHeight, cOv: c.overflow }; });
+    check(css.clamp === 'none' && css.disp === 'block' && css.max === '50px' && css.ov === 'hidden', '#info has no line clamp of its own and keeps max-height 50px, overflow hidden ' + JSON.stringify(css));
+    check(css.cDisp === 'flex' && css.wrap === 'wrap' && css.gap === '2px 8px' && css.lh === '16px' && css.cOv === 'hidden', '#chips: display flex, flex-wrap wrap, gap 2px 8px, line-height 16px, overflow hidden ' + JSON.stringify(css));
+    // Acceptance.
+    const a1 = await G(page, () => { const W = window.__pw; W.newGame(1); W.G.wave = 4; W.refreshPanel();
+      const cv = [...document.querySelectorAll('#chips canvas')], types = new Set(W.buildWave(5).map(g => g[0]));
+      return { n: cv.length, want: types.size, fly: cv.filter(c => { const s = getComputedStyle(c); return s.outlineStyle === 'solid' && s.outlineWidth === '1px' && s.outlineColor === 'rgb(143, 208, 255)'; }).map(c => c.parentNode.dataset.t),
+        radius: getComputedStyle(cv[0]).borderRadius, size: cv.map(c => [c.width, c.height, c.getBoundingClientRect().width, c.getBoundingClientRect().height].join()) }; });
+    check(a1.n === a1.want && a1.n === 3, `newGame(1); G.wave=4; refreshPanel(): the '#chips canvas' count (${a1.n}) equals the number of distinct types in __pw.buildWave(5) (${a1.want})`);
+    check(a1.fly.length === 1 && a1.fly[0] === 'wisp', 'one chip, the Wisp, has the 1px #8fd0ff flier outline ' + JSON.stringify(a1.fly));
+    check(a1.size.every(s => s === '16,16,16,16') && a1.radius === '4px', 'each chip icon is a 16x16 css canvas with 4px corners ' + JSON.stringify(a1.size));
+    const cnt = await G(page, () => { const W = window.__pw, m = {}; for (const [t, c] of W.buildWave(5)) m[t] = (m[t] || 0) + c; const chips = [...document.querySelectorAll('#chips .chip')];
+      const cs = getComputedStyle(chips[0].querySelector('span')); return { got: chips.map(c => c.dataset.t + c.textContent), want: Object.entries(m).map(([t, c]) => t + '×' + c), font: cs.fontSize + ' ' + cs.fontWeight + ' ' + cs.color }; });
+    check(JSON.stringify(cnt.got) === JSON.stringify(cnt.want), 'each chip is its icon plus ×n, the count of its type in the wave, in the order the wave sends them ' + JSON.stringify(cnt));
+    check(cnt.font === '12px 800 rgb(240, 233, 210)', 'the count is 12px, weight 800, in ink (' + cnt.font + ')');
+    const outl = await G(page, () => { const W = window.__pw, o = w => { W.G.wave = w - 1; W.refreshPanel(); return Object.fromEntries([...document.querySelectorAll('#chips .chip')].map(c => { const s = getComputedStyle(c.querySelector('canvas')); return [c.dataset.t, s.outlineStyle === 'none' ? 'none' : s.outlineWidth + ' ' + s.outlineColor]; })); }; return { w6: o(6), w20: o(20) }; });
+    check(outl.w6.brute === '1px rgb(214, 219, 224)' && outl.w6.grunt === 'none' && outl.w6.scout === 'none', 'the armored Brute chip has a 1px #d6dbe0 outline; Grunt and Scout have none ' + JSON.stringify(outl.w6));
+    check(outl.w20.boss === '1px rgb(164, 135, 255)' && outl.w20.wisp === '1px rgb(143, 208, 255)', 'the Warlord chip has a 1px #a487ff outline ' + JSON.stringify(outl.w20));
+    // The icons are the enemies themselves (drawEnemy), centred, with nothing cut off at the canvas edge.
+    const ic = await G(page, () => { const W = window.__pw, out = {};
+      for (const w of [6, 7, 20]) { W.G.wave = w - 1; W.refreshPanel();
+        for (const c of document.querySelectorAll('#chips canvas')) { const d = c.getContext('2d').getImageData(0, 0, 16, 16).data, t = c.parentNode.dataset.t; let n = 0, edge = 0, sx = 0, sy = 0;
+          for (let i = 0; i < 256; i++) { const x = i % 16, y = (i / 16) | 0; if (d[i * 4 + 3] > 40) { n++; sx += x + 0.5; sy += y + 0.5; if (x === 0 || y === 0 || x === 15 || y === 15) edge++; } }
+          out[t] = { n, edge, cx: +(sx / n).toFixed(1), cy: +(sy / n).toFixed(1), mid: [...d.slice((8 * 16 + 8) * 4, (8 * 16 + 8) * 4 + 3)] }; } }
+      return out; });
+    check(Object.keys(ic).length === 6 && Object.values(ic).every(v => v.n > 40 && v.edge === 0), 'every type draws an icon (Grunt, Scout, Brute, Wisp, Splitter, Warlord) and none touches the canvas edge ' + JSON.stringify(ic));
+    check(near3(ic.grunt.mid, [0xc9, 0x58, 0x3a], 4) && Object.values(ic).every(v => Math.abs(v.cy - 8) < 1.2 && Math.abs(v.cx - 8) < 2.5), 'drawn with drawEnemy and centred: the Grunt chip is the grunt colour at its centre ' + JSON.stringify(ic.grunt));
+    // aria-label: 'Next wave: ' + waveSummary. Acceptance: it includes '(air)' when the next wave has wisps.
+    const lab = await G(page, () => { const W = window.__pw, l = w => { W.G.wave = w - 1; W.refreshPanel(); return document.querySelector('#chips').getAttribute('aria-label'); }; return { w5: l(5), w1: l(1), w7: l(7) }; });
+    check(lab.w5 === 'Next wave: 13 Grunts, 7 Scouts, 3 Wisps (air)', "#chips aria-label includes '(air)' when the next wave has wisps (" + lab.w5 + ')');
+    check(lab.w1 === 'Next wave: 7 Grunts' && !lab.w7.includes('(air)'), 'and not for a wave with no fliers ' + JSON.stringify(lab));
+    // The chips are rebuilt only when the road or the wave changes, not on every gold change.
+    const cache = await G(page, () => new Promise(res => { const W = window.__pw; W.G.running = false; W.G.wave = 4; W.refreshPanel(); const c0 = document.querySelector('#chips canvas'); W.G.gold += 37;
+      requestAnimationFrame(() => requestAnimationFrame(() => { const same = document.querySelector('#chips canvas') === c0, gold = document.querySelector('#sGold span').textContent; W.G.wave = 5; W.refreshPanel(); res({ same, gold, g: W.G.gold, rebuilt: document.querySelector('#chips canvas') !== c0 }); })); }));
+    check(cache.same && cache.gold === String(cache.g) && cache.rebuilt, 'a gold change (refreshPanel) keeps the same chip canvases; a new wave rebuilds them ' + JSON.stringify(cache));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+    // DPR-scaled canvases.
+    const hi = await browser.newContext({ viewport: { width: 390, height: 780 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const hp = await hi.newPage(); await hp.goto(`${BASE}/index.html`); await hp.waitForTimeout(250); await startMap(hp, 1);
+    const dpr = await G(hp, () => [...document.querySelectorAll('#chips canvas')].map(c => c.width + 'x' + c.height + '/' + c.getBoundingClientRect().width));
+    check(dpr.length === 1 && dpr.every(d => d === '32x32/16'), 'at DPR 2 each chip canvas is 32x32, shown at 16 css px ' + JSON.stringify(dpr));
+    await hi.close();
+  }
+
+  current = 'wave-intel: what #infoMsg says, and when the chips show';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    let st = await intel(page);
+    check(st.msg === 'Build first: tap a grass tile beside the road.' && st.coach && st.l2 && st.chips && st.one && st.fits && st.types === 'grunt×7', "wave 0 with no towers: the 'Build first' line, in ink on 2 lines, over one row of chips " + JSON.stringify(st));
+    await tapTile(page, 2, 2);
+    st = await intel(page);
+    check(st.msg === 'Pick a tower to place here.' && !st.chips && !st.l1 && !st.l2, 'a selected tile hides the chips and the message has all 3 lines ' + JSON.stringify(st));
+    await page.click('.tw[data-t="bolt"]');
+    st = await intel(page);
+    check(st.msg.startsWith('Bolt · ') && st.msg.includes('Covers') && !st.chips && st.fits, 'placing uses the full #info, as before ' + JSON.stringify(st));
+    await page.waitForTimeout(300); await tapTile(page, 2, 2);
+    st = await intel(page);
+    check((await G(page, () => window.__pw.G.towers.length === 1 && window.__pw.G.pending === 'bolt')) && st.msg === 'Next wave:' && st.l1 && st.chips && !st.one, "built, with Bolt kept armed: 'Next wave:' on one line over the chips " + JSON.stringify(st));
+    await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="frost"]');
+    st = await intel(page);
+    check(st.msg.startsWith('Frost ready. Tap grass to place it.') && !st.chips, 'a tower armed on purpose hides the chips for its ready line ' + JSON.stringify(st));
+    await page.click('.tw[data-t="frost"]');
+    // Acceptance: select a tower.
+    await tapTile(page, 2, 2);
+    st = await intel(page);
+    check(st.chips && st.msg.startsWith('Next level') && st.l1 && st.fits && st.msg.includes('Dmg 18'), "select a tower: #chips is still visible and #infoMsg starts with 'Next level', on one line " + JSON.stringify(st));
+    await tapTile(page, 2, 2);
+    await G(page, () => { const W = window.__pw; W.G.running = false; W.startWave(); W.refreshPanel(); });
+    st = await intel(page);
+    check(st.msg === 'Wave 1 is marching in. Next:' && st.html === 'Wave <b>1</b> is marching in. Next:' && st.chips && st.types === 'grunt×9', "while a wave spawns: 'Wave <b>1</b> is marching in. Next:' over wave 2's chips " + JSON.stringify(st));
+    await clearAll(page); await G(page, () => window.__pw.refreshPanel());
+    st = await intel(page);
+    check(st.msg === 'Next wave:' && st.l1 && st.chips && st.types === 'grunt×9', "between waves: 'Next wave:' " + JSON.stringify(st));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = "wave-intel: a selected tower's line fits one line";
+  for (const vp of [{ width: 320, height: 568 }, { width: 390, height: 780 }]) {
+    const { ctx, page } = await newPage(browser, { viewport: vp });
+    await startMap(page, 1);
+    await calmBoard(page, 30); // endless next: 'Start wave 31' is the widest label beside it
+    const res = await G(page, () => { const W = window.__pw, g = W.G, m = document.querySelector('#infoMsg'), i = document.querySelector('#info'), out = [];
+      for (const k of Object.keys(W.TD)) { g.towers = []; g.grid = W.MAPS[1].grid.slice(); W.build(k, 4, 5); const t = g.towers[0];
+        for (const lv of [1, 2, 3]) { while (t.level < lv) W.upgrade(t); g.selTower = t; W.refreshPanel();
+          const tx = m.textContent; out.push({ k, lv, t: tx, l1: m.classList.contains('l1'), fits: m.scrollHeight <= m.clientHeight + 1, info: i.scrollHeight, ok: lv < 3 ? tx.startsWith('Next level: Dmg ') : tx === W.TD[k].desc || tx === W.TD[k].key }); } }
+      g.selTower = null; g.towers = []; W.refreshPanel(); return out; });
+    const bad = res.filter(r => !r.l1 || !r.fits || r.info > 50 || !r.ok);
+    check(bad.length === 0 && res.length === 15, `${vp.width}px beside 'Start wave 31': every tower's Next level line (levels 1-2) and max-level line (level 3) fits its one line ` + JSON.stringify(bad.slice(0, 3)));
+    const mortar = res.find(r => r.k === 'mortar' && r.lv === 1);
+    check(!mortar.t.includes('Ground') && mortar.t.includes('Dmg 48'), `${vp.width}px: the Mortar's Next level line drops 'Ground only' first (it never changes, and #tvStats shows it) instead of ending in 'Ground…' (${mortar.t})`);
+    if (vp.width === 390) check(mortar.t === 'Next level: Dmg 48 · Splash 1.1', "390px: then the rate, then the range (the board's next-level ring shows it): 'Next level: Dmg 48 · Splash 1.1' (" + mortar.t + ')');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = "wave-intel: a one-time 'New' intro for each enemy type";
+  {
+    const { ctx, page } = await newPage(browser);
+    check(JSON.stringify(await G(page, () => window.__pw.S.seen)) === '["grunt"]' && JSON.stringify((await stored(page)).seen) === '["grunt"]', 'fresh storage: S.seen is ["grunt"], and it is saved');
+    await startMap(page, 1);
+    await G(page, () => { const W = window.__pw; W.G.running = false; W.build('bolt', 2, 2); W.G.wave = 4; W.refreshPanel(); });
+    let st = await intel(page);
+    check(st.msg.includes('New:') && st.msg.includes('Wisp'), "fresh storage at G.wave=4: #infoMsg includes 'New:' and 'Wisp' (" + st.msg + ')');
+    check(st.html === "<b>New:</b> Wisp. Flies. Mortars can't hit it." && st.l2 && st.one && st.chips && st.fits, 'it is <b>New:</b> and the blurb, on 2 lines over one row of chips (Scouts are new too; the type the game introduces last is named) ' + JSON.stringify(st));
+    const sw = await G(page, () => { const W = window.__pw, g = W.G; W.startWave(); return { sub: g.banner.sub, sr: document.querySelector('#sr').textContent, seen: W.S.seen.slice(), ls: JSON.parse(localStorage.getItem('pathwarden.v1')).seen }; });
+    check(sw.sub === 'New: Scout, Wisp' && sw.sr === 'Wave 5. New: Scout, Wisp', "the WAVE 5 banner's sub names what is new: 'New: Scout, Wisp' " + JSON.stringify(sw));
+    check(sw.seen.includes('wisp') && sw.seen.includes('scout') && JSON.stringify(sw.ls) === JSON.stringify(sw.seen), 'startWave adds every type in the wave to S.seen and saves it ' + JSON.stringify(sw.ls));
+    st = await intel(page);
+    check(st.msg.startsWith('New: Brute. Armored') && st.l2 && st.chips, "the 'New' intro outranks 'Wave 5 is marching in': wave 6 brings the first Brute (" + st.msg + ')');
+    await page.reload(); await page.waitForTimeout(250);
+    check((await G(page, () => window.__pw.S.seen)).includes('wisp'), 'after a reload S.seen includes wisp');
+    await startMap(page, 1);
+    await G(page, () => { const W = window.__pw; W.G.running = false; W.G.wave = 4; W.build('bolt', 6, 6); W.refreshPanel(); });
+    st = await intel(page);
+    check(!st.msg.includes('Wisp') && st.msg === 'Next wave:' && st.l1 && !st.one, 'and at G.wave=4 the New line no longer mentions Wisp: wave 5 has nothing new (' + st.msg + ')');
+    // Each type once: the Brute's first wave (6), then the Warlord's (10). Waves 7 and 11 bring nothing new here.
+    const seq = await G(page, () => { const W = window.__pw, g = W.G, m = document.querySelector('#infoMsg'), out = []; W.S.seen = ['grunt', 'scout', 'wisp', 'splitter'];
+      const at = w => { g.W = {}; g.spawnQ = []; g.enemies = []; g.wave = w - 1; W.refreshPanel(); return m.textContent; };
+      out.push(at(6), at(7), at(10), at(11));
+      g.W = {}; g.spawnQ = []; g.wave = 5; W.startWave(); const b6 = g.banner.sub; out.push(at(6));
+      g.wave = 9; W.startWave(); const b10 = g.banner.sub; out.push(at(10));
+      return { out, b6, b10, seen: W.S.seen.slice().sort().join() }; });
+    check(seq.out[0] === 'New: Brute. Armored, so small hits do less. Longshot ignores armor. Costs 2 lives.' && seq.out[1] === 'Next wave:' && seq.out[2] === 'New: Warlord. Heavy armor. Costs 5 lives.' && seq.out[3] === 'Next wave:', 'before waves 6 and 10 the Brute and the Warlord get their blurbs ' + JSON.stringify(seq.out));
+    check(seq.b6 === 'New: Brute' && seq.b10 === 'A Warlord is coming', "banner subs: 'New: Brute'; a Warlord's first wave keeps 'A Warlord is coming' " + JSON.stringify(seq));
+    check(seq.out[4] === 'Next wave:' && seq.out[5] === 'Next wave:' && seq.seen === 'boss,brute,grunt,scout,splitter,wisp', 'once met, neither is introduced again ' + JSON.stringify(seq));
+    const subs = await G(page, () => { const W = window.__pw, keep = W.S.seen, sub = (seen, w) => { W.S.seen = seen; return W.bannerSub(w); };
+      const r = { a: sub(['grunt', 'scout', 'brute', 'splitter', 'boss'], 20), b: sub(['grunt', 'scout', 'brute', 'splitter', 'boss'], 7), c: sub(['grunt', 'scout'], 7) }; W.S.seen = keep; return r; });
+    check(subs.a === 'A Warlord is coming · New: Wisp' && subs.b === '' && subs.c === 'New: Splitter', "bannerSub joins its parts with ' · ' " + JSON.stringify(subs));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'wave-intel: S.seen for players from before 1.1';
+  {
+    const { ctx, page } = await newPage(browser);
+    const load = async v => { await page.evaluate(v => localStorage.setItem('pathwarden.v1', JSON.stringify(v)), v); await page.reload(); await page.waitForTimeout(200); return { seen: await G(page, () => window.__pw.S.seen.slice()), ls: (await stored(page)).seen }; };
+    const b12 = await load({ best: { meadow: 12 } });
+    check(b12.seen.includes('splitter') && b12.seen.includes('brute'), "storage with best {meadow:12} and no seen: S.seen includes 'splitter' and 'brute' after load " + JSON.stringify(b12.seen));
+    check(b12.seen.slice().sort().join() === 'boss,brute,grunt,scout,splitter,wisp' && JSON.stringify(b12.ls) === JSON.stringify(b12.seen), 'it is grunt plus every type in waves 1-12, and it is saved ' + JSON.stringify(b12));
+    const b4 = await load({ best: { quarry: 4, switch: 2 }, saves: { quarry: { map: 'quarry', wave: 4, gold: 100, lives: 20, towers: [] } } });
+    check(b4.seen.join() === 'grunt,scout,brute', 'best of 4 (the highest of any road): grunt, scout, brute; no wisp yet ' + JSON.stringify(b4.seen));
+    await page.click('#bContinue');
+    const st = await intel(page);
+    check(st.msg.startsWith('New: Wisp.'), 'continuing that run at wave 4 introduces the Wisp (' + st.msg + ')');
+    await G(page, () => { window.__pw.G.running = false; }); // so the reloads below do not save the run (and S) over the storage set for them
+    const odd = [];
+    for (const v of [{ best: { meadow: 1e9 } }, { best: { meadow: 'x', quarry: null } }, { seen: 'wisp', best: { meadow: 5 } }, { seen: ['wisp', 'laser', 7, 'wisp', 'constructor'] }]) odd.push((await load(v)).seen.join());
+    check(odd[0] === 'grunt,scout,brute,wisp,splitter,boss' && odd[1] === 'grunt' && odd[2] === 'grunt,scout,brute,wisp' && odd[3] === 'grunt,wisp', 'a huge or broken best, or a broken seen list, still loads to a clean S.seen ' + JSON.stringify(odd));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = "wave-intel: the 'New' intro and every preview fit a 320px phone";
+  {
+    const { ctx, page } = await newPage(browser, { viewport: { width: 320, height: 568 } });
+    await startMap(page, 1);
+    // Acceptance: the #info scrollHeight in the New-intro state.
+    const r = await G(page, () => { const W = window.__pw, g = W.G, i = document.querySelector('#info'), m = document.querySelector('#infoMsg'), c = document.querySelector('#chips'), out = {}; g.running = false; W.build('bolt', 2, 2);
+      for (const [w, seen] of [[4, ['grunt']], [5, ['grunt', 'scout', 'wisp']], [6, ['grunt', 'scout', 'brute', 'wisp']], [9, ['grunt', 'scout', 'brute', 'wisp', 'splitter']]]) {
+        W.S.seen = seen; g.wave = w; W.refreshPanel(); out[w + 1] = { sh: i.scrollHeight, msg: m.textContent.slice(0, 16), l2: m.classList.contains('l2'), rows: c.clientHeight }; }
+      W.S.seen = ['grunt', 'scout', 'brute', 'wisp', 'splitter', 'boss']; return out; });
+    check(Object.values(r).every(x => x.sh <= 50 && x.msg.startsWith('New: ') && x.l2 && x.rows === 16), 'at 320x568 the #info scrollHeight is <= 50 in the New-intro state (Wisp, Brute, Splitter, Warlord) ' + JSON.stringify(r));
+    // Every wave to 40, between waves and while it marches in: #info stays within 50px and every chip is whole.
+    const all = await G(page, () => { const W = window.__pw, g = W.G, i = document.querySelector('#info'), m = document.querySelector('#infoMsg'), c = document.querySelector('#chips'), bad = []; let two = 0, marchFit = 0;
+      let twoLines = 0, short = 0;
+      for (let w = 0; w <= 40; w++) for (const spawning of w ? [false, true] : [false]) {
+        g.wave = w; g.W = {}; g.spawnQ = spawning ? [{ at: 1e9, type: 'grunt', w }] : []; W.refreshPanel();
+        const rows = c.scrollHeight > 17 ? 2 : 1, whole = c.scrollHeight <= c.clientHeight + 1, fits = m.scrollHeight <= m.clientHeight + 1, tx = m.textContent;
+        if (rows === 2) two++;
+        if (spawning && tx === `Wave ${w} is marching in. Next:`) { marchFit++; if (m.classList.contains('l2')) twoLines++; }
+        if (spawning && tx === 'Next wave:') { short++; if (rows !== 2) bad.push({ w, why: 'shortened over one row' }); }
+        if (i.scrollHeight > 50 || !whole || !fits || (spawning && !tx.endsWith('Next:') && tx !== 'Next wave:')) bad.push({ w, spawning, sh: i.scrollHeight, whole, fits, msg: tx });
+      }
+      g.spawnQ = []; W.refreshPanel(); return { bad, two, marchFit, twoLines, short }; });
+    check(all.bad.length === 0 && all.two > 5, `320px, waves 1-41, between waves and while one marches in: #info is never over 50px, every chip shows whole (${all.two} previews take two rows), and no message is cut ` + JSON.stringify(all.bad.slice(0, 3)));
+    check(all.marchFit + all.short === 40 && all.twoLines > 5 && all.short > 0, `320px: 'Wave N is marching in. Next:' takes a second line over one row of chips (${all.twoLines} times); over two rows it becomes 'Next wave:' (${all.short} times) ` + JSON.stringify(all));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'wave-intel: tap a chip for its details';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await G(page, () => { const W = window.__pw; W.G.running = false; W.build('bolt', 2, 2); W.S.seen = Object.keys(W.ED); W.G.wave = 5; W.refreshPanel(); });
+    // Acceptance.
+    await page.click('#chips .chip[data-t="brute"]');
+    const t0 = await G(page, () => performance.now());
+    let st = await intel(page);
+    check(st.msg.includes('Armor') && st.msg.includes('Longshot ignores armor'), "tap the brute chip at wave 6: #infoMsg includes 'Armor' and 'Longshot ignores armor' (" + st.msg + ')');
+    const head = await G(page, () => { const W = window.__pw, w = 6, hp = Math.round(175 * (1 + W.CFG.hpA * (w - 1) + W.CFG.hpB * (w - 1) ** 2) * W.G.map.hp); return `Brute ×1 · ${hp} HP · Slow · Armor ${(3 * (1 + (w - 1) * 0.03)).toFixed(0)}. `; });
+    check(st.msg.startsWith(head) && st.msg.endsWith('Longshot ignores armor. Costs 2 lives.') && st.fits && st.html.startsWith('<b>Brute</b> ×1'), `the detail: <b>Brute</b> ×n · HP · speed · Armor a, then the blurb, which drops sentences from its front to fit 3 lines (${st.msg})`);
+    check(!st.chips && st.off && !st.l1 && !st.l2, 'the chips make way and the detail gets 3 lines ' + JSON.stringify(st));
+    check((await page.$eval('#sr', el => el.textContent)) === head + 'Brute. Armored, so small hits do less. Longshot ignores armor. Costs 2 lives.', 'the whole detail is read out to screen readers');
+    const wait = async ms => { const left = await G(page, ([t0, ms]) => t0 + ms - performance.now(), [t0, ms]); if (left > 0) await page.waitForTimeout(left); };
+    await wait(3000);
+    st = await intel(page);
+    check(!st.chips && st.msg.startsWith('Brute'), 'it is still up 3s later');
+    await wait(4200);
+    st = await intel(page);
+    check(st.chips && !st.off && st.msg === 'Next wave:', 'after 4.2s the chips show again ' + JSON.stringify(st));
+    // Every type's detail at 390px: the full spec line.
+    const det = await G(page, () => { const W = window.__pw, g = W.G, out = {};
+      for (const w of [6, 7, 20]) { g.wave = w - 1; g.chipTip = null; W.refreshPanel();
+        for (const c of [...document.querySelectorAll('#chips .chip')]) { c.click(); const m = document.querySelector('#infoMsg'); out[c.dataset.t + w] = { t: m.textContent, fits: m.scrollHeight <= m.clientHeight + 1 }; } }
+      g.chipTip = null; g.wave = 5; W.refreshPanel(); return out; });
+    const hpOf = (base, w) => Math.round(base * (1 + 0.25 * (w - 1) + 0.032 * (w - 1) ** 2));
+    check(det.grunt6.t === `Grunt ×14 · ${hpOf(42, 6)} HP · Normal. Grunt. Steady and common.` && det.scout6.t === `Scout ×7 · ${hpOf(22, 6)} HP · Fast. Scout. Fast and fragile.`, 'Grunt: Normal; Scout: Fast (speed over 1.3) ' + JSON.stringify([det.grunt6, det.scout6]));
+    check(det.wisp6.t === `Wisp ×4 · ${hpOf(36, 6)} HP · Normal. Wisp. Flies. Mortars can't hit it.` && det.splitter7.t === `Splitter ×3 · ${hpOf(80, 7)} HP · Normal. Splitter. Bursts into 2 Scouts.`, 'Wisp and Splitter ' + JSON.stringify([det.wisp6, det.splitter7]));
+    check(det.boss20.t === `Warlord ×2 · ${hpOf(900, 20)} HP · Slow · Armor 9. Warlord. Heavy armor. Costs 5 lives.`, 'Warlord at wave 20: Slow, Armor (6*(1+19*0.03)).toFixed(0) = 9 ' + JSON.stringify(det.boss20));
+    check(Object.values(det).every(d => d.fits), 'every detail fits its 3 lines at 390px ' + JSON.stringify(Object.keys(det)));
+    // A tap anywhere along the row picks the nearest chip (they are only 16px tall); a tile tap closes the detail.
+    const box = await rect(page, '#chips');
+    await page.mouse.click(box.right - 3, box.top + 8);
+    check((await G(page, () => window.__pw.G.chipTip && window.__pw.G.chipTip.type)) === 'wisp', 'a tap past the last chip picks the nearest one (the Wisp)');
+    await tapTile(page, 4, 5);
+    check((await G(page, () => window.__pw.G.chipTip)) === null && (await text(page, '#infoMsg')) === 'Pick a tower to place here.', 'a tile tap closes the detail');
+    await tapTile(page, 4, 5);
+    // Keyboard: Enter on #chips picks the first chip, again the next; the wave does not start and focus stays on #chips.
+    await G(page, () => document.activeElement.blur());
+    for (let i = 0; i < 8 && (await G(page, () => document.activeElement.id)) !== 'chips'; i++) await page.keyboard.press('Tab');
+    check(await page.$eval('#chips', el => document.activeElement === el && getComputedStyle(el).outlineStyle === 'solid'), 'Tab reaches #chips, which shows a focus ring');
+    await page.keyboard.press('Enter');
+    const k1 = await G(page, () => ({ t: window.__pw.G.chipTip && window.__pw.G.chipTip.type, wave: window.__pw.G.wave, focus: document.activeElement.id, msg: document.querySelector('#infoMsg').textContent }));
+    await page.keyboard.press('Enter');
+    const k2 = await G(page, () => ({ t: window.__pw.G.chipTip.type, wave: window.__pw.G.wave, focus: document.activeElement.id }));
+    await page.keyboard.press(' ');
+    const k3 = await G(page, () => ({ t: window.__pw.G.chipTip.type, wave: window.__pw.G.wave, focus: document.activeElement.id }));
+    check(k1.t === 'grunt' && k1.msg.startsWith('Grunt ×14') && k1.wave === 5 && k1.focus === 'chips', 'Enter on #chips shows the first chip, and does not start the wave ' + JSON.stringify(k1));
+    check(k2.t === 'scout' && k3.t === 'brute' && k3.wave === 5 && k3.focus === 'chips', 'Enter again, then Space, step to the next chips; focus stays on #chips ' + JSON.stringify([k2, k3]));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = "wave-intel: the placing line keeps each tower's trait";
+  for (const vp of [{ width: 320, height: 568 }, { width: 390, height: 780 }]) {
+    // Lead designer: keep the name, the trait and 'Covers N tiles of road'; drop 'Tap again to build.' first; then shorten the trait
+    // to its key phrase. For every tower, wave button label and gold, the key phrase is visible: the line fits #infoMsg and contains it.
+    // (Arc's description, 'Lightning jumps between foes.', states its trait in full without the word 'Chains'.)
+    const { ctx, page } = await newPage(browser, { viewport: vp });
+    await startMap(page, 1);
+    const res = await G(page, () => {
+      const W = window.__pw, g = W.G, m = document.querySelector('#infoMsg'), bw = document.querySelector('#bWave'), out = [];
+      g.running = false; g.hintTiles = [];
+      const states = { 'Start wave 1': () => { g.wave = 0; g.W = {}; g.spawnQ = []; g.sendArmAt = 0; }, 'Send anyway?': () => { g.wave = 0; g.W = {}; g.spawnQ = []; g.sendArmAt = performance.now(); }, 'Call 12 early': () => { g.wave = 11; g.W = { 11: { rem: 0, alive: 1 } }; g.spawnQ = []; }, 'Start wave 31': () => { g.wave = 30; g.W = {}; g.spawnQ = []; } };
+      for (const gold of [9999, 0]) for (const [label, set] of Object.entries(states)) for (const k of Object.keys(W.TD)) {
+        set(); g.gold = gold; g.selTower = null; g.sel = { c: 4, r: 5 }; g.pending = k; W.refreshPanel();
+        const tx = m.textContent, d = W.TD[k];
+        out.push({ label: bw.textContent, k, nm: d.name, gold, tx, fits: m.scrollHeight <= m.clientHeight + 1, name: tx.startsWith(d.name + ' · '), cov: /Covers \d+\.\d tiles of road\./.test(tx), key: tx.includes(d.key), desc: tx.includes(d.desc), tail: /Tap again to build\.|Not enough gold yet\./.test(tx) });
+      }
+      g.sel = null; g.pending = null; g.W = {}; g.wave = 0; W.refreshPanel();
+      return { out, keys: Object.fromEntries(Object.keys(W.TD).map(k => [k, W.TD[k].key])) };
+    });
+    const bad = res.out.filter(r => !r.fits || !r.name || !r.cov || !(r.key || (r.k === 'arc' && r.desc)));
+    check(bad.length === 0 && res.out.length === 40, `${vp.width}px: for all five towers beside every wave label, affordable or not, the placing line fits #infoMsg (scrollHeight <= clientHeight) and keeps the name, the trait's key phrase and the coverage ` + JSON.stringify(bad.slice(0, 3)));
+    check(JSON.stringify(res.keys) === '{"bolt":"Hits fliers","mortar":"Ground only","frost":"Slows","arc":"Chains","long":"Ignores armor"}', 'the key phrases: Bolt "Hits fliers", Mortar "Ground only", Frost "Slows", Arc "Chains", Longshot "Ignores armor"');
+    if (vp.width === 390) {
+      const s1 = res.out.filter(r => r.label === 'Start wave 1' && r.gold);
+      check(s1.filter(r => r.k !== 'long').every(r => r.desc && r.tail) && s1.find(r => r.k === 'long').desc && !s1.find(r => r.k === 'long').tail, "390px beside 'Start wave 1': four towers keep the full spec line; Longshot keeps its description and drops 'Tap again to build.' first " + JSON.stringify(s1.map(r => r.tx)));
+    } else {
+      const sa = res.out.filter(r => r.label === 'Send anyway?' && r.gold);
+      check(sa.length === 5 && sa.every(r => !r.tail && r.tx.startsWith(`${r.nm} · ${res.keys[r.k]}`)), "320px beside 'Send anyway?': no room for the description, so it is the key phrase, and 'Tap again to build.' is gone " + JSON.stringify(sa.map(r => r.tx)));
+      check(res.out.find(r => r.k === 'mortar' && r.label === 'Send anyway?' && r.gold).tx.includes('Ground only'), "320px: Mortar keeps 'Ground only' wherever it goes");
+    }
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
