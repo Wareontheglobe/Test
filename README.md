@@ -35,6 +35,33 @@ Enemies: Grunts, fast Scouts, armored Brutes, flying Wisps, Splitters (burst int
 
 Roads: Long Switchback (easy), Meadow Bend (normal), Quarry Run (hard).
 
+From wave 5 most waves have a theme, shown as a tag in front of the next wave's enemies: **Swarm** (Scouts and Splitters), **Armored** (Brutes, from wave 14) and **Air raid** (mostly Wisps, which Mortars can't hit). Mixed waves have no tag.
+
+## Balance
+Values in 1.1: `CFG.hpB` 0.025 (was 0.032), `CFG.themeBudget` 0.85 (a themed wave has 85% of the Mixed wave's HP), Quarry Run `hp` 1.035 (was 1.05). Tower stats are unchanged.
+
+`node tests/balance.js` checks them. A greedy bot plays every road (140 runs, under a minute on 4 cores) and the script prints PASS or FAIL per target. It is not part of `tests/run.js`. Results for 1.1:
+
+| Profile | Easy | Normal | Hard | Target |
+|---|---|---|---|---|
+| smart (20 seeds) | 20/20 wins | 20/20 wins | 10/20 wins | Easy 19+, Normal 17+, Hard 8-12: met |
+| early (smart, calls waves early) | 20/20 | 20/20 | 10/20 | median cleared wave on Normal within 2 of smart (30 and 30): met |
+| mlf (Mortar, Longshot, Frost only, 5 seeds) | | dies on wave 11 | | loses lives on an Air raid: met (12 on wave 7, 8 on wave 11) |
+| spam (Bolts only, 5 seeds) | wins | wins | dies on wave 30 | dies on waves 15-23 on every road: **not met** |
+| plain (smart without reading the coming waves) | 20/20 | 11/20 | 2/20 | none (for comparison) |
+
+How the bot plays:
+- It is the design team's progression bot. It spends each wave's gold on the best value it can afford: a new tower where it covers the most road, or an upgrade.
+- The smart profile also reads the next 4 waves, as a player reads the chips and their theme tag. It scales each tower by how much of those waves it can hurt: a Mortar can't hit fliers, and armor cuts small hits.
+- It puts its Longshots on Toughest for a Warlord wave and back on First after it.
+- Without reading ahead (plain), the same bot wins Normal 11/20, mostly because it loses Air raids. This is the decision the themes are meant to create.
+
+Why hpB went down rather than up:
+- Themed waves are much harder than Mixed ones for a Mortar-led build. Before the retune, at hpB 0.032, the smart bot won Normal 2/10 and Hard 0/10, and most of the lives it lost went on Air raids.
+- `themeBudget` can't go much lower. Below about 0.82, wave 7 is more than 5% off 85% of the Mixed wave's HP, which the tests hold it to. Even 0.80 with hpB 0.028 left Normal at 9/10. So hpB and Quarry's hp did the work.
+
+Known gap: Bolt spam. A Bolts-only build also won Easy and Normal before themed waves and this retune. To make it fall before wave 24 on Easy, hpB has to be about 0.05, and there the smart bot wins Easy 2/10. Fixing it needs a change to the Bolt or to armor, which this pass did not touch.
+
 ## Files
 - `index.html`: the whole game
 - `manifest.webmanifest`, `sw.js`, `icons/`: home-screen install and offline caching

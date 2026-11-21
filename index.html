@@ -106,6 +106,9 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .chip.air canvas{outline:1px solid #8fd0ff;outline-offset:-1px}
 .chip.armor canvas{outline:1px solid #d6dbe0;outline-offset:-1px}
 .chip.boss canvas{outline:1px solid #a487ff;outline-offset:-1px}
+/* The next wave's theme ahead of its chips, as tall as a chip. Mixed waves have no tag. */
+.theme{display:inline-flex;align-items:center;flex:none;height:16px;line-height:14px;padding:1px 6px;border-radius:6px;font-size:11px;font-weight:800;text-transform:uppercase}
+.theme.air{background:#23415a;color:#bfe7ff}.theme.armored{background:#3c4148;color:#e1e6ea}.theme.swarm{background:#4a4222;color:#f1d27c}
 #pbody{height:96px;display:flex;flex-direction:column;justify-content:center}
 #bWave{flex:none;height:42px;padding:0 16px;border-radius:12px;background:var(--brass);color:var(--brass-ink);
   font-family:var(--font-display);font-weight:800;font-size:15px;box-shadow:0 3px 0 #8f6a22;white-space:nowrap}
@@ -279,7 +282,7 @@ const MAPS=[
    theme:{g1:'#7a8f3f',g2:'#73883a',path:'#e0cf9c',edge:'#a8915d',deco:'#56692a',flower:'#f3a6a0'}},
   {id:'meadow',name:'Meadow Bend',diff:'Normal',hp:1.0,pts:[[1,-1],[1,3],[7,3],[7,7],[1,7],[1,11],[7,11],[7,14]],
    theme:{g1:'#6b8f3e',g2:'#648839',path:'#dcc690',edge:'#a68c59',deco:'#4c6b2b',flower:'#f1d36b'}},
-  {id:'quarry',name:'Quarry Run',diff:'Hard',hp:1.05,pts:[[4,-1],[4,3],[1,3],[1,8],[7,8],[7,14]],
+  {id:'quarry',name:'Quarry Run',diff:'Hard',hp:1.035,pts:[[4,-1],[4,3],[1,3],[1,8],[7,8],[7,14]],
    theme:{g1:'#79814f',g2:'#717948',path:'#cfc2a4',edge:'#8c8166',deco:'#5a613e',flower:'#d9d3c1'}},
 ];
 // desc: what sets a tower apart. key: the same trait in a word or two, for lines too narrow for desc.
@@ -299,6 +302,12 @@ const ED={
   splitter:{name:'Splitter',hp:80,spd:0.85,gold:6,r:0.3,color:'#4f86d9',lives:1,split:true},
   boss:    {name:'Warlord',hp:900,spd:0.42,gold:100,r:0.5,color:'#6a3d8f',lives:5,armor:6,boss:true},
 };
+// Balance (tests/balance.js checks it; README 'Balance' has the numbers). hpA, hpB: enemy HP grows by 1+hpA*(w-1)+hpB*(w-1)^2.
+// themeBudget: a themed wave's share of the Mixed wave's HP. earlyMul: calling wave w early pays earlyMul*(10+w); above 3,
+// always calling early turns into a net gain, so keep it at 3 or less. Defined up here: loading storage already builds waves.
+const CFG={hpA:0.25,hpB:0.025,goldGrow:0.01,bonusA:15,bonusB:2,startGold:200,earlyMul:3,themeBudget:0.85};
+// The wave themes with a tag in the preview, and the tag's class (see waveTheme). Mixed has none.
+const THEME_CLS={Swarm:'swarm',Armored:'armored','Air raid':'air'};
 // Fliers are drawn this many tiles above the road. Shots, sparks and the kill pop aim there too.
 const LIFT=0.32;
 // Targeting. First: furthest along the road. Toughest: the highest max HP (Brutes, Warlords), then the furthest along.
@@ -512,19 +521,12 @@ function tstats(type,lv){
 }
 function upCost(t){return t.level>=3?0:round5(TD[t.type].cost*(t.level===1?0.8:1.4))}
 function sellValue(t){return t.refund+Math.floor((t.spent-t.refund)*0.7)}
-// earlyMul: calling wave w early pays earlyMul*(10+w). Above 3 always calling early turns into a net gain, so keep it at 3 or less.
-const CFG={hpA:0.25,hpB:0.032,goldGrow:0.01,bonusA:15,bonusB:2,startGold:200,earlyMul:3};
 const earlyBonus=w=>CFG.earlyMul*(10+w);
 const hpScale=w=>1+CFG.hpA*(w-1)+CFG.hpB*(w-1)*(w-1);
 
-function buildWave(w){
+// Every non-boss wave before 1.1: a blend of everything met so far. Waves 1-4 and every Mixed wave are still this.
+function mixedWave(w){
   const g=[],n=Math.round(6+w*1.4),iv=Math.max(0.42,0.9-w*0.016);
-  if(w%10===0){
-    g.push(['grunt',Math.round(n*0.6),iv,0]);
-    g.push(['boss',w/10,4,2]);
-    if(w>=20)g.push(['wisp',4+w/5,0.6,2]);
-    return g;
-  }
   g.push(['grunt',n,iv,0]);
   if(w>=3)g.push(['scout',Math.round(n*0.5),0.38,1.6]);
   if(w>=4&&w%2===0)g.push(['brute',1+Math.floor((w-4)/3),1.8,1.6]);
@@ -532,10 +534,42 @@ function buildWave(w){
   if(w>=7&&w%2===1)g.push(['splitter',2+Math.floor(w/4),1.1,1.6]);
   return g;
 }
+// From wave 5 a wave has a theme by w%4: 1 Swarm, 2 Armored (from wave 14; Mixed before), 3 Air raid, 0 Mixed.
+// Boss waves and waves 1-4 have none (''). So: 5 Swarm, 7 Air raid, 8 Mixed, 14 the first Armored.
+function waveTheme(w){
+  if(w%10===0||w<5)return '';
+  const k=w%4;return k===1?'Swarm':k===3?'Air raid':k===2&&w>=14?'Armored':'Mixed';
+}
+function buildWave(w){
+  const n=Math.round(6+w*1.4),iv=Math.max(0.42,0.9-w*0.016);
+  if(w%10===0){
+    const g=[['grunt',Math.round(n*0.6),iv,0],['boss',w/10,4,2]];
+    if(w>=20)g.push(['wisp',4+w/5,0.6,2]);
+    return g;
+  }
+  const th=waveTheme(w);
+  if(!THEME_CLS[th])return mixedWave(w);
+  // A themed wave spends CFG.themeBudget of the Mixed wave's HP (unit HP: spawnEnemy still scales it) on two types.
+  const budget=CFG.themeBudget*mixedWave(w).reduce((s,[t,c])=>s+c*ED[t].hp,0),k=(t,share)=>Math.round(share*budget/ED[t].hp);
+  const g=th==='Swarm'?[['scout',k('scout',0.55),0.3,0],['splitter',k('splitter',0.45),0.9,1.6]]
+    :th==='Armored'?[['grunt',k('grunt',0.25),iv,0],['brute',k('brute',0.75),1.3,1.6]]
+    :[['grunt',k('grunt',0.25),iv,0],['wisp',k('wisp',0.75),0.5,1.6]];
+  return g.filter(x=>x[1]>0);
+}
+// The run's first Air raid (wave 7): the wave before it, #infoMsg warns that Mortars can't hit fliers.
+function firstAirRaid(w){
+  if(waveTheme(w)!=='Air raid')return false;
+  for(let x=5;x<w;x++)if(waveTheme(x)==='Air raid')return false;
+  return true;
+}
 // How many of each type wave w sends, in the order it sends them.
 function waveCounts(w){const m={};for(const [t,c] of buildWave(w))m[t]=(m[t]||0)+c;return m}
+// For #chips' aria-label. A themed wave names its theme and leads with what it brings most of: 'Air raid: 19 Wisps (air), 6 Grunts'.
 function waveSummary(w){
-  return Object.entries(waveCounts(w)).map(([t,c])=>`${c} ${ED[t].name}${c>1?'s':''}${ED[t].fly?' (air)':''}`).join(', ');
+  const th=waveTheme(w),list=Object.entries(waveCounts(w));
+  if(THEME_CLS[th])list.sort((a,b)=>b[1]-a[1]);
+  const s=list.map(([t,c])=>`${c} ${ED[t].name}${c>1?'s':''}${ED[t].fly?' (air)':''}`).join(', ');
+  return THEME_CLS[th]?`${th}: ${s}`:s;
 }
 const activeWaves=()=>Object.keys(G.W).length;
 const isCalm=()=>!activeWaves()&&!G.spawnQ.length;
@@ -546,9 +580,10 @@ function newTypes(w){const m=waveCounts(w);return INTRO.filter(t=>m[t]&&!S.seen.
 // What #info says about a type the first time it comes (plain copy), and in a tapped chip's detail.
 const BLURB={grunt:'Grunt. Steady and common.',scout:'Scout. Fast and fragile.',brute:'Brute. Armored, so small hits do less. Longshot ignores armor. Costs 2 lives.',
   wisp:"Wisp. Flies. Mortars can't hit it.",splitter:'Splitter. Bursts into 2 Scouts.',boss:'Warlord. Heavy armor. Costs 5 lives.'};
-// The small line under 'WAVE N', parts joined with ' · '. A Warlord's first wave already says it is coming, so it is not 'New' as well.
+// The small line under 'WAVE N', parts joined with ' · ': the theme ('Air raid'; not Mixed), or the Warlord's warning, then what is new.
+// A Warlord's first wave already says it is coming, so it is not 'New' as well.
 function bannerSub(w){
-  const parts=[];if(bossWave(w))parts.push('A Warlord is coming');
+  const parts=[],th=waveTheme(w);if(THEME_CLS[th])parts.push(th);if(bossWave(w))parts.push('A Warlord is coming');
   const nt=newTypes(w).filter(t=>!ED[t].boss);if(nt.length)parts.push('New: '+nt.map(t=>ED[t].name).join(', '));
   return parts.join(' · ');
 }
@@ -1285,8 +1320,10 @@ function fitReady(msg,k){
 let chipKey='';
 function syncChips(){
   const w=G.wave+1,key=`${G.map.id}:${w}`;if(chipKey===key)return;chipKey=key;
-  const box=$('#chips'),dpr=Math.min(3,window.devicePixelRatio||1);
+  const box=$('#chips'),dpr=Math.min(3,window.devicePixelRatio||1),th=waveTheme(w);
   box.textContent='';box.setAttribute('aria-label','Next wave: '+waveSummary(w));
+  // A themed wave's tag leads the row ('AIR RAID'). Mixed waves have none.
+  if(THEME_CLS[th]){const tag=document.createElement('span');tag.className='theme '+THEME_CLS[th];tag.textContent=th;box.append(tag)}
   for(const [type,n] of Object.entries(waveCounts(w))){
     const d=ED[type],ch=document.createElement('span'),c=document.createElement('canvas'),num=document.createElement('span');
     // The canvas outline marks fliers (blue), armor (steel) and the Warlord (purple).
@@ -1350,6 +1387,7 @@ function refreshPanel(){
   // The chips show unless a tile is selected or a tower was armed on purpose: placing uses all of #info, as before.
   // A tower kept armed after a build still leaves #info to the wave preview.
   syncChips();
+  const tag=chips.querySelector('.theme');if(tag)tag.hidden=false; // put back before measuring; see the end
   const armed=!!G.pending&&!G.armKept;
   let chipsOn=!G.sel&&!armed,lines=1,oneRow=false,coach=false,ready=null,place=null,next=null,tipLines=null,marching=false,nt;
   const tip=chipsOn&&G.chipTip&&G.chipTip.key===chipKey?G.chipTip:null;
@@ -1370,6 +1408,8 @@ function refreshPanel(){
   // The coach line and the 'New' intro get 2 lines over one row of chips.
   else if(G.wave===0&&!G.towers.length){coach=true;lines=2;oneRow=true;msg.innerHTML='<b>Build first:</b> tap a grass tile beside the road.'}
   else if((nt=newTypes(G.wave+1)).length){lines=2;oneRow=true;msg.innerHTML=`<b>New:</b> ${BLURB[nt[nt.length-1]]}`}
+  // Before the run's first Air raid, the same 2 lines over one row: what the theme means for a build.
+  else if(firstAirRaid(G.wave+1)){lines=2;oneRow=true;msg.innerHTML="<b>Air raid next:</b> Mortars can't hit fliers."}
   else if(G.spawnQ.length){marching=true;msg.innerHTML=`Wave <b>${G.wave}</b> is marching in. Next:`}
   else msg.innerHTML='Next wave:';
   chips.hidden=!chipsOn;chips.classList.toggle('one',oneRow);chips.classList.toggle('off',!!(tip||mtip));
@@ -1394,6 +1434,9 @@ function refreshPanel(){
   if(marching&&msg.scrollHeight>msg.clientHeight+1){
     if(chips.scrollHeight<=17){msg.classList.replace('l1','l2');chips.classList.add('one')}else msg.innerHTML='Next wave:';
   }
+  // One row of chips that can't also hold the theme tag (a 320px phone beside 'Call early +51') drops the tag rather than a chip:
+  // the chips are what the wave is, and the Air raid line names its theme anyway.
+  if(tag&&!chips.hidden&&chips.classList.contains('one')&&chips.scrollHeight>chips.clientHeight+1)tag.hidden=true;
 }
 // Writes the first of lines that fits #infoMsg (the last one if none does), cached per first line and width.
 // The placing line: the tower's name, its trait and the coverage stay. Where the spec line doesn't fit (narrow phones, longer
@@ -1674,7 +1717,7 @@ newGame(MAPS[1]);G.running=false;
 G.gold=200;G.hintTiles=[];
 paintIcons();showMenu();requestAnimationFrame(frame);
 
-window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,refreshPanel,bannerSub:w=>bannerSub(w),newTypes:w=>newTypes(w),BLURB,TIP_MS,sellValue,hintTiles:i=>hintTiles(MAPS[i]),step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
+window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,mixedWave,waveTheme,waveSummary:w=>waveSummary(w),refreshPanel,bannerSub:w=>bannerSub(w),newTypes:w=>newTypes(w),BLURB,TIP_MS,sellValue,hintTiles:i=>hintTiles(MAPS[i]),step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
   CFG,tstats,coverage,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
   hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},hurt:(e,d,p,src)=>hurt(e,d,p,src),LIFT,
