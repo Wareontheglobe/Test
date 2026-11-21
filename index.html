@@ -273,9 +273,11 @@ const ED={
   scout:   {name:'Scout',hp:22, spd:1.75,gold:4,  r:0.2, color:'#e8c547',lives:1},
   brute:   {name:'Brute',hp:175,spd:0.6, gold:14, r:0.36,color:'#87909b',lives:2,armor:3},
   wisp:    {name:'Wisp',hp:36, spd:1.25,gold:7,  r:0.24,color:'#bfe7ff',lives:1,fly:true},
-  splitter:{name:'Splitter',hp:80,spd:0.85,gold:6,r:0.3,color:'#6fbf4e',lives:1,split:true},
+  splitter:{name:'Splitter',hp:80,spd:0.85,gold:6,r:0.3,color:'#4f86d9',lives:1,split:true},
   boss:    {name:'Warlord',hp:900,spd:0.42,gold:100,r:0.5,color:'#6a3d8f',lives:5,armor:6,boss:true},
 };
+// Fliers are drawn this many tiles above the road. Shots, sparks and the kill pop aim there too.
+const LIFT=0.32;
 const MODES=['first','last','strong','close'];
 const MODE_NAME={first:'First',last:'Last',strong:'Strongest',close:'Closest'};
 
@@ -507,7 +509,7 @@ function cavePos(){const a=G.map.path.P[0];return {x:clamp(a.x,0.35,COLS-0.35),y
 function spawnEnemy(type,w,dist,frac){
   const d=ED[type],hp=d.hp*hpScale(w)*G.map.hp*(frac||1);
   const e={type,d,w,hp,max:hp,spd:d.spd*(1+Math.min(0.25,(w-1)*0.006)),dist,slow:0,slowT:0,x:0,y:0,dx:0,dy:1,r:d.r,
-    armor:(d.armor||0)*(1+(w-1)*0.03),fly:!!d.fly,gold:Math.round(d.gold*(1+CFG.goldGrow*(w-1))),hitT:0,bob:Math.random()*6,dead:false};
+    armor:(d.armor||0)*(1+(w-1)*0.03),fly:!!d.fly,gold:Math.round(d.gold*(1+CFG.goldGrow*(w-1))),hitT:0,tinkT:0,tinkA:0,pierceT:0,bob:Math.random()*6,dead:false};
   const p=G.map.path.at(dist);e.x=p.x;e.y=p.y;e.dx=p.dx;e.dy=p.dy;
   G.enemies.push(e);G.W[w].alive++;
   // The Warlord's entrance: dark rings out of the cave, its banner and a horn.
@@ -547,14 +549,24 @@ function waveDone(w){
     refreshPanel();
   }
 }
-function hurt(e,dmg,pierce){
+// src is the attacking tower's type. A Longshot (pierce) hit flashes a red rim. A hit whose damage armor cut by 40% or more
+// sparks off the armor with a tink instead of the white flash (not Frost, whose small hits would tink all the time).
+function hurt(e,dmg,pierce,src){
   if(e.dead)return;
-  const a=pierce?0:e.armor;e.hp-=Math.max(dmg*0.25,dmg-a);e.hitT=0.08;
+  const a=pierce?0:e.armor;e.hp-=Math.max(dmg*0.25,dmg-a);
+  if(pierce)e.pierceT=0.08;
+  else if(src!=='frost'&&dmg-a<0.6*dmg){
+    // One spark set per enemy at a time: a tink while sparks still show keeps that set.
+    if(!(e.tinkT>0)){e.tinkT=0.1;e.tinkA=Math.random()*Math.PI*2}
+    sfx('tink');
+  }else e.hitT=0.05;
   if(e.hp<=0)kill(e);
 }
 function kill(e){
   e.dead=true;G.gold+=e.gold;
   const boss=!!e.d.boss;
+  // A white pop where it stood, so a kill reads as a kill and not a disappearance.
+  G.fx.push({k:'pop',x:e.x,y:e.y-(e.fly?LIFT:0),r:e.r,t:0,dur:0.16});
   if(boss){
     // A real death: two rings, a big burst, a big '+gold', a board shake and its own cue.
     for(const c of ['#e3ad45','#a487ff'])G.fx.push({k:'ring',x:e.x,y:e.y,t:0,dur:0.5,r:2.2,r0:0.3,c});
@@ -562,7 +574,7 @@ function kill(e){
     G.fx.push({k:'text',x:e.x,y:e.y-0.3,t:0,dur:0.8,s:`+${e.gold}`,sz:1.7});
     G.shakeT=0.25;bossGone(e);sfx('bossdown');
   }else{
-    burst(e.x,e.y,e.d.color,8,e.fly);
+    burst(e.x,e.y,e.d.color,6,e.fly,0.04,0.09,'#fff6dc');
     G.fx.push({k:'text',x:e.x,y:e.y-0.3,t:0,dur:0.8,s:`+${e.gold}`});
     if(e.d.split){spawnEnemy('scout',e.w,e.dist+0.18,0.7);spawnEnemy('scout',e.w,e.dist-0.18,0.7)}
     sfx('die');
@@ -587,11 +599,11 @@ function leak(e){
   if(G.lives<=0){gameOver();return}
   sfx('leak');waveDone(e.w);
 }
-// n particles of radius r0-r1 tiles (half as many under reduced motion).
-function burst(x,y,color,n,fly,r0=0.04,r1=0.09){
+// n particles of radius r0-r1 tiles (half as many under reduced motion). With c2, every other particle is c2.
+function burst(x,y,color,n,fly,r0=0.04,r1=0.09,c2){
   if(rm())n=Math.ceil(n/2);
   for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,s=0.6+Math.random()*1.6;
-    G.fx.push({k:'p',x,y:y-(fly?0.25:0),vx:Math.cos(a)*s,vy:Math.sin(a)*s,t:0,dur:0.35+Math.random()*0.3,c:color,r:r0+Math.random()*(r1-r0)})}
+    G.fx.push({k:'p',x,y:y-(fly?LIFT:0),vx:Math.cos(a)*s,vy:Math.sin(a)*s,t:0,dur:0.35+Math.random()*0.3,c:c2&&i%2?c2:color,r:r0+Math.random()*(r1-r0)})}
 }
 
 /* ---------- simulation ---------- */
@@ -607,18 +619,19 @@ function findTarget(t,st){
   }
   return best;
 }
+// Every hit carries its tower type (src): projectiles keep it as p.src.
 function fire(t,e,st){
-  const type=t.type;t.flash=0.12;
-  if(type==='bolt'){G.projs.push({k:'bolt',x:t.x,y:t.y,tg:e,spd:9,dmg:st.dmg});sfx('bolt')}
-  else if(type==='frost'){G.projs.push({k:'frost',x:t.x,y:t.y,tg:e,spd:6,dmg:st.dmg,splash:st.splash,slow:st.slow,slowDur:st.slowDur});sfx('frost')}
+  const type=t.type,src=type;t.flash=0.12;
+  if(type==='bolt'){G.projs.push({k:'bolt',x:t.x,y:t.y,tg:e,spd:9,dmg:st.dmg,src});sfx('bolt')}
+  else if(type==='frost'){G.projs.push({k:'frost',x:t.x,y:t.y,tg:e,spd:6,dmg:st.dmg,splash:st.splash,slow:st.slow,slowDur:st.slowDur,src});sfx('frost')}
   else if(type==='mortar'){
     const dur=0.6,p=G.map.path.at(e.dist+e.spd*(1-e.slow)*dur);
-    G.projs.push({k:'shell',x0:t.x,y0:t.y,tx:p.x,ty:p.y,t:0,dur,dmg:st.dmg,splash:st.splash});sfx('mortar');
+    G.projs.push({k:'shell',x0:t.x,y0:t.y,tx:p.x,ty:p.y,t:0,dur,dmg:st.dmg,splash:st.splash,src});sfx('mortar');
   }
   else if(type==='arc'){
     const pts=[{x:t.x,y:t.y-0.2}],hit=new Set();let cur=e,dmg=st.dmg;
     for(let i=0;i<st.chain&&cur;i++){
-      hit.add(cur);pts.push({x:cur.x,y:cur.y-(cur.fly?0.25:0)});hurt(cur,dmg);dmg*=0.85;
+      hit.add(cur);pts.push({x:cur.x,y:cur.y-(cur.fly?LIFT:0)});hurt(cur,dmg,false,src);dmg*=0.85;
       let nx=null,nd=1.7*1.7;
       for(const o of G.enemies){if(o.dead||hit.has(o)||o.dist<0.1)continue;const d2=(o.x-cur.x)**2+(o.y-cur.y)**2;if(d2<nd){nd=d2;nx=o}}
       cur=nx;
@@ -626,8 +639,8 @@ function fire(t,e,st){
     G.fx.push({k:'zap',pts,t:0,dur:0.18,seed:Math.random()*1000});sfx('arc');
   }
   else if(type==='long'){
-    G.fx.push({k:'tracer',x1:t.x+Math.cos(t.ang)*0.5,y1:t.y+Math.sin(t.ang)*0.5,x2:e.x,y2:e.y-(e.fly?0.25:0),t:0,dur:0.16});
-    hurt(e,st.dmg,true);sfx('long');
+    G.fx.push({k:'tracer',x1:t.x+Math.cos(t.ang)*0.5,y1:t.y+Math.sin(t.ang)*0.5,x2:e.x,y2:e.y-(e.fly?LIFT:0),t:0,dur:0.16});
+    hurt(e,st.dmg,true,src);sfx('long');
   }
 }
 function step(dt){
@@ -643,6 +656,8 @@ function step(dt){
     if(e.dead)continue;
     if(e.slowT>0){e.slowT-=dt;if(e.slowT<=0)e.slow=0}
     if(e.hitT>0)e.hitT-=dt;
+    if(e.tinkT>0)e.tinkT-=dt;
+    if(e.pierceT>0)e.pierceT-=dt;
     e.dist+=e.spd*(1-e.slow)*dt;
     if(e.dist>=path.len-0.2){leak(e);if(G.over)return;continue}
     const p=path.at(e.dist);e.x=p.x;e.y=p.y;e.dx+=(p.dx-e.dx)*Math.min(1,dt*10);e.dy+=(p.dy-e.dy)*Math.min(1,dt*10);
@@ -660,20 +675,20 @@ function step(dt){
     if(p.k==='shell'){
       p.t+=dt;
       if(p.t>=p.dur){p.done=true;
-        for(const e of G.enemies.slice()){if(e.dead||e.fly)continue;if(Math.hypot(e.x-p.tx,e.y-p.ty)<=p.splash+e.r*0.5)hurt(e,p.dmg)}
+        for(const e of G.enemies.slice()){if(e.dead||e.fly)continue;if(Math.hypot(e.x-p.tx,e.y-p.ty)<=p.splash+e.r*0.5)hurt(e,p.dmg,false,p.src)}
         G.fx.push({k:'ring',x:p.tx,y:p.ty,t:0,dur:0.35,r:p.splash,c:'#ffcf7a'});burst(p.tx,p.ty,'#8a7a5a',5,false);sfx('boom');
       }
       continue;
     }
     const e=p.tg;
     if(!e||e.dead){p.done=true;continue}
-    const tx=e.x,ty=e.y-(e.fly?0.25:0),dx=tx-p.x,dy=ty-p.y,d=Math.hypot(dx,dy),mv=p.spd*dt;
+    const tx=e.x,ty=e.y-(e.fly?LIFT:0),dx=tx-p.x,dy=ty-p.y,d=Math.hypot(dx,dy),mv=p.spd*dt;
     p.ang=Math.atan2(dy,dx);
     if(d<=mv+e.r*0.6){
       p.done=true;
-      if(p.k==='bolt')hurt(e,p.dmg);
+      if(p.k==='bolt')hurt(e,p.dmg,false,p.src);
       else{
-        for(const o of G.enemies.slice()){if(o.dead||o.dist<0.1)continue;if(Math.hypot(o.x-e.x,o.y-e.y)<=p.splash){o.slow=Math.max(o.slow,p.slow*(o.d.boss?0.5:1));o.slowT=p.slowDur;hurt(o,p.dmg)}}
+        for(const o of G.enemies.slice()){if(o.dead||o.dist<0.1)continue;if(Math.hypot(o.x-e.x,o.y-e.y)<=p.splash){o.slow=Math.max(o.slow,p.slow*(o.d.boss?0.5:1));o.slowT=p.slowDur;hurt(o,p.dmg,false,p.src)}}
         G.fx.push({k:'ring',x:e.x,y:e.y,t:0,dur:0.3,r:p.splash,c:'#c9f3ff'});
       }
     }else{p.x+=dx/d*mv;p.y+=dy/d*mv}
@@ -722,7 +737,7 @@ function showEnd(win){
 /* ---------- rendering ---------- */
 const cv=$('#cv'),ctx=cv.getContext('2d');
 const FONT_DISPLAY=getComputedStyle(document.documentElement).getPropertyValue('--font-display').trim()||'system-ui,sans-serif';
-let T=36,DPR=1,bg=null,hurtStrips=[];
+let T=36,DPR=1,bg=null,hurtStrips=[],hpBars=[];
 function buildBG(map,T,dpr){
   const c=document.createElement('canvas');c.width=Math.round(COLS*T*dpr);c.height=Math.round(ROWS*T*dpr);
   const g=c.getContext('2d');g.scale(dpr,dpr);
@@ -819,20 +834,34 @@ function drawTower(g,type,lv,x,y,s,ang,flash,time){
   }
   g.restore();
 }
+// Enemies are drawn at least 30px across on small boards (up to 1.2x their size). Drawing only: targeting and hits use e.r.
+const enemyScale=s=>clamp(30/s,1,1.2);
+// Each type has its own outline: Grunt a ball, Scout a teardrop, Splitter twin lobes, Brute a block, Wisp a winged ball, Warlord a spiked crown.
 // Draws at the caller's globalAlpha (render fades enemies near the keep), so its own see-through parts scale from a0.
-function drawEnemy(g,e,s,time){
-  const x=e.x*s;let y=e.y*s;const r=e.r*s,d=e.d,a0=g.globalAlpha;
+// The HP bar is not drawn here (render draws all bars in one pass); this returns the sprite's top edge in px for it.
+function drawEnemy(g,e,s,time,still){
+  const x=e.x*s,d=e.d,a0=g.globalAlpha,r=e.r*s*enemyScale(s),lw=Math.max(1.5,s*0.06),lj=g.lineJoin;
+  const m=Math.hypot(e.dx,e.dy)||1,ux=e.dx/m,uy=e.dy/m,px=-uy,py=ux,ang=Math.atan2(uy,ux);
+  let y=e.y*s;
   if(e.fly){
-    g.fillStyle='rgba(0,0,0,.22)';g.beginPath();g.ellipse(x,y+s*0.05,r*0.85,r*0.4,0,0,7);g.fill();
-    y-=s*(0.25+0.05*Math.sin(time*4+e.bob));
+    g.fillStyle='rgba(0,0,0,.3)';g.beginPath();g.ellipse(x,y+s*0.05,r*0.85,r*0.4,0,0,7);g.fill();
+    y-=s*(LIFT+0.05*Math.sin(time*4+e.bob));
   }
-  g.lineWidth=Math.max(1,s*0.045);g.strokeStyle=INK;
+  let top=y-r;
+  g.lineWidth=lw;g.strokeStyle=INK;g.lineJoin='round';
   if(e.type==='brute'){rr(g,x-r,y-r,r*2,r*2,r*0.35);g.fillStyle=d.color;g.fill();g.stroke();
     g.fillStyle='rgba(255,255,255,.18)';rr(g,x-r*0.75,y-r*0.75,r*1.5,r*0.45,r*0.2);g.fill()}
   else if(e.type==='wisp'){
-    g.globalAlpha=a0*0.85;g.beginPath();g.moveTo(x-e.dx*r*2.2,y-e.dy*r*2.2);
-    g.lineTo(x-e.dy*r*0.8,y+e.dx*r*0.8);g.lineTo(x+e.dy*r*0.8,y-e.dx*r*0.8);g.closePath();g.fillStyle='#8fc7e8';g.fill();
-    circle(g,x,y,r);g.fillStyle=d.color;g.fill();g.stroke();g.globalAlpha=a0}
+    // Two swept-back wings that flap (spread and held still under reduced motion).
+    const flap=still?1:0.55+0.45*Math.abs(Math.sin(time*9+e.bob));
+    g.fillStyle='#f4fbff';
+    for(const sd of [-1,1]){
+      const wa=ang+Math.PI+0.9*sd,cx=x+Math.cos(wa)*r*1.05,cy=y+Math.sin(wa)*r*1.05;
+      g.beginPath();g.ellipse(cx,cy,r*0.95,r*0.45*flap,wa,0,Math.PI*2);g.fill();g.stroke();
+      top=Math.min(top,cy-Math.hypot(r*0.95*Math.sin(wa),r*0.45*Math.cos(wa))); // fully spread, so the bar holds still
+    }
+    circle(g,x,y,r);g.fillStyle=d.color;g.fill();g.stroke();
+  }
   else if(e.type==='boss'){
     g.fillStyle='#3e2356';g.beginPath();
     for(let i=0;i<10;i++){const a=i*Math.PI/5+time*0.8,rad=i%2?r*1.0:r*1.22;g.lineTo(x+Math.cos(a)*rad,y+Math.sin(a)*rad)}
@@ -840,26 +869,58 @@ function drawEnemy(g,e,s,time){
     circle(g,x,y,r*0.85);g.fillStyle=d.color;g.fill();g.stroke();
     g.fillStyle='#e3ad45';g.beginPath();g.moveTo(x-r*0.45,y-r*0.55);g.lineTo(x-r*0.3,y-r*0.95);g.lineTo(x-r*0.1,y-r*0.65);g.lineTo(x,y-r*1.0);
     g.lineTo(x+r*0.1,y-r*0.65);g.lineTo(x+r*0.3,y-r*0.95);g.lineTo(x+r*0.45,y-r*0.55);g.closePath();g.fill();g.stroke();
+    top=y-r*1.22;
   }
-  else{circle(g,x,y,r);g.fillStyle=d.color;g.fill();g.stroke();
-    if(e.type==='splitter'){g.beginPath();g.moveTo(x-e.dy*r,y+e.dx*r);g.lineTo(x+e.dy*r,y-e.dx*r);g.strokeStyle='rgba(34,31,25,.6)';g.stroke();g.strokeStyle=INK}
-    if(e.type==='scout'){g.fillStyle='rgba(255,255,255,.3)';circle(g,x-r*0.3,y-r*0.35,r*0.3);g.fill()}
+  else if(e.type==='splitter'){
+    // Twin lobes side by side across its heading. Each is filled and stroked, so the second one's outline is the seam.
+    for(const sd of [-1,1]){circle(g,x+px*r*0.42*sd,y+py*r*0.42*sd,r*0.74);g.fillStyle=d.color;g.fill();g.stroke()}
+    top=y-(Math.abs(py)*0.42+0.74)*r;
   }
-  if(e.armor>0&&e.type!=='boss'){g.strokeStyle='#d6dbe0';g.lineWidth=Math.max(1,s*0.03);circle(g,x,y,r*1.12);g.stroke()}
-  const px=-e.dy,py=e.dx,er=r*(e.type==='boss'?0.17:0.24);
+  else if(e.type==='scout'){
+    // A teardrop: the round head leads and a point trails 1.75r behind, joined by the two tangents.
+    const q=Math.acos(1/1.75),tx=x-ux*r*1.75,ty=y-uy*r*1.75;
+    g.beginPath();g.moveTo(tx,ty);g.arc(x,y,r,ang+Math.PI+q,ang+Math.PI-q+2*Math.PI);g.closePath();
+    g.fillStyle=d.color;g.fill();g.stroke();
+    g.fillStyle='rgba(255,255,255,.3)';circle(g,x-r*0.3,y-r*0.35,r*0.3);g.fill();
+    top=Math.min(top,ty);
+  }
+  else{circle(g,x,y,r);g.fillStyle=d.color;g.fill();g.stroke()}
+  if(e.armor>0&&e.type!=='boss'){const al=Math.max(1,s*0.03);g.strokeStyle='#d6dbe0';g.lineWidth=al;circle(g,x,y,r*1.12);g.stroke();top=Math.min(top,y-r*1.12-al/2)}
+  const er=r*(e.type==='boss'?0.17:0.24);
   for(const sd of [-1,1]){
-    const ex=x+e.dx*r*0.38+px*r*0.36*sd,ey=y+e.dy*r*0.38+py*r*0.36*sd;
+    const ex=x+ux*r*0.38+px*r*0.36*sd,ey=y+uy*r*0.38+py*r*0.36*sd;
     circle(g,ex,ey,er);g.fillStyle='#fff';g.fill();
-    circle(g,ex+e.dx*er*0.35,ey+e.dy*er*0.35,er*0.55);g.fillStyle=INK;g.fill();
+    circle(g,ex+ux*er*0.35,ey+uy*er*0.35,er*0.55);g.fillStyle=INK;g.fill();
   }
-  if(e.hitT>0){g.globalAlpha=a0*0.55;circle(g,x,y,r);g.fillStyle='#fff';g.fill();g.globalAlpha=a0}
+  // Hit flash: a rim at r, not a fill, so the body keeps its colour. Red for a Longshot hit that pierced the armor.
+  const rim=e.pierceT>0?'#ff9a8a':e.hitT>0?'#fff':'';
+  if(rim){g.globalAlpha=a0*(still?0.3:1);g.strokeStyle=rim;g.lineWidth=lw;circle(g,x,y,r);g.stroke();g.globalAlpha=a0}
+  // Armor tink: three short sparks off the armor ring.
+  if(e.tinkT>0){
+    const R=r*(e.type==='boss'?1.25:1.12),L=s*0.12;g.strokeStyle='#d6dbe0';g.lineWidth=Math.max(1.5,s*0.045);g.lineCap='round';
+    for(let i=-1;i<=1;i++){const a=e.tinkA+i*0.6,c=Math.cos(a),sn=Math.sin(a);g.beginPath();g.moveTo(x+c*R,y+sn*R);g.lineTo(x+c*(R+L),y+sn*(R+L));g.stroke()}
+    g.lineCap='butt';
+  }
   if(e.slow>0){g.strokeStyle='rgba(190,240,255,.9)';g.lineWidth=Math.max(1,s*0.05);circle(g,x,y,r+s*0.04);g.stroke()}
-  // A Warlord has no bar of its own: its HP is the pinned bar at the top of the board.
-  if(e.hp<e.max&&!d.boss){
-    const w=Math.max(s*0.5,r*1.8),hh=Math.max(3,s*0.08),bx=x-w/2,by=y-r-hh-s*0.08;
-    g.fillStyle='rgba(20,18,14,.8)';g.fillRect(bx-1,by-1,w+2,hh+2);
-    const f=clamp(e.hp/e.max,0,1);g.fillStyle=f>0.5?'#9fd36a':f>0.25?'#e8c547':'#e3644f';g.fillRect(bx,by,w*f,hh);
+  g.lineJoin=lj;
+  return top-lw/2;
+}
+// HP bars, all in one pass over the sprites. Each has a 1px dark border, drawn after every fill so it shows over a neighbour's fill:
+// bars in a crowd stay apart instead of merging into one strip. The borders of fully drawn bars are one path, so where two meet
+// the dark is solid. b: {x, y, w, h, f (hp fraction), a (fade alpha)}.
+const BAR_INK='rgba(20,18,14,.9)';
+function barRing(g,b){g.rect(b.x-1,b.y-1,b.w+2,1);g.rect(b.x-1,b.y+b.h,b.w+2,1);g.rect(b.x-1,b.y,1,b.h);g.rect(b.x+b.w,b.y,1,b.h)}
+function drawBars(g,bars){
+  if(!bars.length)return;
+  for(const b of bars){
+    g.globalAlpha=b.a;g.fillStyle=BAR_INK;g.fillRect(b.x,b.y,b.w,b.h);
+    g.fillStyle=b.f>0.5?'#9fd36a':b.f>0.25?'#e8c547':'#e3644f';g.fillRect(b.x,b.y,b.w*b.f,b.h);
   }
+  g.globalAlpha=1;g.fillStyle=BAR_INK;g.beginPath();
+  for(const b of bars)if(b.a>=1)barRing(g,b);
+  g.fill();
+  for(const b of bars)if(b.a<1){g.globalAlpha=b.a;g.beginPath();barRing(g,b);g.fill()}
+  g.globalAlpha=1;
 }
 // The cave the road starts from, drawn under the enemies.
 function drawCave(g,s){
@@ -924,7 +985,15 @@ function render(time){
   }
   drawCave(g,s);
   // Enemies fade out over the last 0.9 tile before they leak (drawing only; the leak distance is unchanged).
-  const end=G.map.path.len-0.2,drawE=e=>{const a=clamp((end-e.dist)/0.9,0,1);if(a<=0)return;g.globalAlpha=a;drawEnemy(g,e,s,time);g.globalAlpha=1};
+  // Each one hurt below 98% (not a Warlord: its bar is pinned at the top) queues an HP bar just above its sprite, at the same fade.
+  const end=G.map.path.len-0.2;hpBars=[];
+  const drawE=e=>{
+    if(e.dead)return;const a=clamp((end-e.dist)/0.9,0,1);if(a<=0)return;
+    g.globalAlpha=a;const top=drawEnemy(g,e,s,time,still);g.globalAlpha=1;
+    if(e.d.boss||!(e.hp<0.98*e.max))return;
+    const w=Math.max(16,e.r>=0.3?s*0.6:s*0.45),h=Math.round(Math.max(4,s*0.09));
+    hpBars.push({x:e.x*s-w/2,y:Math.round(top-Math.max(3,s*0.08))-h,w,h,f:clamp(e.hp/e.max,0,1),a});
+  };
   for(const e of G.enemies)if(!e.fly)drawE(e);
   drawKeep(g,s,time);
   for(const p of G.projs){
@@ -938,6 +1007,7 @@ function render(time){
     }
   }
   for(const e of G.enemies)if(e.fly)drawE(e);
+  drawBars(g,hpBars);
   for(const f of G.fx){
     const k=f.t/f.dur;
     if(f.k==='p'){g.globalAlpha=1-k;g.fillStyle=f.c;circle(g,f.x*s,f.y*s,f.r*s*(1-k*0.5));g.fill();g.globalAlpha=1}
@@ -951,6 +1021,12 @@ function render(time){
       for(let i=0;i<2;i++){const q=clamp((k-i*0.25)/0.75,0,1);if(i&&k<0.25)continue;
         g.globalAlpha=0.9*(still?1-k:1-q);g.lineWidth=Math.max(2,s*0.1*(1-q*0.5));circle(g,f.x*s,f.y*s,(still?0.9+0.5*i:0.4+q)*s);g.stroke()}
       g.globalAlpha=1;
+    }
+    else if(f.k==='pop'){
+      // A kill: a white disc (alpha 0.8 to 0) swelling from 1 to 1.6x the enemy, and a 2px ring out to 2.2x. Fixed sizes under reduced motion.
+      const R=f.r*s*enemyScale(s),x=f.x*s,y=f.y*s;
+      g.globalAlpha=0.8*(1-k);g.fillStyle='#fff';circle(g,x,y,R*(still?1:1+0.6*k));g.fill();
+      g.globalAlpha=0.9*(1-k);g.strokeStyle='#fff';g.lineWidth=2;circle(g,x,y,R*(still?1.6:1+1.2*k));g.stroke();g.globalAlpha=1;
     }
     else if(f.k==='tracer'){g.globalAlpha=1-k;g.strokeStyle='#ffe3b0';g.lineWidth=Math.max(1,s*0.06*(1-k));g.beginPath();g.moveTo(f.x1*s,f.y1*s);g.lineTo(f.x2*s,f.y2*s);g.stroke();g.globalAlpha=1}
     else if(f.k==='zap'){
@@ -1351,7 +1427,8 @@ paintIcons();showMenu();requestAnimationFrame(frame);
 window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,refreshPanel,sellValue,hintTiles:i=>hintTiles(MAPS[i]),step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
   CFG,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
-  hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},render:t=>render(t??performance.now()/1000),keep:()=>keepPos(),cave:()=>cavePos(),bossInfo:()=>bossInfo(),rm,syncOv,toast,menuGuardLeft,spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
+  hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},hurt:(e,d,p,src)=>hurt(e,d,p,src),LIFT,
+  drawEnemy:(g,e,s,t)=>drawEnemy(g,e,s,t||0,rm()),drawR:e=>e.r*T*enemyScale(T),bars:()=>hpBars.map(b=>({...b})),render:t=>render(t??performance.now()/1000),keep:()=>keepPos(),cave:()=>cavePos(),bossInfo:()=>bossInfo(),rm,syncOv,toast,menuGuardLeft,spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
 
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
   window.addEventListener('load',()=>{try{navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){}});

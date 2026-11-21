@@ -762,7 +762,7 @@ let BASE;
     await zap(0.5); const z2 = await tileHash(page, 3, 4, 1);
     check(z1 === z2, 'reduced motion: lightning is one static bolt');
     const parts = await G(page, () => { const W = window.__pw, g = W.G; g.fx = []; g.wave = 1; W.spawn('grunt', 3); W.hurtAll(1e9); return g.fx.filter(f => f.k === 'p').length; });
-    check(parts === 4, 'reduced motion: a kill bursts half the particles (' + parts + ')');
+    check(parts === 3, 'reduced motion: a kill bursts half the particles, 3 of 6 (' + parts + ')');
     check((await page.$eval('#toast', el => getComputedStyle(el).transitionDuration)).split(',').every(d => parseFloat(d) === 0), 'reduced motion: toast does not slide');
     // The same through real frames, with no render hook involved: frame() must not spin the frost either.
     const fr1 = await frameHash(page, 2, 2);
@@ -780,7 +780,7 @@ let BASE;
     await zap(0.5); const z4 = await tileHash(page, 3, 4, 1);
     check(z3 !== z4, 'full motion: lightning re-jitters');
     const parts2 = await G(page, () => { const W = window.__pw, g = W.G; g.fx = []; W.spawn('grunt', 3); W.hurtAll(1e9); return g.fx.filter(f => f.k === 'p').length; });
-    check(parts2 === 8, 'full motion: a kill bursts 8 particles (' + parts2 + ')');
+    check(parts2 === 6, 'full motion: a kill bursts 6 particles (enemy-readability: 8 -> 6) (' + parts2 + ')');
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -1809,6 +1809,264 @@ let BASE;
     check(span.minX > 0.1 && span.maxX < 8.9, `320px: the WARLORD DOWN line is drawn inside the board (${span.minX.toFixed(2)}-${span.maxX.toFixed(2)} tiles)`);
     check(r.page.errors.length === 0, 'no console errors: ' + r.page.errors.join('|'));
     await r.ctx.close();
+  }
+
+  // ---------------------------------------------------------------
+  // enemy-readability: distinct silhouettes (teardrop Scout, cobalt twin-lobed Splitter, winged Wisp), a 30px minimum size on small boards,
+  // HP bars in their own pass after the fliers, a white rim hit flash, a kill pop, and armor tinks (red rim for a Longshot that pierces).
+  // Every board here is Meadow Bend with the run stopped (G.running=false), so only __pw.step moves anything.
+  // calmBoard(page, wave): no enemies, towers, fx, banner or hint tiles. mask(d, bg): pixels that differ from the background by more than 30.
+  const calmBoard = (page, wave) => G(page, wave => { const W = window.__pw, g = W.G; g.running = false; g.enemies = []; g.towers = []; g.projs = []; g.fx = []; g.banner = null; g.bannerNext = null; g.hintTiles = []; g.grid = W.MAPS[1].grid.slice(); g.W = {}; g.wave = wave; g.gold = 9999; }, wave);
+  const lum = p => 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+
+  current = 'enemy-readability: distinct silhouettes and a minimum size';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    check((await G(page, () => window.__pw.ED.splitter.color)) === '#4f86d9', "__pw.ED.splitter.color === '#4f86d9' (cobalt)");
+    await calmBoard(page, 7);
+    // Grunt, Scout and Splitter alone at dist 3.5 (walking down Meadow's first stretch), each on its own render: masks in a 1.4T box.
+    const iou = await G(page, () => {
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      const box = () => { const p = g.map.path.at(3.5); return [Math.round((p.x - 0.7) * T), Math.round((p.y - 0.7) * T), Math.round(1.4 * T), Math.round(1.4 * T)]; };
+      const b = box(); W.render(0); const bg = c.getImageData(...b).data, m = {}, n = {};
+      for (const t of ['grunt', 'scout', 'splitter']) {
+        g.enemies = []; W.spawn(t, 3.5); W.render(0); const d = c.getImageData(...b).data, k = [];
+        for (let i = 0; i < d.length; i += 4) k.push(Math.max(Math.abs(d[i] - bg[i]), Math.abs(d[i + 1] - bg[i + 1]), Math.abs(d[i + 2] - bg[i + 2])) > 30 ? 1 : 0);
+        m[t] = k; n[t] = k.reduce((a, v) => a + v, 0);
+      }
+      const io = (a, b) => { let i = 0, u = 0; for (let j = 0; j < a.length; j++) { i += a[j] & b[j]; u += a[j] | b[j]; } return +(i / u).toFixed(3); };
+      g.enemies = [];
+      return { n, gs: io(m.grunt, m.scout), gp: io(m.grunt, m.splitter), sp: io(m.scout, m.splitter) };
+    });
+    check(iou.gs < 0.8 && iou.gp < 0.8 && iou.sp < 0.8 && Math.min(...Object.values(iou.n)) > 100, 'grunt, scout and splitter masks in a 1.4T box: every pairwise IoU < 0.8 ' + JSON.stringify(iou));
+    // Scout: a teardrop, round head forward and a point 1.75r behind. Splitter: two lobes of 0.74r, 0.42r either side of its heading.
+    const shape = await G(page, () => {
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, at = (x, y) => [...c.getImageData(Math.floor(x), Math.floor(y), 1, 1).data].slice(0, 3);
+      const p = g.map.path.at(5), x = p.x * T, y = p.y * T; // Meadow row 3, walking right
+      g.enemies = []; W.spawn('scout', 5); const r = W.drawR(g.enemies[0]); W.spawn('splitter', 5); const R = W.drawR(g.enemies[1]);
+      g.enemies = []; W.render(0); const bg = { tail: at(x - r * 1.45, y), ahead: at(x + r * 1.45, y), lobe: at(x, y - R * 1.05), front: at(x + R * 1.05, y) };
+      W.spawn('scout', 5); W.render(0); const sc = { tail: at(x - r * 1.45, y), ahead: at(x + r * 1.45, y) };
+      g.enemies = []; W.spawn('splitter', 5); W.render(0); const sp = { lobe: at(x, y - R * 1.05), front: at(x + R * 1.05, y), col: at(x - R * 0.15, y - R * 0.75) };
+      g.enemies = []; return { bg, sc, sp };
+    });
+    const differs = (a, b) => Math.max(...a.map((v, i) => Math.abs(v - b[i]))) > 30;
+    check(differs(shape.sc.tail, shape.bg.tail) && !differs(shape.sc.ahead, shape.bg.ahead), 'the scout is a teardrop: drawn 1.45r behind its centre (the point), not 1.45r ahead (the round head) ' + JSON.stringify(shape.sc));
+    check(differs(shape.sp.lobe, shape.bg.lobe) && !differs(shape.sp.front, shape.bg.front) && near3(shape.sp.col, [0x4f, 0x86, 0xd9], 6), 'the splitter is twin cobalt lobes: it reaches 1.05r to the side of its heading but not ahead ' + JSON.stringify(shape.sp));
+
+    // The Wisp: lifted 0.32 tile over a rgba(0,0,0,.3) shadow, with two wings that flap (spread and still under reduced motion).
+    const wisp = t => G(page, t => {
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      g.enemies = []; const p = g.map.path.at(5), b = [Math.round((p.x - 1) * T), Math.round((p.y - 1.2) * T), Math.round(2 * T), Math.round(2 * T)];
+      W.render(t); const bg = c.getImageData(...b).data, sh0 = [...c.getImageData(Math.floor(p.x * T), Math.floor((p.y + 0.05) * T), 1, 1).data].slice(0, 3);
+      W.spawn('wisp', 5); const e = g.enemies[0]; e.bob = 0; W.render(t);
+      const d = c.getImageData(...b).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (Math.max(Math.abs(d[i] - bg[i]), Math.abs(d[i + 1] - bg[i + 1]), Math.abs(d[i + 2] - bg[i + 2])) > 30) n++;
+      const body = [...c.getImageData(Math.floor(p.x * T), Math.floor((p.y - W.LIFT) * T), 1, 1).data].slice(0, 3), sh = [...c.getImageData(Math.floor(p.x * T), Math.floor((p.y + 0.05) * T), 1, 1).data].slice(0, 3);
+      g.enemies = []; return { n, body, sh, sh0, lift: W.LIFT };
+    }, t);
+    const w0 = await wisp(0), w1 = await wisp(Math.PI / 18), w2 = await wisp(Math.PI / 9);
+    check(w0.lift === 0.32 && near3(w0.body, [0xbf, 0xe7, 0xff], 6), 'the wisp body is drawn 0.32 tile above the road (LIFT) ' + JSON.stringify(w0.body));
+    check(near3(w0.sh, w0.sh0.map(v => v * 0.7), 3), 'its shadow on the road is rgba(0,0,0,.3) ' + JSON.stringify({ sh: w0.sh, road: w0.sh0 }));
+    check(w1.n > w0.n * 1.05 && w2.n !== w1.n, `the wings flap: ${w0.n} px at the narrowest (flap 0.55), ${w1.n} fully spread (flap 1), ${w2.n} later`);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const r0 = await wisp(0), r1 = await wisp(1.234);
+    check(r0.n === r1.n && Math.abs(r0.n - w1.n) <= w1.n * 0.03, `reduced motion: the wings hold still and fully spread (flap 1): ${r0.n} / ${r1.n} px, ${w1.n} at flap 1 in full motion`);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    // Grunt, Brute and Warlord keep their shapes; the outline is Math.max(1.5, 0.06T): at T=39 the grunt's ink ring is about 2.3px.
+    const ring = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      g.enemies = []; W.spawn('grunt', 5); const e = g.enemies[0], R = W.drawR(e), x = Math.floor(e.x * T), y0 = e.y * T; W.render(0);
+      let n = 0; for (let y = Math.floor(y0 - R - 3); y < y0 - R + 3; y++) { const p = c.getImageData(x, y, 1, 1).data; if (p[0] < 90 && p[1] < 90 && p[2] < 90) n++; } g.enemies = []; return { n, T, R }; });
+    check(ring.n >= 2 && ring.n <= 3 && Math.abs(ring.R - 0.26 * ring.T) < 1e-9, `at T=${ring.T} the outline is about 0.06T thick (${ring.n} dark px across it) and the grunt is drawn at its own size (r ${ring.R.toFixed(2)})`);
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+
+    // 320x568 (T=24): enemies are drawn at clamp(30/T, 1, 1.2) = 1.2x, so a scout's drawn radius is e.r*T*1.2.
+    const s = await newPage(browser, { viewport: { width: 320, height: 568 } });
+    await startMap(s.page, 1);
+    await calmBoard(s.page, 3);
+    const sc = await G(s.page, () => {
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, at = (x, y) => [...c.getImageData(Math.floor(x), Math.floor(y), 1, 1).data].slice(0, 3);
+      W.spawn('scout', 5); const e = g.enemies[0], x = e.x * T, y = e.y * T, er = e.r * T; // walking right: straight up is the side of its round head
+      g.enemies = []; W.render(0); const bg = [at(x, y - 1.1 * er), at(x, y - er * 1.2 - 0.5), at(x + 1.1 * er, y)];
+      g.enemies = [e]; W.render(0); const fg = [at(x, y - 1.1 * er), at(x, y - er * 1.2 - 0.5), at(x + 1.1 * er, y)];
+      return { T, er, drawR: W.drawR(e), bg, fg };
+    });
+    const off = (a, b) => Math.max(...a.map((v, i) => Math.abs(v - b[i]))) > 30;
+    check(sc.T === 24 && Math.abs(sc.drawR - sc.er * 1.2) < 1e-9, `at 320x568 (T=${sc.T}) the scout's drawn radius is e.r*T*1.2 (${sc.drawR.toFixed(2)}px)`);
+    check(off(sc.fg[0], sc.bg[0]) && off(sc.fg[2], sc.bg[2]), 'the pixel 1.1*e.r*T from its centre (above, and ahead) is not background ' + JSON.stringify(sc));
+    check(off(sc.fg[1], sc.bg[1]), "and so is the pixel just past 1.2*e.r*T, which the scout's own size alone would not reach");
+    check(s.page.errors.length === 0, 'no console errors: ' + s.page.errors.join('|'));
+    await s.ctx.close();
+  }
+
+  current = 'enemy-readability: HP bars in their own pass';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await calmBoard(page, 10);
+    // drawEnemy itself draws no bar: the same grunt at full and at half HP gives the same pixels on a spare canvas.
+    const own = await G(page, () => {
+      const W = window.__pw, g = W.G, T = document.querySelector('#cv').width / W.COLS, c = document.createElement('canvas'); c.width = 9 * T; c.height = 14 * T; const x = c.getContext('2d');
+      W.spawn('grunt', 5); const e = g.enemies[0], draw = () => { x.clearRect(0, 0, c.width, c.height); W.drawEnemy(x, e, T, 0); let h = 2166136261; const d = x.getImageData(0, 0, c.width, c.height).data; for (let i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 16777619); } return h >>> 0; };
+      const full = draw(); e.hp = e.max * 0.5; const half = draw(); g.enemies = []; return { full, half };
+    });
+    check(own.full === own.half, 'a grunt damaged to 50%: drawEnemy draws no bar pixels (same drawing as at full HP)');
+    const bar = await G(page, () => {
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, at = (x, y) => [...c.getImageData(Math.floor(x), Math.floor(y), 1, 1).data].slice(0, 3);
+      const one = (t, f, d = 5) => { g.enemies = []; W.spawn(t, d); const e = g.enemies[0]; e.hp = e.max * f; W.render(0); return { e, bars: W.bars() }; };
+      const out = {};
+      out.full = one('grunt', 1).bars.length; out.h99 = one('grunt', 0.99).bars.length; out.h97 = one('grunt', 0.97).bars.length;
+      const h = one('grunt', 0.5), b = h.bars[0], e = h.e, top = e.y * T - W.drawR(e) - Math.max(1.5, 0.06 * T) / 2;
+      out.grunt = { n: h.bars.length, w: b.w, h: b.h, f: b.f, a: b.a, gap: top - (b.y + b.h + 1), fill: at(b.x + 2, b.y + b.h / 2), empty: at(b.x + b.w - 2, b.y + b.h / 2), edge: at(b.x + b.w / 2, b.y - 0.5) };
+      out.brute = one('brute', 0.5).bars[0].w; out.splitter = one('splitter', 0.3).bars[0];
+      const wi = one('wisp', 0.8); out.wisp = { bottom: wi.bars[0].y + wi.bars[0].h + 1, body: (wi.e.y - W.LIFT) * T - W.drawR(wi.e) - 0.05 * T, fill: at(wi.bars[0].x + 2, wi.bars[0].y + 1) };
+      out.T = T; g.enemies = []; return out;
+    });
+    check(bar.full === 0 && bar.h99 === 0 && bar.h97 === 1, `a bar only below 98% HP: none at 100% or 99%, one at 97% (${bar.full}/${bar.h99}/${bar.h97})`);
+    check(bar.grunt.n === 1 && Math.abs(bar.grunt.w - 0.45 * bar.T) < 1e-9 && bar.grunt.h === Math.round(Math.max(4, 0.09 * bar.T)) && bar.grunt.f === 0.5 && bar.grunt.a === 1, 'a grunt at 50% gets one bar from the bar pass, 0.45T by Math.max(4, 0.09T) ' + JSON.stringify(bar.grunt));
+    check(near3(bar.grunt.fill, [0xe8, 0xc5, 0x47], 4) && lum(bar.grunt.empty) < 40 && lum(bar.grunt.edge) < 50, 'it is yellow at 50% with a dark empty part and a dark 1px border ' + JSON.stringify(bar.grunt));
+    check(bar.grunt.gap >= 2, `it sits above the drawn sprite (${bar.grunt.gap.toFixed(1)}px clear of the outline)`);
+    check(Math.abs(bar.brute - 0.6 * bar.T) < 1e-9 && Math.abs(bar.splitter.w - 0.6 * bar.T) < 1e-9 && bar.splitter.f === 0.3 && near3(bar.wisp.fill, [0x9f, 0xd3, 0x6a], 4), 'enemies with r >= 0.3 get 0.6T bars; fill colours stay green/yellow/red by fraction');
+    check(bar.wisp.bottom <= bar.wisp.body, `a flier's bar sits above its lifted sprite (bar bottom ${bar.wisp.bottom.toFixed(1)}, body top ${bar.wisp.body.toFixed(1)})`);
+
+    // A hurt Warlord: no bar of any kind over it. The 3px above its drawn top match the board with no Warlord at all.
+    const boss = await G(page, () => {
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      g.enemies = []; g.fx = []; g.banner = null; W.spawn('boss', 5); g.fx = []; g.banner = null; const e = g.enemies[0]; e.hp = e.max * 0.5;
+      const R = W.drawR(e), top = Math.floor(e.y * T - 1.22 * R - Math.max(1.5, 0.06 * T) / 2), box = [Math.floor(e.x * T - 1.3 * R), top - 3, Math.ceil(2.6 * R), 3];
+      W.render(0); const withB = [...c.getImageData(...box).data], bars = W.bars().length;
+      g.enemies = []; W.render(0); const without = [...c.getImageData(...box).data];
+      let worst = 0; for (let i = 0; i < withB.length; i++) worst = Math.max(worst, Math.abs(withB[i] - without[i]));
+      return { bars, worst, box };
+    });
+    check(boss.bars === 0 && boss.worst <= 2, 'a Warlord at 50%: no bar is queued, and the 3px strip above it matches the background (the pinned bar is at the top instead) ' + JSON.stringify(boss));
+
+    // Two damaged grunts 0.45 tile apart on Meadow's row-3 stretch: their bars meet, and the pixel at the midpoint is dark.
+    const pair = await G(page, () => {
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      g.enemies = []; W.spawn('grunt', 5); W.spawn('grunt', 5.45); for (const e of g.enemies) e.hp = e.max * 0.5; W.render(0);
+      const [a, b] = g.enemies, bs = W.bars(), mx = (a.x + b.x) / 2 * T, my = bs[0].y + bs[0].h / 2, p = [...c.getImageData(Math.floor(mx), Math.floor(my), 1, 1).data].slice(0, 3);
+      g.enemies = []; return { p, mx, my, meet: bs[1].x - (bs[0].x + bs[0].w) };
+    });
+    check(Math.abs(pair.meet) < 1e-6 && lum(pair.p) < 40, `two grunts at 50% 0.45 tile apart: the bars meet and the pixel at their midpoint is dark (luminance ${lum(pair.p).toFixed(1)} < 40) ` + JSON.stringify(pair));
+    // Bars are drawn after the fliers: a wisp over a damaged grunt's bar does not hide it.
+    const over = await G(page, () => {
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      g.enemies = []; W.spawn('grunt', 5); W.spawn('wisp', 5); const [gr, wi] = g.enemies; gr.hp = gr.max * 0.5; wi.bob = 0; W.render(0);
+      const b = W.bars()[0], x = b.x + 3, y = b.y + b.h / 2, inWisp = Math.hypot(x - wi.x * T, y - (wi.y - W.LIFT) * T) < W.drawR(wi) - 2;
+      return { inWisp, p: [...c.getImageData(Math.floor(x), Math.floor(y), 1, 1).data].slice(0, 3) };
+    });
+    check(over.inWisp && near3(over.p, [0xe8, 0xc5, 0x47], 4), 'a wisp flying over a damaged grunt does not cover its bar: bars are drawn after the flier loop ' + JSON.stringify(over));
+    // Bars fade with their enemy near the keep: same alpha clamp((path.len-0.2-dist)/0.9, 0, 1), and none at the leak line.
+    const fade = await G(page, () => { const W = window.__pw, g = W.G, L = g.map.path.len, out = [];
+      for (const d of [L - 1.2, L - 0.65, L - 0.2]) { g.enemies = []; W.spawn('grunt', d); g.enemies[0].hp = g.enemies[0].max * 0.5; W.render(0); out.push(W.bars().map(b => +b.a.toFixed(3)).join()); }
+      g.enemies = []; return out; });
+    check(fade[0] === '1' && fade[1] === '0.5' && fade[2] === '', 'bars use the fade alpha: 1, then 0.5 halfway through the last 0.9 tile, then no bar at the leak line ' + JSON.stringify(fade));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+
+    const s = await newPage(browser, { viewport: { width: 320, height: 568 } });
+    await startMap(s.page, 1);
+    await calmBoard(s.page, 3);
+    const small = await G(s.page, () => { const W = window.__pw, g = W.G; W.spawn('grunt', 5); g.enemies[0].hp = 10; W.render(0); const b = W.bars()[0]; g.enemies = []; return { w: b.w, h: b.h, T: document.querySelector('#cv').width / W.COLS }; });
+    check(small.T === 24 && small.w === 16 && small.h === 4, '320px: a grunt bar is at least 16 by 4 px ' + JSON.stringify(small));
+    await s.ctx.close();
+  }
+
+  current = 'enemy-readability: rim hit flash and kill pop';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await calmBoard(page, 1);
+    // rimAt(type, set): one enemy at dist 5 (walking right), with fields from `set`, rendered; returns the pixel at the top of its rim and one inside its body.
+    const rimAt = (type, set) => G(page, ([type, set]) => {
+      const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS, at = (x, y) => [...c.getImageData(Math.floor(x), Math.floor(y), 1, 1).data].slice(0, 3);
+      g.enemies = []; g.fx = []; W.spawn(type, 5); const e = g.enemies[0]; Object.assign(e, set); const R = W.drawR(e), x = e.x * T, y = e.y * T; W.render(0);
+      const r = { rim: at(x, y - R), body: at(x - 0.5 * R, y) }; g.enemies = []; return r; }, [type, set]);
+    const hit = await G(page, () => { const W = window.__pw, g = W.G; W.spawn('grunt', 5); const e = g.enemies[0]; W.hurt(e, 5, false, 'bolt'); const r = { hitT: e.hitT, tinkT: e.tinkT, pierceT: e.pierceT }; g.enemies = []; return r; });
+    check(hit.hitT === 0.05 && hit.tinkT === 0 && hit.pierceT === 0, 'a plain hit sets hitT = 0.05 ' + JSON.stringify(hit));
+    const plain = await rimAt('grunt', {}), flash = await rimAt('grunt', { hitT: 0.05 });
+    check(lum(plain.rim) < 60 && flash.rim.every(v => v > 235), 'the hit flash is a white rim at radius r: the ink outline turns white ' + JSON.stringify({ plain: plain.rim, flash: flash.rim }));
+    check(near3(flash.body, [0xc9, 0x58, 0x3a], 4) && near3(flash.body, plain.body, 2), 'not a fill: the body keeps its colour (#c9583a) while it flashes ' + JSON.stringify(flash.body));
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const soft = await rimAt('grunt', { hitT: 0.05 });
+    check(lum(soft.rim) > lum(plain.rim) + 40 && lum(soft.rim) < lum(flash.rim) - 80, 'reduced motion: the rim is drawn at alpha 0.3 ' + JSON.stringify(soft.rim));
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const pierce = await rimAt('brute', { pierceT: 0.08 });
+    check(near3(pierce.rim, [0xff, 0x9a, 0x8a], 8), 'a pierce hit draws a #ff9a8a rim instead ' + JSON.stringify(pierce.rim));
+
+    // Kill pop: a grunt killed by hurtAll adds a pop, 6 particles (3 of them #fff6dc) and its +gold: at most 8 fx.
+    const kill = await G(page, () => { const W = window.__pw, g = W.G; g.fx = []; W.spawn('grunt', 5); const e = g.enemies[0]; W.hurtAll(1e6);
+      const pop = g.fx.find(f => f.k === 'pop'), ps = g.fx.filter(f => f.k === 'p'); return { n: g.fx.length, pop, x: e.x, y: e.y, parts: ps.length, cream: ps.filter(p => p.c === '#fff6dc').length, own: ps.filter(p => p.c === e.d.color).length }; });
+    check(!!kill.pop && kill.n <= 8, `spawn a grunt and hurtAll(1e6): G.fx has k==='pop', and that kill added ${kill.n} fx (at most 8)`);
+    check(kill.pop && kill.pop.x === kill.x && kill.pop.y === kill.y && kill.pop.r === 0.26 && kill.pop.t === 0 && kill.pop.dur === 0.16, "the pop is {k:'pop', x, y, r:e.r, t:0, dur:0.16} " + JSON.stringify(kill.pop));
+    check(kill.parts === 6 && kill.cream === 3 && kill.own === 3, `a normal kill bursts 6 particles, half of them #fff6dc (${kill.parts}: ${kill.cream} cream, ${kill.own} grunt)`);
+    const flier = await G(page, () => { const W = window.__pw, g = W.G; g.fx = []; g.wave = 5; W.spawn('wisp', 5); const e = g.enemies[0]; W.hurtAll(1e6); const pop = g.fx.find(f => f.k === 'pop'); return { dy: e.y - pop.y, pdy: g.fx.filter(f => f.k === 'p').every(p => Math.abs(e.y - p.y - W.LIFT) < 1e-9), lift: W.LIFT }; });
+    check(Math.abs(flier.dy - flier.lift) < 1e-9 && flier.pdy, 'a flier pops and bursts where it is drawn, LIFT (0.32) above the road ' + JSON.stringify(flier));
+    // The pop swells: white disc 1 -> 1.6r, ring out to 2.2r. Under reduced motion both hold their size and only fade.
+    const popArea = t => G(page, t => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      g.enemies = []; const p = g.map.path.at(5), b = [Math.round((p.x - 1.5) * T), Math.round((p.y - 1.5) * T), Math.round(3 * T), Math.round(3 * T)];
+      g.fx = []; W.render(0); const bg = c.getImageData(...b).data; g.fx = [{ k: 'pop', x: p.x, y: p.y, r: 0.26, t, dur: 0.16 }]; W.render(0);
+      const d = c.getImageData(...b).data; let n = 0, far = 0;
+      for (let i = 0; i < d.length; i += 4) if (Math.max(Math.abs(d[i] - bg[i]), Math.abs(d[i + 1] - bg[i + 1]), Math.abs(d[i + 2] - bg[i + 2])) > 12) { n++; far = Math.max(far, Math.hypot(b[0] + (i / 4) % b[2] + 0.5 - p.x * T, b[1] + Math.floor(i / 4 / b[2]) + 0.5 - p.y * T)); }
+      const ctr = [...c.getImageData(Math.floor(p.x * T), Math.floor(p.y * T), 1, 1).data].slice(0, 3); g.fx = []; return { n, far: +far.toFixed(2), r: 0.26 * T, ctr }; }, t);
+    const p0 = await popArea(0), p1 = await popArea(0.08);
+    check(p0.ctr.every(v => v > 230) && p1.n > p0.n * 1.6 && p1.far > p0.far + 0.4 * p0.r, `the pop is a white disc that swells, its ring growing (${p0.n} px out to ${p0.far}px at t 0, ${p1.n} px out to ${p1.far}px at t 0.08) ` + JSON.stringify(p0.ctr));
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const q0 = await popArea(0), q1 = await popArea(0.08);
+    check(Math.abs(q1.far - q0.far) <= 1 && q0.far > 1.5 * q0.r, `reduced motion: the pop holds its size and only fades (out to ${q0.far}px / ${q1.far}px)`);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'enemy-readability: armor tink and Longshot pierce';
+  {
+    const { ctx, page } = await newPage(browser, { init: audioSpy });
+    await startMap(page, 1);
+    // Acceptance: G.wave=30; spawn('brute',5); a bolt beside it; step until the hit.
+    await calmBoard(page, 30);
+    await clearRec(page, 50);
+    const bolt = await G(page, () => { const W = window.__pw, g = W.G; W.spawn('brute', 5); const e = g.enemies[0]; W.build('bolt', 2, 2);
+      let n = 0, src = null; while (e.hp === e.max && n++ < 300) { W.step(1 / 30); const p = g.projs.find(p => p.k === 'bolt'); if (p) src = p.src; }
+      return { hit: e.hp < e.max, tinkT: e.tinkT, hitT: e.hitT, src, armor: e.armor }; });
+    check(bolt.hit && bolt.tinkT > 0 && bolt.hitT <= 0, 'G.wave=30; spawn brute at 5; a bolt beside it: after the hit brute.tinkT > 0 and hitT <= 0 ' + JSON.stringify(bolt));
+    check(bolt.src === 'bolt', "the bolt's projectile carries its tower type (p.src === 'bolt')");
+    check(near(await vals(page, 'square'), 2600), "the tink plays sfx('tink') (square 2600Hz)");
+    await calmBoard(page, 30);
+    const lng = await G(page, () => { const W = window.__pw, g = W.G; W.spawn('brute', 5); const e = g.enemies[0]; W.build('long', 2, 2);
+      let n = 0; while (e.hp === e.max && n++ < 300) W.step(1 / 30); return { hit: e.hp < e.max, pierceT: e.pierceT, tinkT: e.tinkT, hitT: e.hitT }; });
+    check(lng.hit && lng.pierceT > 0 && lng.tinkT === 0 && lng.hitT <= 0, 'a Longshot hit on a brute sets pierceT > 0 and tinkT === 0 (and no white flash) ' + JSON.stringify(lng));
+    // The 40% rule, Frost's exemption and one spark set at a time (wave-30 brute: armor 3 x 1.87 = 5.61).
+    await calmBoard(page, 30);
+    const rule = await G(page, () => { const W = window.__pw, g = W.G; W.spawn('brute', 5); const e = g.enemies[0], out = {};
+      const fresh = () => { e.tinkT = 0; e.hitT = 0; e.pierceT = 0; };
+      const hit = (d, p, s) => { fresh(); W.hurt(e, d, p, s); return [+e.tinkT.toFixed(3), +e.hitT.toFixed(3), +e.pierceT.toFixed(3)].join(); };
+      out.bolt1 = hit(11, false, 'bolt'); out.bolt2 = hit(17.6, false, 'bolt'); out.arc = hit(11, false, 'arc'); out.frost = hit(5, false, 'frost'); out.mortar = hit(30, false, 'mortar'); out.long = hit(78, true, 'long');
+      fresh(); W.hurt(e, 11, false, 'bolt'); const a1 = e.tinkA; W.step(0.03); W.hurt(e, 11, false, 'bolt'); out.again = { same: e.tinkA === a1, t: +e.tinkT.toFixed(3) };
+      for (let i = 0; i < 3; i++) W.step(0.03); out.ends = +Math.max(0, e.tinkT).toFixed(3); W.hurt(e, 11, false, 'bolt'); out.next = +e.tinkT.toFixed(3);
+      out.armor = +e.armor.toFixed(2); return out; });
+    check(rule.bolt1 === '0.1,0,0' && rule.arc === '0.1,0,0', 'a hit whose damage armor cuts by 40% or more (dmg-a < 0.6*dmg) tinks: tinkT 0.1 and no hitT ' + JSON.stringify(rule));
+    check(rule.bolt2 === '0,0.05,0' && rule.mortar === '0,0.05,0', 'a hit armor cuts by less than 40% flashes white as usual (Bolt level 2, Mortar)');
+    check(rule.frost === '0,0.05,0', "Frost never tinks, though armor eats its whole hit (src === 'frost')");
+    check(rule.long === '0,0,0.08', 'a Longshot (pierce) hit sets pierceT 0.08 and nothing else');
+    check(rule.again.same && rule.again.t < 0.1 && rule.next === 0.1, 'one spark set per enemy at a time: a tink while sparks show keeps that set; a new one starts after it ends ' + JSON.stringify(rule.again) + ' next ' + rule.next);
+    // The sparks: three short #d6dbe0 lines off the armor ring.
+    const sparks = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      const count = tink => { g.enemies = []; g.fx = []; W.spawn('brute', 5); const e = g.enemies[0]; e.tinkT = tink; e.tinkA = -Math.PI / 2; W.render(0);
+        const R = W.drawR(e) * 1.12, x = e.x * T, y = e.y * T, b = [Math.floor(x - R - 0.3 * T), Math.floor(y - R - 0.3 * T), Math.ceil(2 * R + 0.6 * T), Math.ceil(2 * R + 0.6 * T)], d = c.getImageData(...b).data; let n = 0, far = 0;
+        for (let i = 0; i < d.length; i += 4) { const px = b[0] + (i / 4) % b[2] + 0.5, py = b[1] + Math.floor(i / 4 / b[2]) + 0.5, r = Math.hypot(px - x, py - y);
+          if (r > R + 2 && Math.abs(d[i] - 0xd6) < 24 && Math.abs(d[i + 1] - 0xdb) < 24 && Math.abs(d[i + 2] - 0xe0) < 24) { n++; far = Math.max(far, (r - R) / T); } }
+        return { n, far: +far.toFixed(3) }; };
+      const r = { off: count(0), on: count(0.1) }; g.enemies = []; return r; });
+    check(sparks.off.n === 0 && sparks.on.n >= 6 && sparks.on.far > 0.08 && sparks.on.far < 0.16, 'tinkT > 0 draws #d6dbe0 sparks reaching about 0.12 tile off the armor ring ' + JSON.stringify(sparks));
+    // Every projectile carries its tower type.
+    await calmBoard(page, 1);
+    const srcs = await G(page, () => { const W = window.__pw, g = W.G; W.spawn('grunt', 5); g.enemies[0].hp = 1e9; g.enemies[0].max = 1e9; g.enemies[0].spd = 0; W.build('frost', 2, 2); W.build('mortar', 3, 2); W.build('bolt', 4, 2); const seen = {};
+      for (let i = 0; i < 120; i++) { W.step(1 / 30); for (const p of g.projs) seen[p.k] = p.src; } return seen; });
+    check(srcs.bolt === 'bolt' && srcs.frost === 'frost' && srcs.shell === 'mortar', 'projectiles carry src: ' + JSON.stringify(srcs));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
   }
 
   // ---------------------------------------------------------------
