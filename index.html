@@ -123,11 +123,14 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .mapbtn canvas{width:45px;height:70px;border-radius:5px;flex:none;box-shadow:0 0 0 1px #0e140d}
 .mapbtn .mn{font-family:var(--font-display);font-weight:800;font-size:16px}
 .mapbtn .md{font-size:12px;color:var(--muted)}
+.mapbtn .md.prog{color:var(--brass)}
 .tag{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:6px;margin-left:6px;vertical-align:2px}
 .tag.Easy{background:#2f4a25;color:#bfe59a}.tag.Normal{background:#4a4222;color:#f1d27c}.tag.Hard{background:#4d2620;color:#f6b1a4}
-.big{height:50px;border-radius:14px;background:var(--brass);color:var(--brass-ink);font-family:var(--font-display);font-weight:900;font-size:17px;box-shadow:0 3px 0 #8f6a22}
+.big{height:50px;padding:0 12px;line-height:1.15;border-radius:14px;background:var(--brass);color:var(--brass-ink);font-family:var(--font-display);font-weight:900;font-size:17px;box-shadow:0 3px 0 #8f6a22}
 .big:active{transform:translateY(2px);box-shadow:0 1px 0 #8f6a22}
-.ghost{height:46px;border-radius:14px;background:var(--panel-2);border:1px solid var(--line);font-weight:700}
+.ghost{height:46px;border-radius:14px;background:var(--panel-2);border:1px solid var(--line);font-weight:700;line-height:1.1}
+.ghost.armed{background:#4a231d;border-color:var(--danger);font-size:13px}
+.ghost small{display:block;font-size:11px;color:var(--muted)}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .how{margin:0;padding-left:18px;color:var(--muted);font-size:13px;display:flex;flex-direction:column;gap:4px}
 .how b{color:var(--ink)}
@@ -279,7 +282,16 @@ let S=null;
 try{S=JSON.parse(localStorage.getItem(STORE))}catch(e){S=null}
 if(!S||typeof S!=='object'||Array.isArray(S))S={};
 if(!S.best||typeof S.best!=='object'||Array.isArray(S.best))S.best={};
-S.save=validSave(S.save);
+// One saved run per road (S.saves[mapId]); S.last is the road saved most recently.
+{
+  const raw=S.saves&&typeof S.saves==='object'&&!Array.isArray(S.saves)?S.saves:{};
+  S.saves={};
+  for(const m of MAPS){const sv=validSave(raw[m.id]);if(sv&&sv.map===m.id)S.saves[m.id]=sv}
+  // 1.0 kept a single S.save; move it into its road's slot if that slot is free.
+  const old=validSave(S.save);
+  if(old&&!S.saves[old.map]){S.saves[old.map]=old;S.last=old.map}
+  delete S.save;persist();
+}
 // Drop anything in a stored run that this version can't rebuild, rather than failing to start.
 function validSave(sv){
   if(!sv||typeof sv!=='object')return undefined;
@@ -335,7 +347,7 @@ function sfx(name){
 let G=null,speedPref=1;
 function newGame(map,save){
   G={map,grid:map.grid.slice(),wave:0,gold:CFG.startGold,lives:20,towers:[],enemies:[],projs:[],fx:[],spawnQ:[],W:{},time:0,
-     speed:speedPref,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,sellArm:false,gateFlash:0,running:true};
+     speed:speedPref,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,sellArm:false,sellArmAt:0,gateFlash:0,running:true};
   if(save){
     G.wave=save.wave;G.cleared=save.wave;G.gold=save.gold;G.lives=save.lives;G.won=!!save.won;
     for(const t of save.towers)placeTower(t.type,t.c,t.r,t.level,t.spent,t.mode);
@@ -527,14 +539,18 @@ function step(dt){
 /* ---------- save/end ---------- */
 function saveRun(){
   if(!G||G.over)return;
-  S.save={map:G.map.id,wave:G.wave,gold:G.gold,lives:G.lives,won:G.won,
+  const id=G.map.id;
+  // No empty runs. If everything built before wave 1 was sold, the slot would only bring the towers back.
+  if(G.wave===0&&G.towers.length===0){if(S.saves[id]){delete S.saves[id];persist()}return}
+  S.saves[id]={map:id,wave:G.wave,gold:G.gold,lives:G.lives,won:G.won,
     towers:G.towers.map(t=>({type:t.type,c:t.c,r:t.r,level:t.level,spent:t.spent,mode:t.mode}))};
-  if(G.cleared>(S.best[G.map.id]||0))S.best[G.map.id]=G.cleared;
+  S.last=id;
+  if(G.cleared>(S.best[id]||0))S.best[id]=G.cleared;
   persist();
 }
 function recordBest(){const id=G.map.id;if(G.cleared>(S.best[id]||0)){S.best[id]=G.cleared}persist()}
 function gameOver(){
-  G.over=true;G.running=false;recordBest();delete S.save;persist();
+  G.over=true;G.running=false;recordBest();delete S.saves[G.map.id];persist();
   sfx('leak');showEnd(false);
 }
 function showEnd(win){
@@ -856,20 +872,31 @@ $('#bUp').addEventListener('click',()=>{
 $('#bMode').addEventListener('click',()=>{const t=G.selTower;if(!t)return;t.mode=MODES[(MODES.indexOf(t.mode)+1)%MODES.length];G.sellArm=false;refreshPanel();saveRunIfCalm()});
 $('#bSell').addEventListener('click',()=>{
   const t=G.selTower;if(!t)return;
-  if(!G.sellArm){G.sellArm=true;refreshPanel();return}
+  if(!G.sellArm){G.sellArm=true;G.sellArmAt=performance.now();refreshPanel();return}
   G.gold+=sellValue(t);G.towers=G.towers.filter(x=>x!==t);G.grid[t.r*COLS+t.c]=0;burst(t.x,t.y,'#8a7a5a',8,false);sfx('sell');
   deselect();refreshPanel();updateHud(true);saveRunIfCalm();
 });
 $('#bWave').addEventListener('click',()=>{audioInit();startWave();updateHud(true)});
 $('#bSpeed').addEventListener('click',()=>{if(!G)return;G.speed=speedPref=G.speed===1?2:G.speed===2?3:1;$('#bSpeed').textContent=G.speed+'×'});
 function setPause(p){
-  if(!G||G.over)return;G.paused=p;$('#pauseOv').hidden=!p;
-  if(p)$('#pauseInfo').textContent=`${G.map.name} · wave ${G.wave}`;
+  if(!G||G.over)return;G.paused=p;$('#pauseOv').hidden=!p;disarmRestart();
+  if(p){
+    $('#pauseInfo').textContent=`${G.map.name} · wave ${G.wave}`;
+    // Leaving mid-wave goes back to the last cleared wave, so say so.
+    $('#bMenu').innerHTML=activeWaves()||G.spawnQ.length?`Main menu<small>Wave ${G.wave} restarts</small>`:'Main menu';
+  }
 }
 $('#bPause').addEventListener('click',()=>setPause(true));
 $('#bResume').addEventListener('click',()=>setPause(false));
-$('#bRestart').addEventListener('click',()=>{const m=G.map;delete S.save;persist();$('#pauseOv').hidden=true;newGame(m)});
-$('#bMenu').addEventListener('click',()=>{saveRunIfCalm();$('#pauseOv').hidden=true;showMenu()});
+// Restart road wipes the run, so it takes two taps. The arm lapses after 3.5s.
+let restartTimer=0;
+function disarmRestart(){clearTimeout(restartTimer);const b=$('#bRestart');b.classList.remove('armed');b.textContent='Restart road'}
+$('#bRestart').addEventListener('click',()=>{
+  const b=$('#bRestart');
+  if(!b.classList.contains('armed')){disarmRestart();b.classList.add('armed');b.textContent='Tap again to restart';restartTimer=setTimeout(disarmRestart,3500);return}
+  disarmRestart();const m=G.map;delete S.saves[m.id];persist();$('#pauseOv').hidden=true;newGame(m);
+});
+$('#bMenu').addEventListener('click',()=>{saveRunIfCalm();disarmRestart();$('#pauseOv').hidden=true;showMenu()});
 function saveRunIfCalm(){if(G&&G.running&&!G.over&&!activeWaves()&&!G.spawnQ.length)saveRun()}
 $('#bEndMain').addEventListener('click',()=>{
   $('#endOv').hidden=true;
@@ -890,22 +917,26 @@ function showMenu(){
   for(const m of MAPS){
     const b=document.createElement('button');b.className='mapbtn';
     const c=document.createElement('canvas');const txt=document.createElement('div');
-    const best=S.best[m.id]||0;
-    txt.innerHTML=`<div class="mn">${m.name}<span class="tag ${m.diff}">${m.diff}</span></div><div class="md">${best?`Best: wave ${best}${best>=FINAL_WAVE?' · conquered':''}`:'Not yet played'}</div>`;
+    const best=S.best[m.id]||0,sv=S.saves[m.id];
+    const md=sv?`<div class="md prog">In progress · wave ${sv.wave+1}</div>`
+      :`<div class="md">${best?`Best: wave ${best}${best>=FINAL_WAVE?' · conquered':''}`:'Not yet played'}</div>`;
+    txt.innerHTML=`<div class="mn">${m.name}<span class="tag ${m.diff}">${m.diff}</span></div>${md}`;
     b.append(c,txt);box.append(b);
-    b.addEventListener('click',()=>{audioInit();delete S.save;persist();$('#menu').hidden=true;newGame(m);G.running=true});
+    // A road with a saved run resumes it. Starting over is Pause > Restart road.
+    b.addEventListener('click',()=>{audioInit();$('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true});
     requestAnimationFrame(()=>{const dpr=Math.min(3,window.devicePixelRatio||1),ts=5;const img=buildBG(m,ts,dpr);
       c.width=img.width;c.height=img.height;c.getContext('2d').drawImage(img,0,0)});
   }
-  const sv=S.save,cont=$('#bContinue');
-  const sm=sv&&MAPS.find(m=>m.id===sv.map);
+  const sm=continueMap(),cont=$('#bContinue');
   cont.hidden=!sm;
-  if(sm)cont.textContent=`Continue · ${sm.name}, wave ${sv.wave+1}`;
+  if(sm)cont.textContent=`Continue · ${sm.name}, wave ${S.saves[sm.id].wave+1}`;
   syncMute();$('#menu').hidden=false;
 }
+// The road Continue resumes: the one saved most recently, else the first road with a save.
+function continueMap(){return MAPS.find(m=>m.id===S.last&&S.saves[m.id])||MAPS.find(m=>S.saves[m.id])}
 $('#bContinue').addEventListener('click',()=>{
-  audioInit();const sv=S.save,m=sv&&MAPS.find(x=>x.id===sv.map);if(!m)return;
-  $('#menu').hidden=true;newGame(m,sv);G.running=true;
+  audioInit();const m=continueMap();if(!m)return;
+  $('#menu').hidden=true;newGame(m,S.saves[m.id]);G.running=true;
 });
 
 /* ---------- loop ---------- */
@@ -913,6 +944,7 @@ let last=performance.now();
 function frame(now){
   const dt=Math.min(0.05,(now-last)/1000);last=now;
   if(G&&G.running&&!G.paused&&!G.over){for(let i=0;i<G.speed;i++){step(dt);if(G.over)break}}
+  if(G&&G.sellArm&&now-G.sellArmAt>3500){G.sellArm=false;refreshPanel()}
   if(G){render(now/1000);updateHud(false)}
   requestAnimationFrame(frame);
 }
@@ -927,7 +959,7 @@ newGame(MAPS[1]);G.running=false;
 G.gold=200;
 paintIcons();showMenu();requestAnimationFrame(frame);
 
-window.__pw={get G(){return G},step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
+window.__pw={get G(){return G},get S(){return S},ED,buildWave,refreshPanel,step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
   CFG,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
   hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},render:()=>render(performance.now()/1000),spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};

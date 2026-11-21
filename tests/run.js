@@ -159,7 +159,7 @@ let BASE;
     }
     await runUntilCalm(page);
     await page.waitForTimeout(50);
-    const saved = await G(page, () => JSON.parse(localStorage.getItem('pathwarden.v1')).save);
+    const saved = await G(page, () => JSON.parse(localStorage.getItem('pathwarden.v1')).saves.switch);
     check(saved && saved.wave === (enemiesLeft ? 2 : 1), 'run saved after waves clear');
     check(saved && saved.towers.length === 7, 'save includes towers');
     const before = await G(page, () => ({ gold: window.__pw.G.gold, lives: window.__pw.G.lives, wave: window.__pw.G.wave }));
@@ -189,7 +189,7 @@ let BASE;
     await page.click('#bResume');
     await page.waitForTimeout(200);
     check((await G(page, () => window.__pw.G.time)) > t0, 'time runs after resume');
-    await page.click('#bPause'); await page.click('#bRestart');
+    await page.click('#bPause'); await page.click('#bRestart'); await page.click('#bRestart');
     const spd = await G(page, () => window.__pw.G.speed);
     check((await text(page, '#bSpeed')) === spd + '×', `speed label matches game speed after restart (label ${await text(page, '#bSpeed')}, speed ${spd})`);
     check(await hidden(page, '#pauseOv'), 'restart closes pause overlay');
@@ -214,7 +214,7 @@ let BASE;
     await page.waitForTimeout(80);
     check(await G(page, () => window.__pw.G.over), 'game ends at 0 lives');
     check(!(await hidden(page, '#endOv')) && (await text(page, '#endTitle')) === 'The keep has fallen', 'loss screen shown');
-    check((await G(page, () => JSON.parse(localStorage.getItem('pathwarden.v1')).save)) === undefined, 'save cleared on loss');
+    check((await G(page, () => JSON.parse(localStorage.getItem('pathwarden.v1')).saves.quarry)) === undefined, 'save cleared on loss');
     check((await text(page, '#sLives span')) === '0', 'HUD shows 0 lives');
     await tapTile(page, 2, 2);
     check((await G(page, () => window.__pw.G.sel)) === null, 'board ignores taps after game over');
@@ -291,7 +291,12 @@ let BASE;
     const { ctx, page } = await newPage(browser);
     await page.evaluate(v => localStorage.setItem('pathwarden.v1', v), bad); await page.reload(); await page.waitForTimeout(250);
     check(!(await hidden(page, '#menu')) && (await page.$$('.mapbtn')).length === 3, 'menu still loads with roads listed');
-    if (!(await hidden(page, '#bContinue'))) { await page.click('#bContinue'); await page.waitForTimeout(100); }
+    if (bad.startsWith('{"save"')) {
+      check(!(await hidden(page, '#bContinue')), 'old single save migrates and offers Continue');
+      await page.click('#bContinue'); await page.waitForTimeout(100);
+      const g = await G(page, () => ({ map: window.__pw.G.map.id, wave: window.__pw.G.wave, towers: window.__pw.G.towers.length }));
+      check(g.map === 'meadow' && g.wave === 3 && g.towers === 0, 'Continue resumes the migrated run, bad towers dropped ' + JSON.stringify(g));
+    } else if (!(await hidden(page, '#bContinue'))) { await page.click('#bContinue'); await page.waitForTimeout(100); }
     else { await startMap(page, 1); }
     await page.click('#bWave'); await page.waitForTimeout(200);
     check(page.errors.length === 0, 'no crash: ' + page.errors.join('|'));
@@ -351,6 +356,145 @@ let BASE;
     check((await G(page, () => window.__pw.G.towers.length)) === 1 && (await G(page, () => window.__pw.G.gold)) === 150, 'restored with the tower and the gold spent');
     await ctx.close();
   }
+  // ---------------------------------------------------------------
+  // save-safety: one saved run per road, two-tap restart, mid-wave menu warning, sell arm timeout.
+  const stored = page => G(page, () => JSON.parse(localStorage.getItem('pathwarden.v1')));
+  const card = (page, i) => text(page, `.mapbtn >> nth=${i}`);
+  const killWaves = (page, n) => G(page, n => { const W = window.__pw, g = W.G; for (let w = 0; w < n; w++) { W.startWave(); let t = 0; while ((g.spawnQ.length || g.enemies.length) && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; } } return { wave: g.wave, calm: !g.spawnQ.length && !g.enemies.length && !Object.keys(g.W).length }; }, n);
+
+  current = 'save-safety: old single save migrates to its road';
+  {
+    const { ctx, page } = await newPage(browser);
+    await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ save: { map: 'quarry', wave: 4, gold: 100, lives: 20, towers: [] }, best: { quarry: 4 } })));
+    await page.reload(); await page.waitForTimeout(250);
+    const st = await G(page, () => { const S = window.__pw.S; return { wave: S.saves.quarry && S.saves.quarry.wave, save: S.save, hasKey: 'save' in S, last: S.last }; });
+    check(st.wave === 4, 'S.saves.quarry.wave === 4 (' + st.wave + ')');
+    check(st.save === undefined && !st.hasKey, 'S.save is undefined after migration');
+    check(st.last === 'quarry', 'S.last points at the migrated road');
+    const ls = await stored(page);
+    check(ls.save === undefined && ls.saves.quarry.wave === 4, 'migrated storage is written back without the old key');
+    check((await card(page, 2)).includes('In progress · wave 5'), 'Quarry card reads "In progress · wave 5" (' + (await card(page, 2)) + ')');
+    check(await page.$eval('.mapbtn >> nth=2', el => { const md = el.querySelector('.md'); return md.classList.contains('prog') && getComputedStyle(md).color === 'rgb(227, 173, 69)'; }), 'in-progress line uses class prog in brass');
+    check(!(await card(page, 0)).includes('In progress') && !(await card(page, 1)).includes('In progress'), 'other roads show no run in progress');
+    check(!(await hidden(page, '#bContinue')) && (await text(page, '#bContinue')).includes('Quarry Run'), 'Continue names Quarry Run (' + (await text(page, '#bContinue')) + ')');
+    check((await text(page, '#bContinue')) === 'Continue · Quarry Run, wave 5', 'Continue label format');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'save-safety: one slot per road, cards resume, two-tap restart';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1); // Meadow Bend
+    const built = await G(page, () => { const W = window.__pw; W.G.gold = 1000; return [W.build('bolt', 2, 2), W.build('bolt', 4, 2), W.build('arc', 3, 5)].every(Boolean); });
+    check(built, 'built 3 towers on Meadow');
+    const run = await killWaves(page, 2);
+    check(run.wave === 2 && run.calm, 'two waves run until calm ' + JSON.stringify(run));
+    await page.click('#bPause');
+    check(!(await text(page, '#bMenu')).includes('restarts'), 'calm pause: Main menu has no restart warning');
+    await page.click('#bMenu');
+    check(!(await hidden(page, '#menu')), 'back on the road list');
+    check((await card(page, 1)).includes('In progress · wave 3'), 'Meadow card shows its run (' + (await card(page, 1)) + ')');
+    await startMap(page, 0); // Switchback: no save, so a fresh run
+    check((await G(page, () => window.__pw.G.map.id === 'switch' && window.__pw.G.wave === 0 && window.__pw.G.towers.length === 0)), 'Switchback card starts a fresh run');
+    await page.click('#bPause'); await page.click('#bMenu');
+    let ls = await stored(page);
+    check(ls.saves.meadow && ls.saves.meadow.wave === 2 && ls.saves.meadow.towers.length === 3, 'localStorage saves.meadow.wave === 2 survives starting another road');
+    check(ls.saves.switch === undefined, 'a road left at wave 0 with no towers writes no save');
+    check((await card(page, 1)).includes('In progress · wave 3'), 'Meadow card still shows "In progress · wave 3"');
+    check(!(await card(page, 0)).includes('In progress'), 'Switchback card shows no run');
+    check((await text(page, '#bContinue')) === 'Continue · Meadow Bend, wave 3', 'Continue offers the Meadow run (' + (await text(page, '#bContinue')) + ')');
+
+    await startMap(page, 1); // tap the Meadow card: resumes
+    const res = await G(page, () => ({ map: window.__pw.G.map.id, towers: window.__pw.G.towers.length, wave: window.__pw.G.wave, running: window.__pw.G.running }));
+    check(res.map === 'meadow' && res.towers === 3 && res.wave === 2 && res.running, 'Meadow card resumes the saved run ' + JSON.stringify(res));
+
+    // Restart road takes two taps.
+    await page.click('#bPause');
+    await page.click('#bRestart');
+    let g = await G(page, () => ({ wave: window.__pw.G.wave, towers: window.__pw.G.towers.length }));
+    check(g.wave === 2 && g.towers === 3, 'one tap on Restart road changes nothing ' + JSON.stringify(g));
+    check((await text(page, '#bRestart')) === 'Tap again to restart', 'first tap asks to tap again (' + (await text(page, '#bRestart')) + ')');
+    check(await page.$eval('#bRestart', el => el.classList.contains('armed') && getComputedStyle(el).fontSize === '13px'), 'armed restart is styled as a warning');
+    check(!(await hidden(page, '#pauseOv')), 'pause overlay stays open after one tap');
+    await page.waitForTimeout(3600);
+    check((await text(page, '#bRestart')) === 'Restart road' && !(await page.$eval('#bRestart', el => el.classList.contains('armed'))), 'restart disarms after 3.5s');
+    check((await stored(page)).saves.meadow.wave === 2, 'save untouched by an expired restart tap');
+    await page.click('#bRestart'); await page.click('#bResume'); await page.click('#bPause');
+    check((await text(page, '#bRestart')) === 'Restart road', 'restart disarms on Resume and when pause reopens');
+    await page.click('#bRestart'); await page.click('#bRestart');
+    g = await G(page, () => ({ wave: window.__pw.G.wave, towers: window.__pw.G.towers.length, map: window.__pw.G.map.id }));
+    check(g.wave === 0 && g.towers === 0 && g.map === 'meadow', 'two taps restart the road at wave 0 ' + JSON.stringify(g));
+    check(await hidden(page, '#pauseOv'), 'restart closes the pause overlay');
+    ls = await stored(page);
+    check(ls.saves.meadow === undefined, 'restart deletes saves.meadow');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'save-safety: mid-wave menu warning and sell timeout';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await G(page, () => window.__pw.startWave());
+    await page.click('#bPause');
+    check((await text(page, '#bMenu')).includes('Wave 1 restarts'), 'pause mid-wave: Main menu warns "Wave 1 restarts" (' + (await text(page, '#bMenu')) + ')');
+    check(await page.$eval('#bMenu small', el => { const cs = getComputedStyle(el); return cs.display === 'block' && cs.fontSize === '11px' && cs.color === 'rgb(167, 177, 153)'; }), 'warning is a muted 11px second line');
+    await page.click('#bResume');
+    check((await G(page, () => { const W = window.__pw, g = W.G; let t = 0; while ((g.spawnQ.length || g.enemies.length) && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; } return g.wave === 1 && !g.spawnQ.length && !Object.keys(g.W).length; })), 'wave 1 cleared');
+    await page.click('#bPause');
+    check((await text(page, '#bMenu')) === 'Main menu', 'pause while calm: no restart warning (' + (await text(page, '#bMenu')) + ')');
+    await page.click('#bResume');
+
+    await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    await tapTile(page, 2, 2);
+    await page.click('#bSell');
+    check((await text(page, '#bSell')).startsWith('Confirm'), 'first Sell tap arms');
+    await page.waitForTimeout(3700);
+    check((await text(page, '#bSell')).startsWith('Sell'), 'Sell disarms after 3.5s (' + (await text(page, '#bSell')) + ')');
+    check((await G(page, () => !window.__pw.G.sellArm && window.__pw.G.towers.length === 1)), 'tower kept, arm cleared');
+    await page.click('#bSell');
+    check((await text(page, '#bSell')).startsWith('Confirm'), 'Sell can be armed again after the timeout');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'save-safety: a loss clears only that road';
+  {
+    const { ctx, page } = await newPage(browser);
+    await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ saves: { meadow: { map: 'meadow', wave: 5, gold: 100, lives: 20, towers: [{ type: 'bolt', c: 2, r: 2 }] }, switch: { map: 'switch', wave: 2, gold: 80, lives: 20, towers: [] }, quarry: { map: 'meadow', wave: 9, gold: 1, lives: 1, towers: [] } }, last: 'meadow' })));
+    await page.reload(); await page.waitForTimeout(250);
+    check((await G(page, () => window.__pw.S.saves.quarry)) === undefined, 'a slot whose map does not match its road is dropped');
+    check((await text(page, '#bContinue')) === 'Continue · Meadow Bend, wave 6', 'Continue follows S.last (' + (await text(page, '#bContinue')) + ')');
+    await startMap(page, 2); // Quarry: fresh
+    await tapTile(page, 0, 0); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    check(((await stored(page)).saves.quarry || {}).wave === 0, 'building before wave 1 saves the Quarry run');
+    const over = await G(page, () => { const W = window.__pw, g = W.G; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); for (let i = 0; i < 30 && !g.over; i++) W.step(1 / 30); return g.over; });
+    check(over, 'Quarry run lost');
+    const ls = await stored(page);
+    check(ls.saves.quarry === undefined, 'loss deletes saves.quarry');
+    check(ls.saves.meadow && ls.saves.meadow.wave === 5 && ls.saves.switch && ls.saves.switch.wave === 2, 'saves for other roads survive the loss');
+    await page.click('#bEndAlt');
+    check((await card(page, 1)).includes('In progress · wave 6') && (await card(page, 0)).includes('In progress · wave 3') && !(await card(page, 2)).includes('In progress'), 'cards reflect the remaining runs');
+    check((await text(page, '#bContinue')) === 'Continue · Long Switchback, wave 3', 'Continue falls back to the first road with a save (' + (await text(page, '#bContinue')) + ')');
+    await page.click('#bContinue');
+    check((await G(page, () => window.__pw.G.map.id === 'switch' && window.__pw.G.wave === 2)), 'Continue resumes the fallback road');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'save-safety: armed restart fits a 320px phone';
+  {
+    const { ctx, page } = await newPage(browser, { viewport: { width: 320, height: 568 } });
+    await startMap(page, 1);
+    await G(page, () => window.__pw.startWave());
+    await page.click('#bPause'); await page.click('#bRestart');
+    const fit = await page.evaluate(() => [...document.querySelectorAll('#bRestart,#bMenu')].map(b => ({ h: b.getBoundingClientRect().height, sh: b.scrollHeight, ch: b.clientHeight, sw: b.scrollWidth, cw: b.clientWidth })));
+    check(fit.every(f => f.h === 46 && f.sh <= f.ch && f.sw <= f.cw), 'armed Restart and two-line Main menu fit their 46px buttons ' + JSON.stringify(fit));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
   // ---------------------------------------------------------------
   current = 'long run soak (30 waves, all roads)';
   for (let mi = 0; mi < 3; mi++) {
