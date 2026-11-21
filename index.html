@@ -111,6 +111,9 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 /* A build or upgrade you can't afford flashes the gold counter. */
 #sGold.short{color:#ff8a75;animation:shake 80ms linear 3}
 @keyframes shake{25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+/* A wave pays out (early call or clear): the gold counter pops to 1.15 for 250ms with a brass glow. Colour only under reduced motion. */
+#sGold.gain{animation:pop .25s ease-out}
+#sGold.gain span{text-shadow:0 0 6px rgba(227,173,69,.95),0 0 2px rgba(227,173,69,.95)}
 
 #tview{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center}
 #tvIcon{width:44px;height:44px;grid-row:span 1}
@@ -167,7 +170,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .pill.off .i-off{display:inline}
 .pill.off{color:var(--muted)}
 
-@media (prefers-reduced-motion:reduce){#toast{transition:none}.tw.ready .cost,.act.up.ready small,#sGold.short,#sLives.hurt svg,#sLives.low svg{animation:none}}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}.tw.ready .cost,.act.up.ready small,#sGold.short,#sLives.hurt svg,#sLives.low svg,#sGold.gain{animation:none}#sGold.gain span{text-shadow:none;color:var(--brass)}}
 /* Short landscape screens: board on the left, HUD and controls stacked on the right. */
 @media (orientation:landscape) and (max-height:560px){
   #app{display:grid;max-width:none;grid-template-columns:minmax(0,1fr) minmax(300px,360px);grid-template-rows:auto minmax(0,1fr);
@@ -429,9 +432,10 @@ function newGame(map,save){
   // selAt: when a grass tile was picked with a tower already armed (double-tap guard). sendArmAt: when the wave-1 guard armed.
   // armKept: the armed tower was kept after a build, not picked; it shows on the palette but leaves #info to the wave preview.
   // poorWas/upWas: last affordability shown, so refreshPanel pulses only on a real change from poor to affordable.
+  // banner: the one big line on the board ({s, sub, c, t, dur}); bannerNext waits behind 'WARLORD DOWN'. bossBar: the pinned Warlord bar. shakeT: board shake left (real time).
   G={map,grid:map.grid.slice(),wave:0,gold:CFG.startGold,lives:20,towers:[],enemies:[],projs:[],fx:[],spawnQ:[],W:{},time:0,
      speed:speedPref,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,armKept:false,selAt:0,sellArm:false,sellArmAt:0,sendArmAt:0,
-     poorWas:{},upWas:null,hintTiles:[],gateFlash:0,hurtT:0,hurtDur:0.45,running:true};
+     poorWas:{},upWas:null,hintTiles:[],gateFlash:0,hurtT:0,hurtDur:0.45,banner:null,bannerNext:null,bossBar:null,shakeT:0,running:true};
   if(save){
     G.wave=save.wave;G.cleared=save.wave;G.gold=save.gold;G.lives=save.lives;G.won=!!save.won;
     for(const t of save.towers)placeTower(t.type,t.c,t.r,t.level,t.spent,t.mode);
@@ -478,6 +482,12 @@ function waveSummary(w){
 }
 const activeWaves=()=>Object.keys(G.W).length;
 const isCalm=()=>!activeWaves()&&!G.spawnQ.length;
+const bossWave=w=>buildWave(w).some(([t])=>ED[t].boss);
+// The small line under 'WAVE N'. Later items add more (new enemy types, wave themes).
+function bannerSub(w){return bossWave(w)?'A Warlord is coming':''}
+// One banner at a time: a newer one replaces it (and anything waiting behind it).
+function setBanner(b){G.banner={sub:'',...b,t:0};G.bannerNext=null}
+const goldGain=()=>flashClass($('#sGold'),'gain',250);
 
 function startWave(){
   if(!G||G.over||G.spawnQ.length)return;
@@ -487,17 +497,36 @@ function startWave(){
   G.wave++;const w=G.wave;
   let t=G.time+0.4,count=0;
   for(const [type,cnt,iv,delay] of buildWave(w)){t+=delay;for(let i=0;i<cnt;i++){G.spawnQ.push({at:t,type,w});t+=iv;count++}}
-  G.W[w]={rem:count,alive:0};
-  if(early){const b=10+w;G.gold+=b;toast(`Called early · +${b} gold`)}
-  else toast(w%10===0?`Wave ${w} · a Warlord approaches`:`Wave ${w}`);
+  G.W[w]={rem:count,alive:0,leaked:0};
+  if(early){const b=10+w;G.gold+=b;toast(`Called early · +${b} gold`);goldGain()}
+  setBanner({s:`WAVE ${w}`,sub:bannerSub(w),c:bossWave(w)?'#a487ff':'#f0e9d2',dur:1.3});
   sfx('wave');refreshPanel();
 }
+// Where the road comes out of the cave, pulled onto the board.
+function cavePos(){const a=G.map.path.P[0];return {x:clamp(a.x,0.35,COLS-0.35),y:clamp(a.y,0.35,ROWS-0.35)}}
 function spawnEnemy(type,w,dist,frac){
   const d=ED[type],hp=d.hp*hpScale(w)*G.map.hp*(frac||1);
   const e={type,d,w,hp,max:hp,spd:d.spd*(1+Math.min(0.25,(w-1)*0.006)),dist,slow:0,slowT:0,x:0,y:0,dx:0,dy:1,r:d.r,
     armor:(d.armor||0)*(1+(w-1)*0.03),fly:!!d.fly,gold:Math.round(d.gold*(1+CFG.goldGrow*(w-1))),hitT:0,bob:Math.random()*6,dead:false};
   const p=G.map.path.at(dist);e.x=p.x;e.y=p.y;e.dx=p.dx;e.dy=p.dy;
   G.enemies.push(e);G.W[w].alive++;
+  // The Warlord's entrance: dark rings out of the cave, its banner and a horn.
+  if(d.boss){
+    const c=cavePos();G.fx.push({k:'bossin',x:c.x,y:c.y,t:0,dur:0.6});
+    setBanner({s:'THE WARLORD',sub:'Costs 5 lives if it gets through',c:'#a487ff',dur:1.4});
+    sfx('horn');
+  }
+}
+// A Warlord that dies or gets through still counts in the pinned bar until its wave ends, so the bar never jumps up.
+function bossGone(e){const s=G.W[e.w];if(!e.d.boss||!s)return;s.bossMax=(s.bossMax||0)+e.max;s.bossN=(s.bossN||0)+1}
+// Living Warlords, summed: fill fraction, how many (with the fallen of the same waves), and the longest any has walked
+// since leaving the cave (spawn point -0.3), which starts the bar's 0.3s fade-in.
+function bossInfo(){
+  let hp=0,max=0,n=0,walk=0;const ws=new Set();
+  for(const e of G.enemies){if(e.dead||!e.d.boss)continue;hp+=Math.max(0,e.hp);max+=e.max;n++;ws.add(e.w);walk=Math.max(walk,(e.dist+0.3)/e.spd)}
+  if(!n)return null;
+  for(const w of ws){const s=G.W[w];if(s&&s.bossN){max+=s.bossMax;n+=s.bossN}}
+  return {frac:clamp(hp/max,0,1),n,walk};
 }
 function waveDone(w){
   const s=G.W[w];if(!s)return;s.alive--;
@@ -506,9 +535,11 @@ function waveDone(w){
     const b=CFG.bonusA+CFG.bonusB*w;G.gold+=b;G.cleared=Math.max(G.cleared,w);
     // The run only saves when the road is calm, so record a new best right away: leaving mid-wave must not lose it.
     if(G.cleared>(S.best[G.map.id]||0))recordBest();
-    toast(`Wave ${w} cleared · +${b} gold`);
-    const calm=!activeWaves()&&!G.spawnQ.length,victory=calm&&G.cleared>=FINAL_WAVE&&!G.won;
-    sfx(victory?'win':'clear');
+    const calm=!activeWaves()&&!G.spawnQ.length,victory=calm&&G.cleared>=FINAL_WAVE&&!G.won,flawless=calm&&!s.leaked;
+    // Overlapping waves get no banner: the next one is already on the road.
+    if(calm)setBanner({s:`CLEARED +${b}`,sub:flawless?'FLAWLESS':'',c:'#e3ad45',dur:1.0});
+    goldGain();
+    sfx(victory?'win':flawless?'flawless':'clear');
     if(calm){
       saveRun();
       if(victory){G.won=true;recordBest();saveRun();showEnd(true)}
@@ -523,16 +554,30 @@ function hurt(e,dmg,pierce){
 }
 function kill(e){
   e.dead=true;G.gold+=e.gold;
-  burst(e.x,e.y,e.d.color,e.d.boss?22:8,e.fly);
-  G.fx.push({k:'text',x:e.x,y:e.y-0.3,t:0,dur:0.8,s:`+${e.gold}`});
-  if(e.d.split){spawnEnemy('scout',e.w,e.dist+0.18,0.7);spawnEnemy('scout',e.w,e.dist-0.18,0.7)}
-  sfx(e.d.boss?'boom':'die');
+  const boss=!!e.d.boss;
+  if(boss){
+    // A real death: two rings, a big burst, a big '+gold', a board shake and its own cue.
+    for(const c of ['#e3ad45','#a487ff'])G.fx.push({k:'ring',x:e.x,y:e.y,t:0,dur:0.5,r:2.2,r0:0.3,c});
+    burst(e.x,e.y,e.d.color,36,e.fly,0.06,0.14);
+    G.fx.push({k:'text',x:e.x,y:e.y-0.3,t:0,dur:0.8,s:`+${e.gold}`,sz:1.7});
+    G.shakeT=0.25;bossGone(e);sfx('bossdown');
+  }else{
+    burst(e.x,e.y,e.d.color,8,e.fly);
+    G.fx.push({k:'text',x:e.x,y:e.y-0.3,t:0,dur:0.8,s:`+${e.gold}`});
+    if(e.d.split){spawnEnemy('scout',e.w,e.dist+0.18,0.7);spawnEnemy('scout',e.w,e.dist-0.18,0.7)}
+    sfx('die');
+  }
+  const before=G.banner;
   waveDone(e.w);
+  // 'WARLORD DOWN' wins over the 'CLEARED' banner this same kill may have raised; that one shows right after it.
+  if(boss){const cl=G.banner!==before?G.banner:null;setBanner({s:'WARLORD DOWN',c:'#e3ad45',dur:1.2});G.bannerNext=cl}
 }
 // The keep, in tiles: the road's last point, pulled onto the board.
 function keepPos(){const P=G.map.path.P,b=P[P.length-1];return {x:clamp(b.x,0.4,COLS-0.4),y:clamp(b.y,0.4,ROWS-0.4)}}
 function leak(e){
   e.dead=true;G.lives=Math.max(0,G.lives-e.d.lives);G.gateFlash=0.6;
+  if(G.W[e.w])G.W[e.w].leaked=(G.W[e.w].leaked||0)+1;
+  bossGone(e);
   if(S.vibe!==false){try{navigator.vibrate&&navigator.vibrate(e.d.boss?[60,40,60]:30)}catch(x){}}
   // A red vignette (real time, see frame()), the lives lost above the keep, and the HUD heart. A new leak refreshes the vignette; it never stacks.
   G.hurtDur=e.d.boss?0.8:0.45;G.hurtT=Math.max(G.hurtT||0,G.hurtDur);
@@ -542,10 +587,11 @@ function leak(e){
   if(G.lives<=0){gameOver();return}
   sfx('leak');waveDone(e.w);
 }
-function burst(x,y,color,n,fly){
+// n particles of radius r0-r1 tiles (half as many under reduced motion).
+function burst(x,y,color,n,fly,r0=0.04,r1=0.09){
   if(rm())n=Math.ceil(n/2);
   for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,s=0.6+Math.random()*1.6;
-    G.fx.push({k:'p',x,y:y-(fly?0.25:0),vx:Math.cos(a)*s,vy:Math.sin(a)*s,t:0,dur:0.35+Math.random()*0.3,c:color,r:0.04+Math.random()*0.05})}
+    G.fx.push({k:'p',x,y:y-(fly?0.25:0),vx:Math.cos(a)*s,vy:Math.sin(a)*s,t:0,dur:0.35+Math.random()*0.3,c:color,r:r0+Math.random()*(r1-r0)})}
 }
 
 /* ---------- simulation ---------- */
@@ -636,6 +682,12 @@ function step(dt){
   for(const f of G.fx){f.t+=dt;if(f.k==='p'){f.x+=f.vx*dt;f.y+=f.vy*dt;f.vx*=0.9;f.vy*=0.9}}
   G.fx=G.fx.filter(f=>f.t<f.dur);
   G.enemies=G.enemies.filter(e=>!e.dead);
+  if(G.banner){G.banner.t+=dt;if(G.banner.t>=G.banner.dur){G.banner=G.bannerNext;G.bannerNext=null;if(G.banner)G.banner.t=0}}
+  // Pinned Warlord bar: the white trail eases down to the fill. Its fade-in clock starts when a Warlord leaves the cave.
+  const bi=bossInfo();
+  if(!bi)G.bossBar=null;
+  else if(!G.bossBar)G.bossBar={frac:bi.frac,trail:bi.frac,t:bi.walk};
+  else{const b=G.bossBar;b.frac=bi.frac;b.t+=dt;b.trail+=(bi.frac-b.trail)*Math.min(1,dt*3)}
 }
 
 /* ---------- save/end ---------- */
@@ -802,7 +854,8 @@ function drawEnemy(g,e,s,time){
   }
   if(e.hitT>0){g.globalAlpha=a0*0.55;circle(g,x,y,r);g.fillStyle='#fff';g.fill();g.globalAlpha=a0}
   if(e.slow>0){g.strokeStyle='rgba(190,240,255,.9)';g.lineWidth=Math.max(1,s*0.05);circle(g,x,y,r+s*0.04);g.stroke()}
-  if(e.hp<e.max){
+  // A Warlord has no bar of its own: its HP is the pinned bar at the top of the board.
+  if(e.hp<e.max&&!d.boss){
     const w=Math.max(s*0.5,r*1.8),hh=Math.max(3,s*0.08),bx=x-w/2,by=y-r-hh-s*0.08;
     g.fillStyle='rgba(20,18,14,.8)';g.fillRect(bx-1,by-1,w+2,hh+2);
     const f=clamp(e.hp/e.max,0,1);g.fillStyle=f>0.5?'#9fd36a':f>0.25?'#e8c547':'#e3644f';g.fillRect(bx,by,w*f,hh);
@@ -810,8 +863,7 @@ function drawEnemy(g,e,s,time){
 }
 // The cave the road starts from, drawn under the enemies.
 function drawCave(g,s){
-  const a=G.map.path.P[0];
-  const ex=clamp(a.x,0.35,COLS-0.35)*s,ey=clamp(a.y,0.35,ROWS-0.35)*s;
+  const c=cavePos(),ex=c.x*s,ey=c.y*s;
   g.fillStyle='rgba(20,16,12,.75)';g.beginPath();g.ellipse(ex,ey,s*0.36,s*0.3,0,0,7);g.fill();
   g.strokeStyle='#5a4a35';g.lineWidth=Math.max(1,s*0.06);g.stroke();
 }
@@ -833,7 +885,12 @@ function render(time){
   if(!G||!bg)return;
   // Every use of time is decorative (spin, pulse, bob, flag), so reduced motion freezes the clock here, for every caller.
   const g=ctx,s=T,still=rm();if(still)time=0;
-  g.setTransform(DPR,0,0,DPR,0,0);
+  // Board shake after a Warlord dies: up to ±3px, a new random offset each frame, none under reduced motion.
+  // Taps use getBoundingClientRect, so they are unaffected. The edge the shake uncovers is filled dark.
+  const sh=!still&&G.shakeT>0?3*Math.min(1,G.shakeT/0.25):0;
+  if(sh){g.setTransform(1,0,0,1,0,0);g.fillStyle='#0e140d';g.fillRect(0,0,cv.width,cv.height)}
+  const ox=sh?(Math.random()*2-1)*sh:0,oy=sh?(Math.random()*2-1)*sh:0;
+  g.setTransform(DPR,0,0,DPR,ox*DPR,oy*DPR);
   g.drawImage(bg,0,0,COLS*s,ROWS*s);
   const showRange=(x,y,r,ok)=>{
     g.beginPath();g.arc(x*s,y*s,r*s,0,Math.PI*2);g.fillStyle=ok?'rgba(255,248,220,.13)':'rgba(227,100,79,.15)';g.fill();
@@ -884,7 +941,17 @@ function render(time){
   for(const f of G.fx){
     const k=f.t/f.dur;
     if(f.k==='p'){g.globalAlpha=1-k;g.fillStyle=f.c;circle(g,f.x*s,f.y*s,f.r*s*(1-k*0.5));g.fill();g.globalAlpha=1}
-    else if(f.k==='ring'){g.globalAlpha=(1-k)*0.85;g.strokeStyle=f.c;g.lineWidth=Math.max(1,s*0.08*(1-k));circle(g,f.x*s,f.y*s,f.r*s*(0.4+0.6*k));g.stroke();g.globalAlpha=1}
+    else if(f.k==='ring'){
+      // A ring with r0 grows from r0 to r tiles (held at r under reduced motion); without, from 0.4r to r.
+      const rad=f.r0!=null?(still?f.r:f.r0+(f.r-f.r0)*k):f.r*(0.4+0.6*k);
+      g.globalAlpha=(1-k)*0.85;g.strokeStyle=f.c;g.lineWidth=Math.max(1,s*0.08*(1-k));circle(g,f.x*s,f.y*s,rad*s);g.stroke();g.globalAlpha=1}
+    else if(f.k==='bossin'){
+      // Two dark rings out of the cave, the second a beat behind, growing from 0.4 to 1.4 tiles (fixed radii under reduced motion).
+      g.strokeStyle='#3e2356';
+      for(let i=0;i<2;i++){const q=clamp((k-i*0.25)/0.75,0,1);if(i&&k<0.25)continue;
+        g.globalAlpha=0.9*(still?1-k:1-q);g.lineWidth=Math.max(2,s*0.1*(1-q*0.5));circle(g,f.x*s,f.y*s,(still?0.9+0.5*i:0.4+q)*s);g.stroke()}
+      g.globalAlpha=1;
+    }
     else if(f.k==='tracer'){g.globalAlpha=1-k;g.strokeStyle='#ffe3b0';g.lineWidth=Math.max(1,s*0.06*(1-k));g.beginPath();g.moveTo(f.x1*s,f.y1*s);g.lineTo(f.x2*s,f.y2*s);g.stroke();g.globalAlpha=1}
     else if(f.k==='zap'){
       const rnd=mulberry32((f.seed|0)+(still?0:Math.floor(f.t*40)));
@@ -900,12 +967,52 @@ function render(time){
     else if(f.k==='text'){g.globalAlpha=1-k;g.font=`800 ${Math.round(s*0.34*(f.sz||1))}px ${FONT_DISPLAY}`;const ty=(still?f.y:f.y-k*0.5)*s;
       g.textAlign='center';g.lineWidth=3;g.strokeStyle='rgba(30,24,10,.8)';g.strokeText(f.s,f.x*s,ty);g.fillStyle=f.c||'#f3d27a';g.fillText(f.s,f.x*s,ty);g.globalAlpha=1}
   }
+  // The overlays below sit on the screen, not the board, so they hold still through a shake.
+  g.setTransform(DPR,0,0,DPR,0,0);
   // Leak vignette: a = 0.55*hurtT/hurtDur at the edges (the strips carry the 0.55).
   if(G.hurtT>0){
     g.globalAlpha=Math.min(1,G.hurtT/G.hurtDur);
     for(const [gr,x,y,w,h] of hurtStrips){g.fillStyle=gr;g.fillRect(x,y,w,h)}
     g.globalAlpha=1;
   }
+  if(G.banner)drawBanner(g,s,G.banner,still);
+  const bi=bossInfo();if(bi)drawBossBar(g,s,bi,G.bossBar);
+}
+// The banner: text only, centred at 38% of the board's height. It fades in over 0.15s, holds, fades out over the last 0.4s,
+// and rises 0.3 tile over its life (not under reduced motion). A line too wide for 8.6 tiles drops from 0.9T to 0.7T.
+function drawBanner(g,s,b,still){
+  const a=clamp(Math.min(b.t/0.15,(b.dur-b.t)/0.4),0,1);if(a<=0)return;
+  const cx=COLS*s/2,cy=ROWS*s*0.38-(still?0:0.3*s*clamp(b.t/b.dur,0,1));
+  g.save();g.globalAlpha=a;g.textAlign='center';g.textBaseline='middle';g.lineJoin='round';g.strokeStyle=INK;
+  let fs=0.9*s;g.font=`900 ${fs}px ${FONT_DISPLAY}`;
+  if(g.measureText(b.s).width>8.6*s){fs=0.7*s;g.font=`900 ${fs}px ${FONT_DISPLAY}`}
+  b.fs=fs;b.w=g.measureText(b.s).width;
+  g.lineWidth=4;g.strokeText(b.s,cx,cy);g.fillStyle=b.c;g.fillText(b.s,cx,cy);
+  if(b.sub){
+    // 0.32T, but never under 10px (T is 24 on a 320px phone), and narrowed to fit 8.6 tiles.
+    let ss=Math.max(10,0.32*s);g.font=`800 ${ss}px ${FONT_DISPLAY}`;
+    const sw=g.measureText(b.sub).width;if(sw>8.6*s){ss*=8.6*s/sw;g.font=`800 ${ss}px ${FONT_DISPLAY}`}
+    g.lineWidth=3;g.strokeText(b.sub,cx,cy+0.55*s);g.fillStyle='#f0e9d2';g.fillText(b.sub,cx,cy+0.55*s);
+  }
+  g.restore();
+}
+// The pinned Warlord bar across the top of the board: every living Warlord's HP summed, a white trail easing down behind the fill,
+// 'WARLORD' (or 'WARLORDS ×N') and the percentage just below it. It fades in over the first 0.3s after a Warlord leaves the cave.
+function drawBossBar(g,s,bi,bar){
+  const t=bar?bar.t:bi.walk,trail=bar?Math.max(bar.trail,bi.frac):bi.frac;
+  const x=6,y=6,w=COLS*s-12,h=Math.max(8,0.2*s);
+  g.save();g.globalAlpha=0.9*clamp(t/0.3,0,1);
+  rr(g,x,y,w,h,4);g.fillStyle='rgba(20,18,14,.85)';g.fill();
+  g.save();rr(g,x+1,y+1,w-2,h-2,3);g.clip();
+  g.fillStyle='#ffffff';g.fillRect(x+1,y+1,(w-2)*trail,h-2);
+  g.fillStyle='#a487ff';g.fillRect(x+1,y+1,(w-2)*bi.frac,h-2);
+  g.restore();
+  const fs=Math.max(9,Math.round(0.28*s)),ly=y+h+2+fs/2; // 0.28T, at least 9px so it stays legible on small boards
+  g.font=`800 ${fs}px ${FONT_DISPLAY}`;g.textBaseline='middle';g.lineJoin='round';g.lineWidth=3;g.strokeStyle='rgba(20,18,14,.85)';g.fillStyle='#f0e9d2';
+  const name=bi.n>=2?`WARLORDS ×${bi.n}`:'WARLORD',pct=`${Math.max(1,Math.round(bi.frac*100))}%`;
+  g.textAlign='left';g.strokeText(name,x+2,ly);g.fillText(name,x+2,ly);
+  g.textAlign='right';g.strokeText(pct,x+w-2,ly);g.fillText(pct,x+w-2,ly);
+  g.restore();
 }
 
 /* ---------- UI ---------- */
@@ -1225,6 +1332,8 @@ function frame(now){
   if(G&&G.sendArmAt&&now-G.sendArmAt>3000){G.sendArmAt=0;refreshPanel()}
   // The leak vignette fades in real time: the same at 1x and 3x, and still fading after game over or while paused.
   if(G&&G.hurtT>0)G.hurtT=Math.max(0,G.hurtT-dt);
+  // So does the Warlord shake, so it settles even if the run pauses (a wave-30 win) right after.
+  if(G&&G.shakeT>0)G.shakeT=Math.max(0,G.shakeT-dt);
   if(G){render(now/1000);updateHud(false)}
   requestAnimationFrame(frame);
 }
@@ -1242,7 +1351,7 @@ paintIcons();showMenu();requestAnimationFrame(frame);
 window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,refreshPanel,sellValue,hintTiles:i=>hintTiles(MAPS[i]),step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
   CFG,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
-  hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},render:t=>render(t??performance.now()/1000),keep:()=>keepPos(),rm,syncOv,toast,menuGuardLeft,spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
+  hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},render:t=>render(t??performance.now()/1000),keep:()=>keepPos(),cave:()=>cavePos(),bossInfo:()=>bossInfo(),rm,syncOv,toast,menuGuardLeft,spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
 
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){
   window.addEventListener('load',()=>{try{navigator.serviceWorker.register('sw.js').catch(()=>{})}catch(e){}});

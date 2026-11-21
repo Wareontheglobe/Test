@@ -604,7 +604,8 @@ let BASE;
     await sendWave(page);
     await page.waitForTimeout(250);
     const ts = await rect(page, '#toast'), cv = await rect(page, '#cv');
-    check((await text(page, '#toast')) === 'Wave 1' && (await page.$eval('#toast', el => el.classList.contains('show'))), 'wave 1 toast showing');
+    // Wave 1 now gets a banner on the board instead of a toast, so the wave-1 guard's warning is the toast still up here.
+    check((await G(page, () => window.__pw.G.wave === 1 && window.__pw.G.banner && window.__pw.G.banner.s === 'WAVE 1')) && (await text(page, '#toast')) === 'No towers yet. Enemies will walk straight in.' && (await page.$eval('#toast', el => el.classList.contains('show'))), 'wave 1 started with its banner; the guard toast is showing');
     check(ts.top > cv.top + cv.height / 2 && ts.bottom <= cv.bottom, `toast sits in the bottom half of the board (toast ${Math.round(ts.top)}-${Math.round(ts.bottom)}, board ${Math.round(cv.top)}-${Math.round(cv.bottom)})`);
     check(Math.abs(ts.bottom - (cv.bottom - 10)) <= 1 && ts.left >= cv.left && ts.right <= cv.right, 'toast is 10px above the board bottom and inside it horizontally');
     check(await page.$eval('#toast', (el, w) => parseFloat(el.style.maxWidth) === w - 24 && getComputedStyle(el).textOverflow === 'ellipsis', cv.width), 'toast max-width is board width - 24 with ellipsis');
@@ -947,12 +948,15 @@ let BASE;
     await page.waitForTimeout(80);
     let sine = await vals(page, 'sine');
     check(!(await hidden(page, '#endOv')) && (await text(page, '#endTitle')) === 'The road holds', 'victory screen after wave 30');
-    check(near(sine, 1047) && sine.filter(x => Math.abs(x - 523) < 0.5).length === 1, 'victory plays the win cue (523-1047) once, with no clear cue on top ' + JSON.stringify(sine.map(Math.round)));
+    // Wave 30's Warlords die here too; bossdown's own 523Hz note starts 0.25s in, so count only the notes that start with the cue (clock pinned at 60).
+    const s523 = (await recs(page, 'sine')).filter(r => Math.abs(r.v - 523) < 0.5 && Math.abs(r.t - 60) < 0.002).length;
+    check(near(sine, 1047) && s523 === 1, 'victory plays the win cue (523-1047) once, with no clear cue on top ' + JSON.stringify(sine.map(Math.round)));
     await page.click('#bEndMain');
     await clearRec(page, 70);
     const r31 = await killWaves(page, 1);
     sine = await vals(page, 'sine');
-    check(r31.wave === 31 && near(sine, 523) && near(sine, 659) && near(sine, 784) && !near(sine, 1047), 'an ordinary wave clear plays clear (523, 659, 784) ' + JSON.stringify(sine.map(Math.round)));
+    // Nothing leaked in wave 31, so it is a flawless clear (wave-banners-warlord): 'flawless' plays clear's notes and then 1047.
+    check(r31.wave === 31 && near(sine, 523) && near(sine, 659) && near(sine, 784) && near(sine, 1047), 'an ordinary wave cleared with no leaks plays flawless (523, 659, 784, 1047) ' + JSON.stringify(sine.map(Math.round)));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -1467,7 +1471,7 @@ let BASE;
     // The 'text' fx takes a colour (default #f3d27a) and a size (default 1) on the 0.34T font.
     const tx = await G(page, () => {
       const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
-      g.enemies = []; g.hurtT = 0; g.gateFlash = 0;
+      g.enemies = []; g.hurtT = 0; g.gateFlash = 0; g.banner = null; // the Warlord leak above raised a banner, drawn over fx at this height
       const count = (fx, want) => { g.fx = [fx]; W.render(0); const d = c.getImageData(Math.round(3 * T), Math.round(4 * T), Math.round(3 * T), Math.round(2 * T)).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - want[0]) < 30 && Math.abs(d[i + 1] - want[1]) < 30 && Math.abs(d[i + 2] - want[2]) < 30) n++; return n; };
       const one = count({ k: 'text', x: 4.5, y: 5.3, t: 0, dur: 1e9, s: '88', c: '#20ff20' }, [32, 255, 32]);
       const two = count({ k: 'text', x: 4.5, y: 5.3, t: 0, dur: 1e9, s: '88', c: '#20ff20', sz: 2 }, [32, 255, 32]);
@@ -1577,6 +1581,234 @@ let BASE;
     check((await hidden(page, '#endOv')) && (await G(page, () => !window.__pw.G.over)), 'a new run started during the hold does not show the old loss screen');
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
+  }
+
+  // ---------------------------------------------------------------
+  // wave-banners-warlord: a banner on the board for wave start, clear (FLAWLESS) and the Warlord; the Warlord's entrance, a pinned
+  // boss bar with a white damage trail, and a real boss death (rings, a big burst and '+gold', WARLORD DOWN, a board shake, bossdown).
+  // toastLog(page): from now on, record every text #toast shows in window.__toasts. clearAll(page): run the board to calm with hurtAll.
+  const toastLog = page => G(page, () => { window.__toasts = []; new MutationObserver(() => { const t = document.querySelector('#toast').textContent; if (t) window.__toasts.push(t); }).observe(document.querySelector('#toast'), { childList: true, characterData: true, subtree: true }); });
+  const toasts = page => G(page, () => window.__toasts);
+  const clearAll = page => G(page, () => { const W = window.__pw, g = W.G; let t = 0; while ((g.spawnQ.length || g.enemies.length) && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; } return { calm: !g.spawnQ.length && !Object.keys(g.W).length, banner: g.banner && { s: g.banner.s, sub: g.banner.sub, c: g.banner.c, dur: g.banner.dur } }; });
+
+  current = 'wave-banners-warlord: wave banners replace the wave toasts';
+  {
+    const { ctx, page } = await newPage(browser, { init: audioSpy });
+    await startMap(page, 1);
+    await G(page, () => { const W = window.__pw; W.G.running = false; W.build('bolt', 2, 2); });
+    await toastLog(page);
+    await page.click('#bWave');
+    const b1 = await G(page, () => window.__pw.G.banner);
+    check(b1 && b1.s === 'WAVE 1' && b1.sub === '' && b1.c === '#f0e9d2' && b1.dur === 1.3 && b1.t === 0, "after startWave(): G.banner is {s:'WAVE 1', sub:'', c:'#f0e9d2', dur:1.3} " + JSON.stringify(b1));
+    await page.waitForTimeout(150);
+    check(!(await toasts(page)).some(t => t.includes('Wave 1')) && !(await cls(page, '#toast', 'show')), 'no #toast text "Wave 1" appears ' + JSON.stringify(await toasts(page)));
+
+    // Wave 1 to calm with no leaks: CLEARED with FLAWLESS, the flawless cue, and the gold counter pops as the bonus pays.
+    await clearRec(page, 10);
+    const c1 = await clearAll(page);
+    const gain = await page.$eval('#sGold', el => ({ on: el.classList.contains('gain'), anim: getComputedStyle(el).animationName, shadow: getComputedStyle(el.querySelector('span')).textShadow }));
+    check(c1.calm && c1.banner && c1.banner.s.includes('CLEARED') && c1.banner.sub === 'FLAWLESS', 'wave 1 run to calm with no leaks: the banner includes CLEARED and has sub FLAWLESS ' + JSON.stringify(c1));
+    check(c1.banner.s === 'CLEARED +17' && c1.banner.c === '#e3ad45' && c1.banner.dur === 1, "it reads 'CLEARED +17' (the 15 + 2x1 bonus) in brass for 1.0s");
+    let sine = await vals(page, 'sine');
+    check(near(sine, 523) && near(sine, 1047), "a flawless clear plays 'flawless' (523 up to 1047Hz) instead of 'clear'");
+    check(gain.on && gain.anim === 'pop' && gain.shadow.includes('227, 173, 69'), "#sGold gets class 'gain' as the clear pays out: the pop keyframes (scale 1.15) and a brass glow " + JSON.stringify(gain));
+    await page.waitForTimeout(320);
+    check(!(await cls(page, '#sGold', 'gain')), "'gain' is gone after 250ms");
+    check(!(await toasts(page)).some(t => /cleared/i.test(t)), 'no "Wave N cleared" toast ' + JSON.stringify(await toasts(page)));
+
+    // One forced leak: CLEARED with no sub, and the plain clear cue.
+    await clearRec(page, 20);
+    const lk = await G(page, () => { const W = window.__pw, g = W.G; W.startWave(); W.spawn('grunt', g.map.path.len - 0.25); W.step(1 / 30); W.step(1 / 30); return { lives: g.lives, leaked: g.W[2] && g.W[2].leaked }; });
+    check(lk.lives === 19 && lk.leaked === 1, 'leak() counts the leak on its wave: G.W[2].leaked === 1 ' + JSON.stringify(lk));
+    const c2 = await clearAll(page);
+    check(c2.calm && c2.banner && c2.banner.s === 'CLEARED +19' && !c2.banner.sub, 'with one forced leak (spawn at path.len-0.25) the CLEARED banner has no sub ' + JSON.stringify(c2));
+    sine = await vals(page, 'sine');
+    check(near(sine, 784) && !near(sine, 1047), "a clear with a leak plays 'clear', not 'flawless'");
+
+    // Overlapping waves: wave 3 clears while wave 4 (called early) is on its way, so no banner and only the clear cue.
+    const ov = await G(page, () => { const W = window.__pw, g = W.G; W.startWave(); while (g.spawnQ.length) W.step(1 / 30); W.refreshPanel(); return { label: document.querySelector('#bWave').textContent, n: g.enemies.length, gold: g.gold }; });
+    check(ov.label === 'Call 4 early' && ov.n > 0, 'wave 3 is all on the road ' + JSON.stringify(ov));
+    await page.click('#bWave');
+    const early = await page.evaluate(() => ({ toast: document.querySelector('#toast').textContent, banner: window.__pw.G.banner.s, gain: document.querySelector('#sGold').classList.contains('gain'), gold: window.__pw.G.gold }));
+    check(early.toast.includes('Called early') && early.toast === 'Called early · +14 gold', "the #bWave early-call toast still includes 'Called early' (" + early.toast + ')');
+    check(early.banner === 'WAVE 4' && early.gain && early.gold === ov.gold + 14, "an early call also shows the WAVE 4 banner, and #sGold pops as the bonus pays " + JSON.stringify(early));
+    await clearRec(page, 30);
+    const o3 = await G(page, () => { const W = window.__pw, g = W.G; for (const e of g.enemies) if (e.w === 3) e.hp = 0.1; W.hurtAll(0.5); return { w3: !!g.W[3], w4: !!g.W[4], banner: g.banner.s, next: g.bannerNext }; });
+    check(!o3.w3 && o3.w4 && o3.banner === 'WAVE 4' && !o3.next, 'wave 3 cleared under wave 4: no CLEARED banner, the WAVE 4 banner stays ' + JSON.stringify(o3));
+    sine = await vals(page, 'sine');
+    check(near(sine, 784) && !near(sine, 1047), "and only the 'clear' cue plays, though nothing leaked");
+
+    // A boss wave: purple, with its warning as the sub line.
+    const b10 = await G(page, () => { const W = window.__pw, g = W.G; g.W = {}; g.spawnQ = []; g.enemies = []; g.wave = 9; W.startWave(); return g.banner; });
+    check(b10.s === 'WAVE 10' && b10.c === '#a487ff' && b10.sub === 'A Warlord is coming', "startWave at a boss wave: {s:'WAVE 10', sub:'A Warlord is coming', c:'#a487ff'} " + JSON.stringify(b10));
+    await page.waitForTimeout(100);
+    check(!(await toasts(page)).some(t => t.startsWith('Wave ')), 'no "Wave N", "Wave N cleared" or "a Warlord approaches" toast in the whole run ' + JSON.stringify(await toasts(page)));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'wave-banners-warlord: the Warlord arrives, and a pinned bar tracks it';
+  {
+    const { ctx, page } = await newPage(browser, { init: audioSpy });
+    await startMap(page, 1);
+    await G(page, () => { const g = window.__pw.G; g.running = false; g.wave = 9; g.cleared = 9; });
+    await clearRec(page, 40);
+    const a = await G(page, () => {
+      const W = window.__pw, g = W.G; W.startWave(); const t0 = g.time;
+      const pre = window.__rec.some(r => r.type === 'sawtooth' && Math.abs(r.v - 98) < 0.5);
+      let n = 0; while (!g.enemies.some(e => e.d.boss) && n++ < 1000) W.step(1 / 30);
+      return { pre, after: g.time - t0, banner: g.banner, fx: g.fx.filter(f => f.k === 'bossin'), cave: W.cave() };
+    });
+    check(!a.pre, 'no 98Hz when wave 10 starts');
+    check(Math.abs(a.after - 11.3) < 0.1, `the Warlord comes out ${a.after.toFixed(2)}s after wave 10 starts`);
+    check(a.banner && a.banner.s === 'THE WARLORD' && a.banner.sub === 'Costs 5 lives if it gets through' && a.banner.c === '#a487ff' && a.banner.dur === 1.4, "as it spawns the banner is {s:'THE WARLORD', sub:'Costs 5 lives if it gets through', c:'#a487ff', dur:1.4} " + JSON.stringify(a.banner));
+    check(a.fx.length === 1 && a.fx[0].x === a.cave.x && a.fx[0].y === a.cave.y && a.fx[0].dur === 0.6, "a 'bossin' fx at the cave, 0.6s long " + JSON.stringify(a.fx) + ' cave ' + JSON.stringify(a.cave));
+    const saw = await vals(page, 'sawtooth');
+    check(near(saw, 98) && near(saw, 147), 'an AudioParam setValueAtTime hook records 98Hz on boss spawn (the horn: 98 and 147Hz)');
+    const rings = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), x = cv.getContext('2d'), T = cv.width / W.COLS, c = W.cave(), f = g.fx.find(f => f.k === 'bossin');
+      const dark = () => { W.render(0); const d = x.getImageData(0, 0, Math.round(4 * T), Math.round(3 * T)).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 110 && d[i + 1] < 80 && d[i + 2] > d[i + 1] + 15) n++; return n; }; // dark purple: grass, road and cave all have blue < green
+      const on = dark(), t = f.t; f.t = 1; const off = dark(); f.t = t; return { on, off }; });
+    check(rings.on > 30 && rings.off < rings.on / 4, 'the arrival draws dark #3e2356 rings around the cave ' + JSON.stringify(rings));
+
+    // The pinned bar fades in over the first 0.3s after the Warlord leaves the cave.
+    const fadeIn = await G(page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), c = cv.getContext('2d'), DPR = cv.width / cv.getBoundingClientRect().width;
+      const px = () => { W.render(0); return [...c.getImageData(Math.round(cv.width / 2), Math.round(9 * DPR), 1, 1).data].slice(0, 3); };
+      const t0 = g.bossBar.t, p0 = px(); for (let i = 0; i < 10; i++) W.step(1 / 30); return { t0, p0, t1: g.bossBar.t, p1: px() }; });
+    check(fadeIn.t0 < 0.05 && !(fadeIn.p0[2] > fadeIn.p0[1] + 40), 'as the Warlord leaves the cave the pinned bar is still faint ' + JSON.stringify(fadeIn));
+    check(fadeIn.t1 >= 0.3 && fadeIn.p1[2] > fadeIn.p1[1] + 40, 'and 0.3s later it is fully in ' + JSON.stringify(fadeIn));
+
+    // The acceptance pixel, then the bar's extent: x 6 to board-6, top 6px, Math.max(8, 0.2T) tall.
+    const pix = await G(page, () => { const W = window.__pw; W.newGame(1); const g = W.G; g.running = true; g.wave = 10;
+      const cv = document.querySelector('#cv'), c = cv.getContext('2d'), DPR = cv.width / cv.getBoundingClientRect().width, T = cv.width / DPR / W.COLS, at = (x, y) => [...c.getImageData(Math.round(x * DPR), Math.round(y * DPR), 1, 1).data].slice(0, 3);
+      W.render(); const before = at(cv.width / DPR / 2, 9);
+      W.spawn('boss', 3); W.step(1 / 30); W.render();
+      const after = at(cv.width / DPR / 2, 9), h = Math.max(8, 0.2 * T), Wd = cv.width / DPR;
+      const r = { before, after, DPR, left: at(8, 9), right: at(Wd - 8, 9), outL: at(3, 9), top: at(Wd / 2, 4), bottom: at(Wd / 2, 6 + h - 2), below: at(Wd / 2, 6 + h + 1.5) };
+      g.running = false; return r; });
+    const purple = p => p[2] > p[1] + 40;
+    check(purple(pix.after), `newGame(1); G.running=true; G.wave=10; spawn('boss',3); step(1/30); render(): canvas pixel (cv.width/2, 9*DPR) is purple-ish ${JSON.stringify(pix.after)}`);
+    check(pix.before[1] > pix.before[2], 'with no Warlord that pixel is grass ' + JSON.stringify(pix.before));
+    check(purple(pix.left) && purple(pix.right) && purple(pix.bottom) && !purple(pix.outL) && !purple(pix.top) && !purple(pix.below), 'the bar runs from x 6 to board-6, from y 6 down Math.max(8, 0.2T) ' + JSON.stringify(pix));
+
+    // The white trail lags the fill.
+    const tr = await G(page, () => { const W = window.__pw, g = W.G, b = g.enemies.find(e => e.d.boss); const t0 = g.bossBar.trail; b.hp = b.max * 0.5; W.step(1 / 30); const t1 = g.bossBar.trail;
+      const cv = document.querySelector('#cv'), c = cv.getContext('2d'), DPR = cv.width / cv.getBoundingClientRect().width, Wd = cv.width / DPR; W.render(0);
+      const at = f => [...c.getImageData(Math.round((7 + (Wd - 14) * f) * DPR), Math.round(9 * DPR), 1, 1).data].slice(0, 3); const white = at(0.75), fill = at(0.25);
+      for (let i = 0; i < 45; i++) W.step(1 / 30); return { t0, t1, t45: g.bossBar.trail, frac: g.bossBar.frac, white, fill }; });
+    check(tr.t0 === 1 && tr.t1 > 0.5 && tr.t1 < 1, `set boss hp to 50%: after one step G.bossBar.trail is ${tr.t1.toFixed(3)} (> 0.5)`);
+    check(Math.abs(tr.t45 - 0.5) < 0.02 && tr.frac === 0.5, `after 45 more steps |trail-0.5| < 0.02 (${tr.t45.toFixed(4)})`);
+    check(tr.white.every(v => v > 200) && purple(tr.fill), 'the trail is drawn white beyond the purple fill ' + JSON.stringify(tr));
+
+    // Two Warlords, kill one: the fallen one still counts until its wave ends, so the fill never jumps up.
+    const two = await G(page, () => { const W = window.__pw; W.newGame(1); const g = W.G; g.wave = 20; W.spawn('boss', 3); W.spawn('boss', 2.5); W.step(1 / 30);
+      const [a, b] = g.enemies; a.hp = 1; b.hp = b.max * 0.8; W.step(1 / 30);
+      const f0 = g.bossBar.frac, n0 = W.bossInfo().n; W.hurtAll(2); W.step(1 / 30);
+      const f1 = g.bossBar.frac, n1 = W.bossInfo().n, alive = g.enemies.filter(e => e.d.boss).length;
+      W.hurtAll(1e9); W.step(1 / 30);
+      return { f0, f1, n0, n1, alive, after: g.bossBar, w20: !!g.W[20] }; });
+    check(two.alive === 1 && two.f1 <= two.f0, `two bosses, kill one: the bar fill fraction does not rise above its previous value (${two.f0.toFixed(3)} -> ${two.f1.toFixed(3)})`);
+    check(two.f1 < 0.45 && two.n0 === 2 && two.n1 === 2, 'the fallen one still counts until its wave ends, and the label still says WARLORDS ×2 ' + JSON.stringify(two));
+    check(two.after === null && !two.w20, 'once the last Warlord falls and the wave ends, the bar is gone');
+
+    // A hurt Warlord draws no bar over its head; a hurt grunt still does.
+    const own = await G(page, () => { const W = window.__pw; W.newGame(1); const g = W.G; g.wave = 10; const cv = document.querySelector('#cv'), c = cv.getContext('2d'), T = cv.width / W.COLS;
+      const above = e => { W.render(0); const d = c.getImageData(Math.round((e.x - 0.6) * T), Math.round((e.y - 0.9) * T), Math.round(1.2 * T), Math.round(0.75 * T)).data; let h = 2166136261; for (let i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 16777619); } return h >>> 0; };
+      W.spawn('boss', 5); const b = g.enemies[0]; const full = above(b); b.hp = b.max * 0.5; const half = above(b);
+      g.enemies = []; g.fx = []; g.wave = 1; W.spawn('grunt', 5); const gr = g.enemies[0]; const gf = above(gr); gr.hp = gr.max * 0.5; const gh = above(gr);
+      return { boss: full === half, grunt: gf !== gh }; });
+    check(own.boss && own.grunt, 'drawEnemy skips its own overhead bar for a hurt Warlord; a hurt grunt still has one ' + JSON.stringify(own));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'wave-banners-warlord: a real Warlord death';
+  {
+    const { ctx, page } = await newPage(browser, { init: audioSpy });
+    await startMap(page, 1);
+    await G(page, () => { const W = window.__pw, g = W.G; g.running = false; g.wave = 10; W.spawn('boss', 3); W.step(1 / 30); g.fx = []; window.__mr = Math.random; });
+    await clearRec(page, 70);
+    const d = await G(page, () => { const W = window.__pw, g = W.G, e = g.enemies[0]; W.hurtAll(1e9);
+      return { rings: g.fx.filter(f => f.k === 'ring'), texts: g.fx.filter(f => f.k === 'text'), parts: g.fx.filter(f => f.k === 'p'), banner: g.banner, next: g.bannerNext, shakeT: g.shakeT, gold: e.gold, color: e.d.color }; });
+    check(d.rings.filter(r => r.r >= 2).length === 2, 'hurtAll(1e9) on a boss: G.fx has 2 ring entries with r>=2 ' + JSON.stringify(d.rings));
+    check(d.rings.map(r => r.c).sort().join() === '#a487ff,#e3ad45' && d.rings.every(r => r.r === 2.2 && r.r0 === 0.3 && r.dur === 0.5), 'the rings are #e3ad45 and #a487ff, r 2.2, growing from 0.3 tiles over 0.5s');
+    check(d.texts.some(t => t.sz >= 1.6 && t.s === '+' + d.gold), `and a '+${d.gold}' text with sz>=1.6 ` + JSON.stringify(d.texts));
+    check(d.parts.length === 36 && d.parts.every(p => p.r >= 0.06 && p.r <= 0.14 && p.c === d.color), 'a burst of 36 particles of radius 0.06-0.14 tile (' + d.parts.length + ')');
+    check(d.banner.s === 'WARLORD DOWN' && d.banner.c === '#e3ad45' && d.banner.dur === 1.2, "G.banner.s === 'WARLORD DOWN' " + JSON.stringify(d.banner));
+    check(d.shakeT === 0.25, 'G.shakeT === 0.25');
+    const tri = await vals(page, 'triangle'), filt = await G(page, () => window.__filt.map(f => f.frequency.value));
+    check(near(tri, 392) && near(tri, 98) && filt.includes(400) && !filt.some(f => f > 600 && f < 800), "sfx('bossdown') plays instead of 'boom' (filters " + JSON.stringify(filt) + ')');
+    check(d.next && d.next.s === 'CLEARED +35' && d.next.sub === 'FLAWLESS', 'the CLEARED banner raised by the same kill waits behind it ' + JSON.stringify(d.next));
+    const seq = await G(page, () => { const W = window.__pw, g = W.G, out = []; for (let i = 0; i < 40; i++) { W.step(1 / 30); out.push(g.banner ? g.banner.s : '-'); } return out; });
+    check(seq[33] === 'WARLORD DOWN' && seq[38] === 'CLEARED +35', 'WARLORD DOWN holds for 1.2s, then CLEARED +35 follows ' + JSON.stringify([seq[33], seq[38]]));
+
+    // The shake: a random offset of up to 3px each frame while shakeT lasts, none under reduced motion. It decays in real time.
+    // shaken(st): render one tile with Math.random pinned at 0, then at 0.999, with G.shakeT = st; true when the two frames differ.
+    const shaken = async (st = 0.25) => { const one = rnd => G(page, ([st, rnd]) => { window.__pw.G.shakeT = st; Math.random = () => rnd; }, [st, rnd]);
+      await one(0); const a = await tileHash(page, 4, 7, 0); await one(0.999); const b = await tileHash(page, 4, 7, 0); await G(page, () => { Math.random = window.__mr; }); return a !== b; };
+    check(await shaken(), 'render shakes the board: two random draws give two different frames');
+    check(!(await shaken(0)), 'with shakeT at 0 the board holds still');
+    await G(page, () => { window.__pw.G.shakeT = 0.25; });
+    await tapTile(page, 4, 5);
+    check(JSON.stringify(await G(page, () => window.__pw.G.sel)) === '{"c":4,"r":5}', 'a tap during the shake picks the tile under the finger');
+    await page.waitForTimeout(400);
+    check((await G(page, () => window.__pw.G.shakeT)) === 0, 'shakeT runs out in real time (0.25s), with the run not stepping');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    check(!(await shaken()), 'reduced motion: no shake');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'wave-banners-warlord: drawing the banner';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    // spot(b, c): render with banner b (or none) and find the pixels within 30 of colour c: how many, their centre in tiles, and their x extent.
+    const spot = (b, c) => G(page, ([b, c]) => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), x = cv.getContext('2d'), T = cv.width / W.COLS;
+      g.running = false; g.enemies = []; g.fx = []; g.hintTiles = []; g.banner = b; W.render(0);
+      const d = x.getImageData(0, 0, cv.width, cv.height).data; let n = 0, sx = 0, sy = 0, minX = 1e9, maxX = -1;
+      for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - c[0]) < 30 && Math.abs(d[i + 1] - c[1]) < 30 && Math.abs(d[i + 2] - c[2]) < 30) { const p = i / 4, px = p % cv.width; n++; sx += px; sy += Math.floor(p / cv.width); minX = Math.min(minX, px); maxX = Math.max(maxX, px); }
+      return { n, x: n ? sx / n / T : 0, y: n ? sy / n / T : 0, minX: minX / T, maxX: maxX / T }; }, [b, c]);
+    const GRN = [32, 255, 32], INKY = [240, 233, 210], ban = (t, sub = '') => ({ s: 'WAVE 3', sub, c: '#20ff20', t, dur: 1.3 });
+    const none = await spot(null, GRN), hold = await spot(ban(0.3), GRN), late = await spot(ban(0.85), GRN);
+    check(none.n === 0 && hold.n > 200, 'a banner draws its main line in its colour c ' + JSON.stringify({ none: none.n, hold: hold.n }));
+    const y0 = 14 * 0.38;
+    check(Math.abs(hold.x - 4.5) < 0.15 && Math.abs(hold.y - (y0 - 0.3 * 0.3 / 1.3)) < 0.25, `centred on the board at 38% of its height (centre ${hold.x.toFixed(2)}, ${hold.y.toFixed(2)} tiles)`);
+    check(Math.abs(late.n - hold.n) < hold.n * 0.15 && hold.y - late.y > 0.08 && hold.y - late.y < 0.18, `it holds, and rises 0.3 tile over its life (${(hold.y - late.y).toFixed(3)} tiles from t 0.3 to 0.85)`);
+    const fadeIn = await spot(ban(0.05), GRN), fadeOut = await spot(ban(1.2), GRN), gone = await spot(ban(1.3), GRN);
+    check(fadeIn.n < hold.n * 0.1 && fadeOut.n < hold.n * 0.1 && gone.n === 0, 'it fades in over 0.15s and out over the last 0.4s ' + JSON.stringify({ fadeIn: fadeIn.n, fadeOut: fadeOut.n, gone: gone.n }));
+    const noSub = await spot(ban(0.3), INKY), sub = await spot(ban(0.3, 'FLAWLESS'), INKY);
+    check(noSub.n === 0 && sub.n > 20 && Math.abs(sub.x - 4.5) < 0.15 && Math.abs(sub.y - (hold.y + 0.55)) < 0.2, `the sub line sits 0.55T below the main line (${(sub.y - hold.y).toFixed(2)} tiles)`);
+    // Text only on the canvas: a tap where the banner is still picks the tile under it.
+    await G(page, () => { window.__pw.G.banner = { s: 'WAVE 3', sub: 'FLAWLESS', c: '#e3ad45', t: 0.3, dur: 1e9 }; });
+    await tapTile(page, 4, 5);
+    check(JSON.stringify(await G(page, () => window.__pw.G.sel)) === '{"c":4,"r":5}', 'a tap on the banner picks the grass tile under it');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const rm1 = await spot(ban(0.3), GRN), rm2 = await spot(ban(0.85), GRN);
+    check(rm1.y === rm2.y && Math.abs(rm1.y - y0) < 0.25, `reduced motion: no rise (${rm1.y.toFixed(3)} / ${rm2.y.toFixed(3)} tiles)`);
+    // Under reduced motion the gold counter only changes colour.
+    await G(page, () => { const W = window.__pw, g = W.G; g.W = { 9: { rem: 0, alive: 1 } }; g.spawnQ = []; W.startWave(); });
+    const rmGain = await page.$eval('#sGold', el => { const cs = getComputedStyle(el), sp = getComputedStyle(el.querySelector('span')); return { on: el.classList.contains('gain'), anim: cs.animationName, color: sp.color, shadow: sp.textShadow }; });
+    check(rmGain.on && rmGain.anim === 'none' && rmGain.color === 'rgb(227, 173, 69)' && rmGain.shadow === 'none', "reduced motion: 'gain' is colour only " + JSON.stringify(rmGain));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+
+    // 320px: 'WARLORD DOWN' at 0.9T fits inside 9T; a line wider than 8.6T drops to 0.7T.
+    const r = await newPage(browser, { viewport: { width: 320, height: 568 } });
+    await startMap(r.page, 1);
+    const wd = await G(r.page, () => { const W = window.__pw, g = W.G, T = document.querySelector('#cv').width / W.COLS; g.running = false;
+      const fit = s => { g.banner = { s, sub: '', c: '#e3ad45', t: 0.5, dur: 1.2 }; W.render(0); return { fs: g.banner.fs / T, w: g.banner.w / T }; };
+      return { T, down: fit('WARLORD DOWN'), the: fit('THE WARLORD'), long: fit('WARLORD DOWN WARLORD') }; });
+    check(wd.T <= 26 && Math.abs(wd.down.fs - 0.9) < 1e-9 && wd.down.w <= 8.6 && wd.the.w <= 8.6, `320px (T=${wd.T}): 'WARLORD DOWN' at 0.9T is ${wd.down.w.toFixed(2)} tiles wide, inside 8.6T ` + JSON.stringify(wd));
+    check(Math.abs(wd.long.fs - 0.7) < 1e-9, 'a line wider than 8.6T at 0.9T falls back to 0.7T ' + JSON.stringify(wd.long));
+    const span = await G(r.page, () => { const W = window.__pw, g = W.G, cv = document.querySelector('#cv'), x = cv.getContext('2d'), T = cv.width / W.COLS;
+      g.banner = { s: 'WARLORD DOWN', sub: 'Costs 5 lives if it gets through', c: '#20ff20', t: 0.5, dur: 1.2 }; W.render(0);
+      const d = x.getImageData(0, 0, cv.width, cv.height).data; let minX = 1e9, maxX = -1;
+      for (let i = 0; i < d.length; i += 4) if (Math.abs(d[i] - 32) < 30 && Math.abs(d[i + 1] - 255) < 30 && Math.abs(d[i + 2] - 32) < 30) { const px = (i / 4) % cv.width; minX = Math.min(minX, px); maxX = Math.max(maxX, px); }
+      return { minX: minX / T, maxX: maxX / T }; });
+    check(span.minX > 0.1 && span.maxX < 8.9, `320px: the WARLORD DOWN line is drawn inside the board (${span.minX.toFixed(2)}-${span.maxX.toFixed(2)} tiles)`);
+    check(r.page.errors.length === 0, 'no console errors: ' + r.page.errors.join('|'));
+    await r.ctx.close();
   }
 
   // ---------------------------------------------------------------
