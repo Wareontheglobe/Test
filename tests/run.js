@@ -716,6 +716,204 @@ let BASE;
   }
 
   // ---------------------------------------------------------------
+  // sound-pass: master bus with limiter, pitch jitter, kill combo, named cues.
+  // audioSpy (an init script) records every AudioParam.setValueAtTime as {v, t, type} (type is the owning oscillator's, '' for gains),
+  // counts compressors and oscillators, lists what connects to the speakers, keeps every filter in __filt,
+  // and lets a test pin the audio clock with window.__at so throttle and combo timing are deterministic.
+  const audioSpy = () => {
+    window.__rec = []; window.__comp = 0; window.__osc = 0; window.__dest = []; window.__filt = [];
+    const own = new WeakMap();
+    const co = BaseAudioContext.prototype.createOscillator;
+    BaseAudioContext.prototype.createOscillator = function () { const o = co.call(this); own.set(o.frequency, o); window.__osc++; return o; };
+    const cb = BaseAudioContext.prototype.createBiquadFilter;
+    BaseAudioContext.prototype.createBiquadFilter = function () { const f = cb.call(this); window.__filt.push(f); return f; };
+    const sv = AudioParam.prototype.setValueAtTime;
+    AudioParam.prototype.setValueAtTime = function (v, t) { const o = own.get(this); window.__rec.push({ v, t, type: o ? o.type : '' }); return sv.call(this, v, t); };
+    const cd = AudioContext.prototype.createDynamicsCompressor;
+    AudioContext.prototype.createDynamicsCompressor = function () { window.__comp++; return cd.call(this); };
+    const cn = AudioNode.prototype.connect;
+    AudioNode.prototype.connect = function (d, ...r) { if (d instanceof AudioDestinationNode) window.__dest.push(this.constructor.name); return cn.call(this, d, ...r); };
+    const ct = Object.getOwnPropertyDescriptor(BaseAudioContext.prototype, 'currentTime');
+    Object.defineProperty(BaseAudioContext.prototype, 'currentTime', { configurable: true, get() { return window.__at != null ? window.__at : ct.get.call(this); } });
+  };
+  const recs = (page, type) => G(page, type => window.__rec.filter(r => type == null || r.type === type), type);
+  const vals = (page, type) => recs(page, type).then(rs => rs.map(r => r.v));
+  const near = (list, f) => list.some(v => Math.abs(v - f) < 0.5);
+  // clearRec(page, at) also pins the audio clock at `at`, so each phase of a test starts clear of the per-cue throttle.
+  const clearRec = (page, at) => G(page, at => { window.__rec = []; window.__filt = []; if (at != null) window.__at = at; }, at);
+  // Play one cue at a pinned clock time and return what it scheduled, with times relative to the cue.
+  const cue = (page, name, at) => G(page, ([name, at]) => { window.__rec = []; window.__filt = []; window.__at = at; window.__pw.sfx(name); return { rec: window.__rec.map(r => ({ v: r.v, dt: +(r.t - at).toFixed(3), type: r.type })), filt: window.__filt.map(f => ({ type: f.type, f: f.frequency.value })) }; }, [name, at]);
+  const startsAt = (c, type, f, dt) => c.rec.some(r => r.type === type && Math.abs(r.v - f) < 0.5 && Math.abs(r.dt - dt) < 0.002);
+
+  current = 'sound-pass: master bus and limiter';
+  {
+    const { ctx, page } = await newPage(browser, { init: audioSpy });
+    check((await G(page, () => window.__comp)) === 0 && (await G(page, () => window.__pw.AU.ctx)) === null, 'no audio context before the first tap');
+    await startMap(page, 1);
+    check((await G(page, () => window.__comp)) === 1, 'tapping a road card creates exactly one compressor (' + (await G(page, () => window.__comp)) + ')');
+    const bus = await G(page, () => { const A = window.__pw.AU, k = A.comp; return { gain: A.master.gain.value, th: k.threshold.value, knee: k.knee.value, ratio: k.ratio.value, atk: k.attack.value, rel: k.release.value }; });
+    const close = (a, b) => Math.abs(a - b) < 1e-5;
+    check(close(bus.gain, 0.8) && close(bus.th, -14) && close(bus.knee, 6) && close(bus.ratio, 4) && close(bus.atk, 0.003) && close(bus.rel, 0.15), 'master gain 0.8 into a compressor at -14dB, knee 6, ratio 4, attack 0.003, release 0.15 ' + JSON.stringify(bus));
+    // Every tower type fires and things die and leak through one wave; only the compressor may reach the speakers.
+    await G(page, () => { const W = window.__pw; W.G.gold = 2000; [['bolt', 2, 2], ['mortar', 4, 2], ['frost', 2, 5], ['arc', 4, 5], ['long', 3, 9]].forEach(([k, c, r]) => W.build(k, c, r)); });
+    await page.click('#bWave');
+    // The audio clock follows the game clock here, so the 0.06s throttle lets a realistic number of voices through.
+    await G(page, () => { const W = window.__pw, g = W.G; g.running = false; let t = 0; while ((g.spawnQ.length || g.enemies.length) && !g.over && t < 400) { W.step(1 / 30); t += 1 / 30; window.__at = 1 + t; } g.running = true; });
+    await page.click('#bPause'); await page.click('#bMenu'); await startMap(page, 0); await page.click('#bWave');
+    const wiring = await G(page, () => ({ osc: window.__osc, dest: window.__dest, comp: window.__comp }));
+    check(wiring.osc > 20, `a wave made plenty of voices (${wiring.osc})`);
+    check(wiring.dest.length === 1 && wiring.dest[0] === 'DynamicsCompressorNode', 'only the compressor connects to the speakers; every voice goes through the master bus ' + JSON.stringify(wiring.dest.slice(0, 5)));
+    check(wiring.comp === 1, 'more taps, a second road and a new wave make no second compressor (' + wiring.comp + ')');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'sound-pass: upgrade, leak, game over and victory cues';
+  {
+    const { ctx, page } = await newPage(browser, { init: audioSpy });
+    await startMap(page, 1);
+    await clearRec(page, 10);
+    await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    let v = await vals(page, 'sine');
+    check((await G(page, () => window.__pw.G.towers.length)) === 1 && near(v, 520), 'building a bolt plays the build cue (520Hz)');
+    check(!near(await vals(page), 1175), 'building a bolt records no 1175Hz value');
+    await tapTile(page, 2, 2);
+    await clearRec(page, 20);
+    await page.click('#bUp');
+    v = await vals(page);
+    check((await G(page, () => window.__pw.G.towers[0].level)) === 2 && near(v, 1175), 'upgrading via #bUp records 1175 (up2)');
+    check(near(v, 523) && near(v, 784) && !near(v, 1568) && !near(v, 520), 'level 2 plays up2 (523, 784, 1175), not up3 and not the build cue ' + JSON.stringify(v.map(Math.round)));
+    await clearRec(page, 30);
+    await page.click('#bUp');
+    v = await vals(page);
+    check((await G(page, () => window.__pw.G.towers[0].level)) === 3 && near(v, 1568) && near(v, 1175), 'upgrading to level 3 records 1568 (up3)');
+
+    // A leak that leaves lives still plays the leak tone; the leak that ends the run plays only the lose cue.
+    await clearRec(page, 40);
+    const lives = await G(page, () => { const W = window.__pw, g = W.G; g.lives = 5; W.spawn('grunt', g.map.path.len - 0.3); for (let i = 0; i < 30; i++) W.step(1 / 30); return g.lives; });
+    check(lives === 4 && near(await vals(page, 'sawtooth'), 180), 'a leak that leaves lives plays the 180Hz leak tone');
+    await clearRec(page, 50);
+    const over = await G(page, () => { const W = window.__pw, g = W.G; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); for (let i = 0; i < 30 && !g.over; i++) W.step(1 / 30); return g.over; });
+    const endShown = !(await hidden(page, '#endOv'));
+    v = await vals(page);
+    const tri = await vals(page, 'triangle');
+    check(over && endShown && near(tri, 262) && near(tri, 311) && near(tri, 392), 'game over records 262 (lose cue: 392, 311, 262) when the end overlay shows');
+    check(!near(v, 180), 'no 180Hz leak tone at the moment of the end overlay ' + JSON.stringify(v.map(Math.round)));
+
+    // Victory plays 'win' in place of 'clear'; an ordinary clear plays 'clear'.
+    await page.click('#bEndMain');
+    await G(page, () => { const g = window.__pw.G; g.wave = 29; g.cleared = 29; });
+    await clearRec(page, 60);
+    await G(page, () => { const W = window.__pw; W.startWave(); let t = 0; while ((W.G.spawnQ.length || W.G.enemies.length) && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; } });
+    await page.waitForTimeout(80);
+    let sine = await vals(page, 'sine');
+    check(!(await hidden(page, '#endOv')) && (await text(page, '#endTitle')) === 'The road holds', 'victory screen after wave 30');
+    check(near(sine, 1047) && sine.filter(x => Math.abs(x - 523) < 0.5).length === 1, 'victory plays the win cue (523-1047) once, with no clear cue on top ' + JSON.stringify(sine.map(Math.round)));
+    await page.click('#bEndMain');
+    await clearRec(page, 70);
+    const r31 = await killWaves(page, 1);
+    sine = await vals(page, 'sine');
+    check(r31.wave === 31 && near(sine, 523) && near(sine, 659) && near(sine, 784) && !near(sine, 1047), 'an ordinary wave clear plays clear (523, 659, 784) ' + JSON.stringify(sine.map(Math.round)));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'sound-pass: pitch jitter, kill combo and throttle';
+  {
+    const { ctx, page } = await newPage(browser, { init: audioSpy });
+    await startMap(page, 1);
+    // Single-enemy boards: one grunt, killed by hurtAll. The wave stays open (rem 99) so no clear cue plays.
+    const killAt = (at, rnd) => G(page, ([at, rnd]) => { const W = window.__pw, g = W.G; window.__at = at; Math.random = () => rnd; W.spawn('grunt', 3); W.hurtAll(1e9); return { combo: W.AU.combo, n: g.enemies.length }; }, [at, rnd]);
+    const dieStarts = async () => (await recs(page, 'triangle')).filter(r => r.v >= 380 && r.v <= 760).map(r => r.v);
+    await G(page, () => { const g = window.__pw.G; g.running = false; g.enemies = []; g.towers = []; g.projs = []; g.wave = 1; g.W = { 1: { rem: 99, alive: 0 } }; });
+    await clearRec(page);
+    for (let i = 0; i < 4; i++) await killAt(10 + i * 0.1, 0.5);
+    let d = await dieStarts();
+    check(d.length === 4 && d.every((x, i) => i === 0 || x > d[i - 1]), 'four kills 100ms apart: die start frequencies strictly increase ' + JSON.stringify(d.map(x => +x.toFixed(1))));
+    check(Math.abs(d[0] - 420) < 0.5 && Math.abs(d[3] - 420 * Math.pow(1.0595, 3)) < 0.5 && (await G(page, () => window.__pw.AU.combo)) === 3, 'each kill in the combo is one semitone (x1.0595) up from 420Hz');
+    await clearRec(page);
+    await killAt(10.3 + 0.4, 0.5);
+    d = await dieStarts();
+    check(d.length === 1 && Math.abs(d[0] - 420) < 0.5 && (await G(page, () => window.__pw.AU.combo)) === 0, 'a kill 0.4s after the last resets the combo to 420Hz');
+    await clearRec(page);
+    for (let i = 1; i <= 12; i++) await killAt(10.7 + i * 0.1, 0.5);
+    d = await dieStarts();
+    check((await G(page, () => window.__pw.AU.combo)) === 8 && Math.abs(Math.max(...d) - 420 * Math.pow(1.0595, 8)) < 0.5, 'the combo stops climbing at 8 semitones (' + Math.round(Math.max(...d)) + 'Hz)');
+    await clearRec(page);
+    await killAt(30, 0.5); await killAt(30.03, 0.5); await killAt(30.07, 0.5);
+    check((await dieStarts()).length === 2, 'die is throttled to one voice per 0.06s');
+
+    // Jitter: j = 0.94 + random*0.12 on bolt, frost and die, and on the boom filter.
+    let c = await cue(page, 'bolt', 40); const lo = c.rec.find(r => r.type === 'square' && r.dt === 0);
+    await G(page, () => { Math.random = () => 0; });
+    c = await cue(page, 'bolt', 41); const b0 = c.rec.find(r => r.type === 'square' && r.dt === 0).v;
+    const f0 = (await cue(page, 'frost', 42)).rec.find(r => r.type === 'sine' && r.dt === 0).v;
+    const boom0 = await cue(page, 'boom', 43);
+    const die0 = (await killAt(44, 0)) && (await dieStarts()).pop();
+    await G(page, () => { Math.random = () => 0.999; });
+    const b1 = (await cue(page, 'bolt', 45)).rec.find(r => r.type === 'square' && r.dt === 0).v;
+    const f1 = (await cue(page, 'frost', 46)).rec.find(r => r.type === 'sine' && r.dt === 0).v;
+    const boom1 = await cue(page, 'boom', 47);
+    await clearRec(page);
+    const die1 = (await killAt(48, 0.999)) && (await dieStarts()).pop();
+    check(lo && Math.abs(lo.v - 900) < 0.5 && Math.abs(b0 - 846) < 0.5 && Math.abs(b1 - 900 * (0.94 + 0.999 * 0.12)) < 0.5, `bolt pitch is jittered 0.94-1.06 (${Math.round(b0)} / ${Math.round(lo.v)} / ${Math.round(b1)}Hz)`);
+    check(Math.abs(f0 - 1410) < 0.5 && Math.abs(f1 - 1500 * (0.94 + 0.999 * 0.12)) < 0.5, `frost pitch is jittered (${Math.round(f0)} / ${Math.round(f1)}Hz)`);
+    check(Math.abs(die0 - 420 * 0.94) < 0.5 && Math.abs(die1 - 420 * (0.94 + 0.999 * 0.12)) < 0.5, `die pitch is jittered (${Math.round(die0)} / ${Math.round(die1)}Hz)`);
+    check(boom0.filt.length === 1 && Math.abs(boom0.filt[0].f - 658) < 0.5 && Math.abs(boom1.filt[0].f - 700 * (0.94 + 0.999 * 0.12)) < 0.5, `boom filter is jittered around 700Hz (${Math.round(boom0.filt[0].f)} / ${Math.round(boom1.filt[0].f)}Hz)`);
+    check(boom0.rec.some(r => r.type === '' && Math.abs(r.v - 0.10) < 1e-9) && !boom0.rec.some(r => Math.abs(r.v - 0.16) < 1e-9), 'boom is quieter: volume 0.10 (was 0.16)');
+
+    // Throttle: 0.06s per cue, 0.12s for tink.
+    const plays = async (name, ats, type, f) => { const p = []; for (const at of ats) { const k = await cue(page, name, at); p.push(k.rec.some(r => r.type === type && Math.abs(r.v - f) < 0.5 && r.dt === 0) ? 1 : 0); } return p.join(''); };
+    const tk = await plays('tink', [60, 60.08, 60.13], 'square', 2600);
+    check(tk === '101', 'tink is throttled to one per 0.12s: 60 plays, 60.08 dropped, 60.13 plays (' + tk + ')');
+    const nk = await plays('no', [70, 70.03, 70.07], 'square', 160);
+    check(nk === '101', 'other cues keep the 0.06s throttle: 70 plays, 70.03 dropped, 70.07 plays (' + nk + ')');
+    check((await G(page, () => window.__pw.AU.gap.tink)) === 0.12, 'AU.gap = {tink: 0.12}');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'sound-pass: named cues';
+  {
+    const { ctx, page } = await newPage(browser, { init: audioSpy });
+    await startMap(page, 1);
+    let at = 100;
+    const c = {};
+    for (const n of ['up2', 'up3', 'clear', 'flawless', 'horn', 'bossdown', 'tink', 'lose', 'win']) { c[n] = await cue(page, n, at); at += 5; }
+    check(startsAt(c.up2, 'sine', 523, 0) && startsAt(c.up2, 'sine', 784, 0.07) && near(c.up2.rec.map(r => r.v), 1175) && !near(c.up2.rec.map(r => r.v), 1568), 'up2: 523->784, then 784->1175 at +0.07');
+    check(startsAt(c.up3, 'sine', 523, 0) && startsAt(c.up3, 'sine', 784, 0.07) && startsAt(c.up3, 'sine', 1175, 0.14) && near(c.up3.rec.map(r => r.v), 1568), 'up3: up2 plus 1175->1568 at +0.14');
+    check(startsAt(c.clear, 'sine', 523, 0) && startsAt(c.clear, 'sine', 659, 0.07) && startsAt(c.clear, 'sine', 784, 0.14) && startsAt(c.clear, 'sine', 523 * 1.01, 0.09) && !near(c.clear.rec.map(r => r.v), 1047), 'clear: 523, 659, 784 at 0, 0.07, 0.14, each 0.09s gliding to f*1.01');
+    check(startsAt(c.flawless, 'sine', 784, 0.14) && startsAt(c.flawless, 'sine', 1047, 0.21), 'flawless: clear plus 1047 at +0.21');
+    check(startsAt(c.horn, 'sawtooth', 98, 0) && startsAt(c.horn, 'sawtooth', 147, 0) && c.horn.filt.length === 2 && c.horn.filt.every(f => f.type === 'lowpass' && f.f === 600), 'horn: two sawtooth voices (98, 147) through 600Hz lowpass filters ' + JSON.stringify(c.horn.filt));
+    check(startsAt(c.bossdown, 'triangle', 392, 0) && startsAt(c.bossdown, 'sine', 523, 0.25) && startsAt(c.bossdown, 'sine', 659, 0.32) && startsAt(c.bossdown, 'sine', 784, 0.39) && c.bossdown.filt.some(f => f.f === 400), 'bossdown: triangle 392->98, 400Hz noise, then 523/659/784 at 0.25/0.32/0.39');
+    check(startsAt(c.tink, 'square', 2600, 0) && startsAt(c.tink, 'square', 2000, 0.035), 'tink: square 2600->2000 over 0.035s');
+    check(startsAt(c.lose, 'triangle', 392, 0) && startsAt(c.lose, 'triangle', 311, 0.25) && startsAt(c.lose, 'triangle', 262, 0.5), 'lose: triangle 392, 311, 262 at 0, 0.25, 0.5');
+    check(startsAt(c.win, 'sine', 523, 0) && startsAt(c.win, 'sine', 659, 0.1) && startsAt(c.win, 'sine', 784, 0.2) && startsAt(c.win, 'sine', 1047, 0.3), 'win: sine 523, 659, 784, 1047 at 0, 0.1, 0.2, 0.3');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'sound-pass: muted through a full wave';
+  {
+    const { ctx, page } = await newPage(browser, { init: audioSpy });
+    await page.click('#bMute');
+    await startMap(page, 1);
+    check((await G(page, () => window.__pw.AU.on)) === false && (await text(page, '#bMute')) === 'Sound: off', 'AU.on is false after muting');
+    await G(page, () => { const W = window.__pw; W.G.gold = 2000; [['bolt', 2, 2], ['mortar', 4, 2], ['frost', 2, 5], ['arc', 4, 5], ['long', 3, 9]].forEach(([k, c, r]) => W.build(k, c, r)); });
+    await page.click('#bWave');
+    await page.waitForTimeout(300);
+    const t = await runUntilCalm(page);
+    await page.waitForTimeout(200);
+    check(t > 5 && (await G(page, () => window.__pw.G.wave === 1 && !window.__pw.G.enemies.length && !window.__pw.G.spawnQ.length)), 'a full wave ran to the end while muted');
+    check((await G(page, () => window.__osc)) === 0, 'muted: no voices are made (' + (await G(page, () => window.__osc)) + ')');
+    check(page.errors.length === 0, 'no console errors with sound muted through a full wave: ' + page.errors.join('|'));
+    await page.click('#bPause'); await page.click('#bMute2'); await page.click('#bResume');
+    await G(page, () => window.__pw.sfx('build'));
+    check((await G(page, () => window.__osc)) === 1, 'unmuting brings sound back');
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------
   current = 'long run soak (30 waves, all roads)';
   for (let mi = 0; mi < 3; mi++) {
     const { ctx, page } = await newPage(browser);

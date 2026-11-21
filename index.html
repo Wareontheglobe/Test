@@ -319,36 +319,63 @@ function validSave(sv){
 function persist(){try{localStorage.setItem(STORE,JSON.stringify(S))}catch(e){}}
 
 /* ---------- audio ---------- */
-const AU={ctx:null,on:S.muted!==true,last:{},noise:null};
+// Every voice goes through one master gain and a limiter (AU.master -> AU.comp -> speakers), so a busy wave can't clip.
+// Each cue name is throttled to one voice per 0.06s, or AU.gap[name]. Kills inside 0.35s of each other climb a semitone, up to 8.
+const AU={ctx:null,on:S.muted!==true,last:{},noise:null,master:null,comp:null,gap:{tink:0.12},combo:0,comboAt:-9};
 function audioInit(){
   if(AU.ctx)return;
-  try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;AU.ctx=new C();
-    const b=AU.ctx.createBuffer(1,AU.ctx.sampleRate*0.4,AU.ctx.sampleRate),d=b.getChannelData(0);
+  try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const a=AU.ctx=new C();
+    AU.master=a.createGain();AU.master.gain.value=0.8;
+    const k=AU.comp=a.createDynamicsCompressor();
+    k.threshold.value=-14;k.knee.value=6;k.ratio.value=4;k.attack.value=0.003;k.release.value=0.15;
+    AU.master.connect(k).connect(a.destination);
+    const b=a.createBuffer(1,a.sampleRate*0.4,a.sampleRate),d=b.getChannelData(0);
     for(let i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*(1-i/d.length);AU.noise=b;
   }catch(e){AU.ctx=null}
 }
 function sfx(name){
-  const a=AU.ctx;if(!AU.on||!a)return;
+  const a=AU.ctx;if(!AU.on||!a||!AU.master)return;
   if(a.state==='suspended'){try{a.resume()}catch(e){}}
-  const now=a.currentTime;if(AU.last[name]&&now-AU.last[name]<0.06)return;AU.last[name]=now;
-  const tone=(type,f1,f2,dur,vol)=>{const o=a.createOscillator(),g=a.createGain();o.type=type;o.frequency.setValueAtTime(f1,now);
-    o.frequency.exponentialRampToValueAtTime(Math.max(20,f2),now+dur);g.gain.setValueAtTime(vol,now);g.gain.exponentialRampToValueAtTime(0.0001,now+dur);
-    o.connect(g).connect(a.destination);o.start(now);o.stop(now+dur+0.02)};
-  const noise=(dur,vol,freq)=>{const s=a.createBufferSource(),f=a.createBiquadFilter(),g=a.createGain();s.buffer=AU.noise;f.type='lowpass';f.frequency.value=freq;
-    g.gain.setValueAtTime(vol,now);g.gain.exponentialRampToValueAtTime(0.0001,now+dur);s.connect(f).connect(g).connect(a.destination);s.start(now);s.stop(now+dur)};
+  const now=a.currentTime,gap=AU.gap[name]??0.06;
+  if(AU.last[name]!=null&&now-AU.last[name]<gap)return;AU.last[name]=now;
+  const out=AU.master;
+  // One voice: f1 glides to f2 over dur, starting at now+at. lp>0 puts a lowpass filter at lp Hz after the oscillator.
+  const tone=(type,f1,f2,dur,vol,at=0,lp=0)=>{const t0=now+at,o=a.createOscillator(),g=a.createGain();o.type=type;f2=Math.max(20,f2);
+    o.frequency.setValueAtTime(f1,t0);o.frequency.exponentialRampToValueAtTime(f2,t0+dur);o.frequency.setValueAtTime(f2,t0+dur);
+    g.gain.setValueAtTime(vol,t0);g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    let n=o;if(lp>0){const f=a.createBiquadFilter();f.type='lowpass';f.frequency.value=lp;n=o.connect(f)}
+    n.connect(g).connect(out);o.start(t0);o.stop(t0+dur+0.02)};
+  const noise=(dur,vol,freq,at=0)=>{const t0=now+at,s=a.createBufferSource(),f=a.createBiquadFilter(),g=a.createGain();s.buffer=AU.noise;f.type='lowpass';f.frequency.value=freq;
+    g.gain.setValueAtTime(vol,t0);g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);s.connect(f).connect(g).connect(out);s.start(t0);s.stop(t0+dur)};
+  // A run of short held notes, the first at `at`, then one every `step` seconds.
+  const notes=(type,fs,at,step,dur,vol)=>fs.forEach((f,i)=>tone(type,f,f*1.01,dur,vol,at+i*step));
+  const j=0.94+Math.random()*0.12; // pitch jitter, so repeats don't sound identical
   switch(name){
-    case 'bolt':tone('square',900,520,0.05,0.025);break;
+    case 'bolt':tone('square',900*j,520*j,0.05,0.025);break;
     case 'mortar':tone('triangle',160,60,0.12,0.08);break;
-    case 'boom':noise(0.3,0.16,700);break;
-    case 'frost':tone('sine',1500,900,0.09,0.03);break;
+    case 'boom':noise(0.22,0.10,700*j);break;
+    case 'frost':tone('sine',1500*j,900*j,0.09,0.03);break;
     case 'arc':tone('sawtooth',260+Math.random()*120,900,0.08,0.03);break;
     case 'long':tone('square',220,90,0.12,0.05);noise(0.08,0.05,2500);break;
-    case 'die':tone('triangle',420,140,0.09,0.035);break;
+    case 'die':{
+      AU.combo=now-AU.comboAt<0.35?Math.min(8,AU.combo+1):0;AU.comboAt=now;
+      const m=j*Math.pow(1.0595,AU.combo);tone('triangle',420*m,140*m,0.09,0.035);break;
+    }
     case 'leak':tone('sawtooth',180,60,0.35,0.07);break;
     case 'build':tone('sine',520,880,0.12,0.06);break;
+    case 'up2':case 'up3':
+      tone('sine',523,784,0.08,0.05);tone('sine',784,1175,0.10,0.05,0.07);
+      if(name==='up3')tone('sine',1175,1568,0.12,0.05,0.14);
+      break;
     case 'sell':tone('sine',700,350,0.12,0.05);break;
     case 'wave':tone('triangle',330,660,0.25,0.06);break;
-    case 'clear':tone('sine',660,1320,0.22,0.06);break;
+    case 'clear':notes('sine',[523,659,784],0,0.07,0.09,0.05);break;
+    case 'flawless':notes('sine',[523,659,784,1047],0,0.07,0.09,0.05);break;
+    case 'horn':tone('sawtooth',98,96,0.7,0.07,0,600);tone('sawtooth',147,144,0.7,0.05,0,600);break;
+    case 'bossdown':tone('triangle',392,98,0.6,0.09);noise(0.5,0.12,400);notes('sine',[523,659,784],0.25,0.07,0.12,0.05);break;
+    case 'tink':tone('square',2600,2000,0.035,0.012);break;
+    case 'lose':notes('triangle',[392,311,262],0,0.25,0.25,0.06);break;
+    case 'win':notes('sine',[523,659,784,1047],0,0.1,0.18,0.06);break;
     case 'no':tone('square',160,120,0.12,0.04);break;
   }
 }
@@ -424,10 +451,12 @@ function waveDone(w){
   if(s.rem<=0&&s.alive<=0&&!G.over){
     delete G.W[w];
     const b=CFG.bonusA+CFG.bonusB*w;G.gold+=b;G.cleared=Math.max(G.cleared,w);
-    toast(`Wave ${w} cleared · +${b} gold`);sfx('clear');
-    if(!activeWaves()&&!G.spawnQ.length){
+    toast(`Wave ${w} cleared · +${b} gold`);
+    const calm=!activeWaves()&&!G.spawnQ.length,victory=calm&&G.cleared>=FINAL_WAVE&&!G.won;
+    sfx(victory?'win':'clear');
+    if(calm){
       saveRun();
-      if(G.cleared>=FINAL_WAVE&&!G.won){G.won=true;recordBest();saveRun();showEnd(true)}
+      if(victory){G.won=true;recordBest();saveRun();showEnd(true)}
     }
     refreshPanel();
   }
@@ -446,10 +475,11 @@ function kill(e){
   waveDone(e.w);
 }
 function leak(e){
-  e.dead=true;G.lives=Math.max(0,G.lives-e.d.lives);G.gateFlash=0.6;sfx('leak');
+  e.dead=true;G.lives=Math.max(0,G.lives-e.d.lives);G.gateFlash=0.6;
   if(S.vibe!==false){try{navigator.vibrate&&navigator.vibrate(e.d.boss?[60,40,60]:30)}catch(x){}}
+  // The leak that ends the run plays only the game-over cue.
   if(G.lives<=0){gameOver();return}
-  waveDone(e.w);
+  sfx('leak');waveDone(e.w);
 }
 function burst(x,y,color,n,fly){
   if(rm())n=Math.ceil(n/2);
@@ -562,7 +592,7 @@ function saveRun(){
 function recordBest(){const id=G.map.id;if(G.cleared>(S.best[id]||0)){S.best[id]=G.cleared}persist()}
 function gameOver(){
   G.over=true;G.running=false;recordBest();delete S.saves[G.map.id];persist();
-  sfx('leak');showEnd(false);
+  sfx('lose');showEnd(false);
 }
 function showEnd(win){
   $('#endTitle').textContent=win?'The road holds':'The keep has fallen';
@@ -882,7 +912,7 @@ cv.addEventListener('pointerdown',ev=>{
 $('#bUp').addEventListener('click',()=>{
   const t=G.selTower;if(!t||t.level>=3)return;const c=upCost(t);
   if(G.gold<c){toast(`Need ${c-G.gold} more gold`,true);sfx('no');return}
-  G.gold-=c;t.spent+=c;t.level++;t.born=G.time;sfx('build');burst(t.x,t.y,'#e3ad45',8,false);G.sellArm=false;refreshPanel();updateHud(true);saveRunIfCalm();
+  G.gold-=c;t.spent+=c;t.level++;t.born=G.time;sfx(t.level===3?'up3':'up2');burst(t.x,t.y,'#e3ad45',8,false);G.sellArm=false;refreshPanel();updateHud(true);saveRunIfCalm();
 });
 $('#bMode').addEventListener('click',()=>{const t=G.selTower;if(!t)return;t.mode=MODES[(MODES.indexOf(t.mode)+1)%MODES.length];G.sellArm=false;refreshPanel();saveRunIfCalm()});
 $('#bSell').addEventListener('click',()=>{
@@ -1019,7 +1049,7 @@ newGame(MAPS[1]);G.running=false;
 G.gold=200;
 paintIcons();showMenu();requestAnimationFrame(frame);
 
-window.__pw={get G(){return G},get S(){return S},ED,buildWave,refreshPanel,step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
+window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,refreshPanel,step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
   CFG,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
   hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},render:t=>render(rm()?0:(t??performance.now()/1000)),rm,syncOv,spawn:(type,dist)=>{const w=G.wave||1;G.W[w]=G.W[w]||{rem:0,alive:0};spawnEnemy(type,w,dist,1)}};
