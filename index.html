@@ -111,6 +111,9 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
   font-family:var(--font-display);font-weight:800;font-size:15px;box-shadow:0 3px 0 #8f6a22;white-space:nowrap}
 #bWave:active{transform:translateY(2px);box-shadow:0 1px 0 #8f6a22}
 #bWave:disabled{background:var(--panel-2);color:var(--muted);box-shadow:none;cursor:default}
+/* Calling the next wave early is a choice, not the next step: outlined in brass rather than solid, with the bonus beside it. */
+#bWave.early{background:var(--panel-2);color:var(--brass);border:1px solid var(--brass);box-shadow:none}
+#bWave.early small{font-size:12px;font-weight:800}
 
 #palette{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;height:100%}
 .tw{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:6px 2px 5px;border-radius:12px;
@@ -298,8 +301,21 @@ const ED={
 };
 // Fliers are drawn this many tiles above the road. Shots, sparks and the kill pop aim there too.
 const LIFT=0.32;
-const MODES=['first','last','strong','close'];
-const MODE_NAME={first:'First',last:'Last',strong:'Strongest',close:'Closest'};
+// Targeting. First: furthest along the road. Toughest: the highest max HP (Brutes, Warlords), then the furthest along.
+// Fliers: any flier before anything on the ground, then the furthest along.
+const MODES=['first','tough','air'];
+const MODE_NAME={first:'First',tough:'Toughest',air:'Fliers'};
+// What #infoMsg says for 4s after a tap on Target.
+const MODE_TIP={first:'First: shoots whoever is closest to the keep.',tough:'Toughest: focuses Brutes and Warlords. Fliers may slip past.',air:'Fliers: shoots fliers first, then the leader.'};
+// The modes a tower cycles through: one that can't hit fliers (the Mortar) has no 'Fliers'.
+const towerModes=type=>TD[type].air===false?MODES.filter(m=>m!=='air'):MODES;
+// 1.0 saves: 'strong' was the Longshot's untouched default, so it becomes First there and Toughest on any other tower.
+// 'last' and 'close' become First. Anything else this tower can't use is dropped (placeTower then uses First).
+function migrateMode(type,m){
+  if(m==='strong')return type==='long'?'first':'tough';
+  if(m==='last'||m==='close')return 'first';
+  return towerModes(type).includes(m)?m:undefined;
+}
 
 /* ---------- helpers ---------- */
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
@@ -391,7 +407,7 @@ function validSave(sv){
     if(!t||!TD[t.type]||!int(t.c,0)||!int(t.r,0)||t.c>=COLS||t.r>=ROWS)return false;
     const k=t.r*COLS+t.c;if(map.grid[k]===1||seen.has(k))return false;seen.add(k);return true;
   }).map(t=>({type:t.type,c:t.c,r:t.r,level:[1,2,3].includes(t.level)?t.level:1,
-    spent:Number.isFinite(t.spent)&&t.spent>0?Math.round(t.spent):TD[t.type].cost,mode:MODES.includes(t.mode)?t.mode:undefined}));
+    spent:Number.isFinite(t.spent)&&t.spent>0?Math.round(t.spent):TD[t.type].cost,mode:migrateMode(t.type,t.mode)}));
   sv.won=!!sv.won;
   return sv;
 }
@@ -470,9 +486,10 @@ function newGame(map,save){
   // poorWas/upWas: last affordability shown, so refreshPanel pulses only on a real change from poor to affordable.
   // banner: the one big line on the board ({s, sub, c, t, dur}); bannerNext waits behind 'WARLORD DOWN'. bossBar: the pinned Warlord bar. shakeT: board shake left (real time).
   // chipTip: a tapped wave chip's detail in #info ({type, key, until}), shown until performance.now() passes until.
+  // modeTip: what a tap on Target set the selected tower to, said in #info ({t, until}) the same way.
   G={map,grid:map.grid.slice(),wave:0,gold:CFG.startGold,lives:20,towers:[],enemies:[],projs:[],fx:[],spawnQ:[],W:{},time:0,
      speed:speedPref,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,armKept:false,selAt:0,sellArm:false,sellArmAt:0,sendArmAt:0,
-     poorWas:{},upWas:null,hintTiles:[],gateFlash:0,hurtT:0,hurtDur:0.45,banner:null,bannerNext:null,bossBar:null,shakeT:0,chipTip:null,running:true};
+     poorWas:{},upWas:null,hintTiles:[],gateFlash:0,hurtT:0,hurtDur:0.45,banner:null,bannerNext:null,bossBar:null,shakeT:0,chipTip:null,modeTip:null,running:true};
   if(save){
     G.wave=save.wave;G.cleared=save.wave;G.gold=save.gold;G.lives=save.lives;G.won=!!save.won;
     for(const t of save.towers)placeTower(t.type,t.c,t.r,t.level,t.spent,t.mode);
@@ -484,7 +501,7 @@ function newGame(map,save){
 }
 function placeTower(type,c,r,level,spent,mode){
   // refund: the part of spent that sells back in full. Only builds and upgrades made between waves earn it, and the next wave clears it.
-  const t={type,c,r,x:c+0.5,y:r+0.5,level:level||1,spent:spent||TD[type].cost,refund:0,mode:mode||(type==='long'?'strong':'first'),cd:0.2,ang:-Math.PI/2,flash:0,born:G.time,upT:0};
+  const t={type,c,r,x:c+0.5,y:r+0.5,level:level||1,spent:spent||TD[type].cost,refund:0,mode:mode||'first',cd:0.2,ang:-Math.PI/2,flash:0,born:G.time,upT:0};
   G.towers.push(t);G.grid[r*COLS+c]=2;return t;
 }
 function towerAt(c,r){return G.towers.find(t=>t.c===c&&t.r===r)}
@@ -495,7 +512,9 @@ function tstats(type,lv){
 }
 function upCost(t){return t.level>=3?0:round5(TD[t.type].cost*(t.level===1?0.8:1.4))}
 function sellValue(t){return t.refund+Math.floor((t.spent-t.refund)*0.7)}
-const CFG={hpA:0.25,hpB:0.032,goldGrow:0.01,bonusA:15,bonusB:2,startGold:200};
+// earlyMul: calling wave w early pays earlyMul*(10+w). Above 3 always calling early turns into a net gain, so keep it at 3 or less.
+const CFG={hpA:0.25,hpB:0.032,goldGrow:0.01,bonusA:15,bonusB:2,startGold:200,earlyMul:3};
+const earlyBonus=w=>CFG.earlyMul*(10+w);
 const hpScale=w=>1+CFG.hpA*(w-1)+CFG.hpB*(w-1)*(w-1);
 
 function buildWave(w){
@@ -551,7 +570,7 @@ function startWave(){
   let t=G.time+0.4,count=0;
   for(const [type,cnt,iv,delay] of buildWave(w)){t+=delay;for(let i=0;i<cnt;i++){G.spawnQ.push({at:t,type,w});t+=iv;count++}}
   G.W[w]={rem:count,alive:0,leaked:0};
-  if(early){const b=10+w;G.gold+=b;toast(`Called early · +${b} gold`);goldGain()}
+  if(early){const b=earlyBonus(w);G.gold+=b;toast(`Called early · +${b} gold`);goldGain()}
   const sub=bannerSub(w);markSeen(w); // the sub names what is new, so it is worked out before the wave counts as met
   setBanner({s:`WAVE ${w}`,sub,c:bossWave(w)?'#a487ff':'#f0e9d2',dur:1.3,say:`Wave ${w}${sub?'. '+sub:''}`});
   sfx('wave');refreshPanel();
@@ -670,7 +689,7 @@ function findTarget(t,st){
     if(e.dead||(e.fly&&!air)||e.dist<0.1)continue;
     const dx=e.x-t.x,dy=e.y-t.y,d2=dx*dx+dy*dy,rr2=(R+e.r*0.5);
     if(d2>rr2*rr2)continue;
-    let v;switch(t.mode){case 'first':v=e.dist;break;case 'last':v=-e.dist;break;case 'strong':v=e.hp+e.dist*0.01;break;default:v=-d2}
+    let v;switch(t.mode){case 'tough':v=e.max*1000+e.dist;break;case 'air':v=(e.fly?1e6:0)+e.dist;break;default:v=e.dist}
     if(!best||v>bv){best=e;bv=v}
   }
   return best;
@@ -1295,9 +1314,11 @@ function chipDetail(type){
 // Enter or Space on #chips picks the first chip; pressed again while a detail shows, the next one.
 const TIP_MS=4000;
 function showTip(type){
-  if(!G||G.over||!BLURB[type])return;G.chipTip={type,key:chipKey,until:performance.now()+TIP_MS};refreshPanel();
+  if(!G||G.over||!BLURB[type])return;G.modeTip=null;G.chipTip={type,key:chipKey,until:performance.now()+TIP_MS};refreshPanel();
   say(chipDetail(type)[0].replace(/<[^>]+>/g,''));
 }
+const modeTipHtml=m=>{const [a,b]=MODE_TIP[m].split(/:(.*)/s);return `<b>${a}:</b>${b}`};
+const NARROW=window.matchMedia?matchMedia('(max-width:360px)'):{matches:false};
 function refreshPanel(){
   if(!G)return;
   const msg=$('#infoMsg'),chips=$('#chips');
@@ -1332,7 +1353,10 @@ function refreshPanel(){
   const armed=!!G.pending&&!G.armKept;
   let chipsOn=!G.sel&&!armed,lines=1,oneRow=false,coach=false,ready=null,place=null,next=null,tipLines=null,marching=false,nt;
   const tip=chipsOn&&G.chipTip&&G.chipTip.key===chipKey?G.chipTip:null;
+  // A tap on Target says what the new mode does, over 3 lines, for 4s (the chips make way, as for a chip's detail).
+  const mtip=!tip&&t&&G.modeTip&&G.modeTip.t===t?G.modeTip:null;
   if(tip){lines=3;tipLines=chipDetail(tip.type);msg.innerHTML=tipLines[0]}
+  else if(mtip){lines=3;msg.innerHTML=modeTipHtml(t.mode)}
   else if(t)next=t; // written by fitNext, on one line
   else if(G.sel&&G.pending){
     // How much road this spot covers, then what a second tap does. fitFirst drops that instruction first, then shortens the trait.
@@ -1348,12 +1372,19 @@ function refreshPanel(){
   else if((nt=newTypes(G.wave+1)).length){lines=2;oneRow=true;msg.innerHTML=`<b>New:</b> ${BLURB[nt[nt.length-1]]}`}
   else if(G.spawnQ.length){marching=true;msg.innerHTML=`Wave <b>${G.wave}</b> is marching in. Next:`}
   else msg.innerHTML='Next wave:';
-  chips.hidden=!chipsOn;chips.classList.toggle('one',oneRow);chips.classList.toggle('off',!!tip);
+  chips.hidden=!chipsOn;chips.classList.toggle('one',oneRow);chips.classList.toggle('off',!!(tip||mtip));
   msg.classList.toggle('l1',lines===1);msg.classList.toggle('l2',lines===2);msg.classList.toggle('coach',coach);
-  const bw=$('#bWave');
-  if(G.spawnQ.length){bw.disabled=true;bw.textContent=`Wave ${G.wave}…`}
-  else if(activeWaves()){bw.disabled=false;bw.textContent=`Call ${G.wave+1} early`}
-  else{bw.disabled=false;bw.textContent=G.wave===0?(sendArmed()?'Send anyway?':'Start wave 1'):`Start wave ${G.wave+1}`}
+  // #bWave gets its label before the fitters run, as they fit #info to the room it leaves. Calling early is a choice, not the main
+  // action: an outlined button that says what it pays ('Call 5 early +45'; 'Call early +45' on phones 360px wide or less).
+  const bw=$('#bWave'),early=!G.spawnQ.length&&activeWaves()>0;
+  bw.classList.toggle('early',early);
+  // The markup is replaced only when it changes: refreshPanel runs on every kill's gold, and a tap must not lose the <small> it pressed.
+  if(early){const n=G.wave+1,b=earlyBonus(n),h=`${NARROW.matches?'Call':`Call ${n}`} early <small>+${b}</small>`;bw.disabled=false;if(bw.innerHTML!==h)bw.innerHTML=h;bw.setAttribute('aria-label',`Call wave ${n} early for ${b} bonus gold`)}
+  else{
+    bw.removeAttribute('aria-label');
+    if(G.spawnQ.length){bw.disabled=true;bw.textContent=`Wave ${G.wave}…`}
+    else{bw.disabled=false;bw.textContent=G.wave===0?(sendArmed()?'Send anyway?':'Start wave 1'):`Start wave ${G.wave+1}`}
+  }
   if(ready)fitReady(msg,ready);
   if(place)fitFirst(msg,place,placeFit);
   if(tipLines)fitFirst(msg,tipLines,tipFit);
@@ -1410,7 +1441,7 @@ function deselect(){G.sel=null;G.selTower=null;G.pending=null;G.armKept=false;G.
 // A tower can be armed before or after picking a tile. With no tile, tapping the armed tower again disarms it.
 function onPalette(k){
   audioInit();if(!G||G.over)return;
-  G.chipTip=null;
+  G.chipTip=G.modeTip=null;
   if(!G.sel){
     if(G.pending===k)G.pending=null;else{G.selTower=null;G.sellArm=false;G.pending=k}
     G.armKept=false;refreshPanel();return;
@@ -1432,7 +1463,7 @@ function tryBuild(){
 }
 function onBoardTap(c,r){
   audioInit();if(!G||G.over)return;
-  G.chipTip=null;
+  G.chipTip=G.modeTip=null;
   if(c<0||r<0||c>=COLS||r>=ROWS){deselect();refreshPanel();return}
   const t=towerAt(c,r);
   if(t){if(G.selTower===t){deselect()}else{deselect();G.selTower=t}refreshPanel();return}
@@ -1471,14 +1502,19 @@ $('#chips').addEventListener('keydown',ev=>{
 $('#bUp').addEventListener('click',()=>{
   const t=G.selTower;if(!t||t.level>=3||G.over)return;const c=upCost(t);
   if(G.gold<c){toast(`Need ${c-G.gold} more gold`,true);sfx('no');goldShort();return}
-  G.gold-=c;t.spent+=c;if(isCalm())t.refund+=c;t.level++;
+  G.gold-=c;t.spent+=c;if(isCalm())t.refund+=c;t.level++;G.modeTip=null;
   // The punch: the tower swells and settles (upT, see render), and a brass ring grows out to the new range.
   t.upT=0.22;const nr=tstats(t.type,t.level).range;G.fx.push({k:'ring',x:t.x,y:t.y,t:0,dur:0.45,r:nr,r0:nr*0.4,c:'#e3ad45',a:0.8});
   sfx(t.level===3?'up3':'up2');burst(t.x,t.y,'#e3ad45',8,false);G.sellArm=false;refreshPanel();updateHud(true);saveRunIfCalm();
 });
-$('#bMode').addEventListener('click',()=>{const t=G.selTower;if(!t||G.over)return;t.mode=MODES[(MODES.indexOf(t.mode)+1)%MODES.length];G.sellArm=false;refreshPanel();saveRunIfCalm()});
+// Target cycles First, Toughest, Fliers (First, Toughest on a Mortar), and #infoMsg says what the new mode does for 4s.
+$('#bMode').addEventListener('click',()=>{
+  const t=G.selTower;if(!t||G.over)return;const ms=towerModes(t.type);
+  t.mode=ms[(ms.indexOf(t.mode)+1)%ms.length];G.sellArm=false;G.chipTip=null;G.modeTip={t,until:performance.now()+TIP_MS};
+  refreshPanel();say(MODE_TIP[t.mode]);saveRunIfCalm();
+});
 $('#bSell').addEventListener('click',()=>{
-  const t=G.selTower;if(!t||G.over)return;
+  const t=G.selTower;if(!t||G.over)return;G.modeTip=null;
   if(!G.sellArm){G.sellArm=true;G.sellArmAt=performance.now();refreshPanel();return}
   G.gold+=sellValue(t);G.towers=G.towers.filter(x=>x!==t);G.grid[t.r*COLS+t.c]=0;burst(t.x,t.y,'#8a7a5a',8,false);sfx('sell');
   deselect();refreshPanel();updateHud(true);saveRunIfCalm();
@@ -1616,6 +1652,7 @@ function frame(now){
   if(G&&G.sellArm&&now-G.sellArmAt>3500){G.sellArm=false;refreshPanel()}
   if(G&&G.sendArmAt&&now-G.sendArmAt>3000){G.sendArmAt=0;refreshPanel()}
   if(G&&G.chipTip&&now>G.chipTip.until){G.chipTip=null;refreshPanel()}
+  if(G&&G.modeTip&&now>G.modeTip.until){G.modeTip=null;refreshPanel()}
   // The leak vignette fades in real time: the same at 1x and 3x, and still fading after game over or while paused.
   if(G&&G.hurtT>0)G.hurtT=Math.max(0,G.hurtT-dt);
   // So does the Warlord shake, so it settles even if the run pauses (a wave-30 win) right after.

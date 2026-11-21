@@ -119,8 +119,8 @@ let BASE;
     check(await page.$eval('#bUp', el => el.disabled && el.textContent.includes('Max level')), 'upgrade disabled at max');
 
     const modes = [];
-    for (let i = 0; i < 4; i++) { await page.click('#bMode'); modes.push(await page.$eval('#bMode small', el => el.textContent)); }
-    check(modes.join(',') === 'Last,Strongest,Closest,First', 'target cycles Last→Strongest→Closest→First (' + modes + ')');
+    for (let i = 0; i < 3; i++) { await page.click('#bMode'); modes.push(await page.$eval('#bMode small', el => el.textContent)); }
+    check(modes.join(',') === 'Toughest,Fliers,First', 'target cycles Toughest→Fliers→First (' + modes + ')');
 
     const spent = await G(page, () => window.__pw.G.towers[0].spent);
     const goldBefore = await G(page, () => window.__pw.G.gold);
@@ -165,10 +165,11 @@ let BASE;
     const label = await text(page, '#bWave');
     const enemiesLeft = await G(page, () => window.__pw.G.enemies.length);
     if (enemiesLeft) {
-      check(label === 'Call 2 early', 'offers early call once wave fully arrived (' + label + ')');
-      const g0 = await G(page, () => window.__pw.G.gold);
+      check(/^Call 2 early\s*\+36$/.test(label), 'offers early call once wave fully arrived, with its bonus (' + label + ')');
+      // Hold the run still, so no kill lands between reading the gold and the tap.
+      const g0 = await G(page, () => { window.__pw.G.running = false; return window.__pw.G.gold; });
       await page.click('#bWave');
-      check((await G(page, () => window.__pw.G.gold)) >= g0 + 12, 'early call pays a bonus');
+      check((await G(page, () => { window.__pw.G.running = true; return window.__pw.G.gold; })) === g0 + 36, 'early call pays a bonus of 36');
     }
     await runUntilCalm(page);
     await page.waitForTimeout(50);
@@ -1666,11 +1667,11 @@ let BASE;
 
     // Overlapping waves: wave 3 clears while wave 4 (called early) is on its way, so no banner and only the clear cue.
     const ov = await G(page, () => { const W = window.__pw, g = W.G; W.startWave(); while (g.spawnQ.length) W.step(1 / 30); W.refreshPanel(); return { label: document.querySelector('#bWave').textContent, n: g.enemies.length, gold: g.gold }; });
-    check(ov.label === 'Call 4 early' && ov.n > 0, 'wave 3 is all on the road ' + JSON.stringify(ov));
+    check(/^Call 4 early\s*\+42$/.test(ov.label) && ov.n > 0, 'wave 3 is all on the road ' + JSON.stringify(ov));
     await page.click('#bWave');
     const early = await page.evaluate(() => ({ toast: document.querySelector('#toast').textContent, banner: window.__pw.G.banner.s, gain: document.querySelector('#sGold').classList.contains('gain'), gold: window.__pw.G.gold }));
-    check(early.toast.includes('Called early') && early.toast === 'Called early · +14 gold', "the #bWave early-call toast still includes 'Called early' (" + early.toast + ')');
-    check(early.banner === 'WAVE 4' && early.gain && early.gold === ov.gold + 14, "an early call also shows the WAVE 4 banner, and #sGold pops as the bonus pays " + JSON.stringify(early));
+    check(early.toast.includes('Called early') && early.toast === 'Called early · +42 gold', "the #bWave early-call toast still includes 'Called early' (targeting-early-call: 3x(10+4) = 42) (" + early.toast + ')');
+    check(early.banner === 'WAVE 4' && early.gain && early.gold === ov.gold + 42, "an early call also shows the WAVE 4 banner, and #sGold pops as the bonus pays " + JSON.stringify(early));
     await clearRec(page, 30);
     const o3 = await G(page, () => { const W = window.__pw, g = W.G; for (const e of g.enemies) if (e.w === 3) e.hp = 0.1; W.hurtAll(0.5); return { w3: !!g.W[3], w4: !!g.W[4], banner: g.banner.s, next: g.bannerNext }; });
     check(!o3.w3 && o3.w4 && o3.banner === 'WAVE 4' && !o3.next, 'wave 3 cleared under wave 4: no CLEARED banner, the WAVE 4 banner stays ' + JSON.stringify(o3));
@@ -2712,6 +2713,196 @@ let BASE;
       check(sa.length === 5 && sa.every(r => !r.tail && r.tx.startsWith(`${r.nm} · ${res.keys[r.k]}`)), "320px beside 'Send anyway?': no room for the description, so it is the key phrase, and 'Tap again to build.' is gone " + JSON.stringify(sa.map(r => r.tx)));
       check(res.out.find(r => r.k === 'mortar' && r.label === 'Send anyway?' && r.gold).tx.includes('Ground only'), "320px: Mortar keeps 'Ground only' wherever it goes");
     }
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------
+  // targeting-early-call: three target modes (First, Toughest, Fliers), First by default on every tower, a 4s line in #infoMsg on
+  // what a mode does, 1.0 modes migrated on load, and an early call that pays CFG.earlyMul*(10+w) on an outlined button that says so.
+  const MODE_TIPS = { First: 'First: shoots whoever is closest to the keep.', Toughest: 'Toughest: focuses Brutes and Warlords. Fliers may slip past.', Fliers: 'Fliers: shoots fliers first, then the leader.' };
+  // modeState(page): the Target button's label, the selected tower's mode, and what #infoMsg, #chips and #sr show.
+  const modeState = page => G(page, () => { const m = document.querySelector('#infoMsg'), c = document.querySelector('#chips'), t = window.__pw.G.selTower;
+    return { small: document.querySelector('#bMode small').textContent, mode: t && t.mode, msg: m.textContent, html: m.innerHTML, fits: m.scrollHeight <= m.clientHeight + 1, lines: m.classList.contains('l1') ? 1 : m.classList.contains('l2') ? 2 : 3,
+      off: c.classList.contains('off'), chips: !c.hidden && c.getBoundingClientRect().height > 0, info: document.querySelector('#info').scrollHeight, sr: document.querySelector('#sr').textContent }; });
+  // wbtn(page): #bWave's text, markup, class, aria-label and look.
+  const wbtn = page => page.$eval('#bWave', el => { const cs = getComputedStyle(el), sm = el.querySelector('small'), ss = sm && getComputedStyle(sm);
+    return { text: el.textContent.trim(), html: el.innerHTML, early: el.classList.contains('early'), disabled: el.disabled, aria: el.getAttribute('aria-label'), bg: cs.backgroundColor, color: cs.color,
+      border: `${cs.borderTopWidth} ${cs.borderTopStyle} ${cs.borderTopColor}`, shadow: cs.boxShadow, small: ss ? `${ss.fontSize} ${ss.fontWeight}` : '', sw: el.scrollWidth, cw: el.clientWidth }; });
+
+  current = 'targeting-early-call: First, Toughest and Fliers, with First the default';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    // Acceptance: the Longshot (1.0 default 'strong') now starts on First, like every other tower.
+    const def = await G(page, () => { const W = window.__pw; W.newGame(1); W.build('long', 4, 5); const long = W.G.towers[0].mode, all = {};
+      Object.keys(W.TD).forEach((k, i) => { W.G.gold = 9999; W.build(k, i * 2, 0); all[k] = W.G.towers[W.G.towers.length - 1].mode; }); return { long, all }; });
+    check(def.long === 'first', "__pw.newGame(1); __pw.build('long',4,5): G.towers[0].mode === 'first' (" + def.long + ')');
+    check(Object.values(def.all).length === 5 && Object.values(def.all).every(m => m === 'first'), 'every tower type starts on First ' + JSON.stringify(def.all));
+    // Acceptance: a Bolt cycles Toughest, Fliers, First. Each tap says what the new mode does in #infoMsg.
+    await tapTile(page, 0, 0);
+    const first = await modeState(page);
+    check(first.small === 'First' && first.msg.startsWith('Next level') && first.lines === 1 && first.chips, 'a selected Bolt reads Target: First, with its Next level line over the chips ' + JSON.stringify(first));
+    const seq = [];
+    for (let i = 0; i < 3; i++) { await page.click('#bMode'); seq.push(await modeState(page)); }
+    check(seq.map(s => s.small).join(',') === 'Toughest,Fliers,First' && seq.map(s => s.mode).join(',') === 'tough,air,first', "select a bolt and tap #bMode 3 times: the small labels read 'Toughest','Fliers','First' " + JSON.stringify(seq.map(s => s.small + '/' + s.mode)));
+    check(seq.every(s => s.msg === MODE_TIPS[s.small]), 'each tap shows the spec line for the new mode in #infoMsg ' + JSON.stringify(seq.map(s => s.msg)));
+    check(seq.every(s => s.html.startsWith(`<b>${s.small}:</b> `) && s.fits && s.lines === 3 && s.off && !s.chips && s.info <= 50), 'the mode name is bold, the line gets 3 lines and fits, and the chips make way for it ' + JSON.stringify(seq.map(s => [s.html.slice(0, 20), s.fits, s.lines, s.off, s.info])));
+    check(seq.every(s => s.sr === MODE_TIPS[s.small]), 'each line is read out to screen readers (#sr) ' + JSON.stringify(seq.map(s => s.sr)));
+    // It stays up for 4s, then the Next level line and the chips come back.
+    const t0 = await G(page, () => performance.now());
+    const wait = async ms => { const left = await G(page, ([t0, ms]) => t0 + ms - performance.now(), [t0, ms]); if (left > 0) await page.waitForTimeout(left); };
+    await wait(3000);
+    const at3 = await modeState(page);
+    check(at3.msg === MODE_TIPS.First && at3.off, 'it is still up 3s after the tap ' + JSON.stringify(at3));
+    await wait(4200);
+    const at4 = await modeState(page);
+    check(at4.msg.startsWith('Next level') && at4.lines === 1 && at4.chips && !at4.off, 'after 4.2s the Next level line and the chips are back ' + JSON.stringify(at4));
+    // Acceptance: a Mortar can't hit fliers, so it cycles Toughest, First (and never Fliers).
+    await tapTile(page, 2, 0);
+    const mor = [];
+    for (let i = 0; i < 4; i++) { await page.click('#bMode'); mor.push(await modeState(page)); }
+    check(mor.map(s => s.small).join(',') === 'Toughest,First,Toughest,First' && mor.every(s => s.msg === MODE_TIPS[s.small]), "a mortar cycles 'Toughest','First' " + JSON.stringify(mor.map(s => s.small)));
+    // Frost, Arc and Longshot hit fliers, so they cycle all three.
+    const cyc = await G(page, () => { const W = window.__pw, g = W.G, out = {};
+      for (const k of ['frost', 'arc', 'long']) { const t = g.towers.find(x => x.type === k && x.r === 0); g.selTower = t; W.refreshPanel(); const l = [];
+        for (let i = 0; i < 3; i++) { document.querySelector('#bMode').click(); l.push(document.querySelector('#bMode small').textContent); } out[k] = l.join(','); }
+      return out; });
+    check(Object.values(cyc).every(v => v === 'Toughest,Fliers,First'), 'Frost, Arc and Longshot cycle Toughest, Fliers, First ' + JSON.stringify(cyc));
+    // Anything else done to the tower, or a tap on the board, takes the line down at once.
+    await tapTile(page, 0, 0);
+    await page.click('#bMode'); await page.click('#bUp');
+    const up = await modeState(page);
+    check(up.msg.startsWith('Next level') && up.chips, 'Upgrade right after a Target tap shows the new Next level line ' + JSON.stringify(up));
+    await page.click('#bMode'); await tapTile(page, 2, 0);
+    const other = await modeState(page);
+    check(other.small === 'First' && other.msg.startsWith('Next level') && other.chips, "selecting another tower doesn't carry the line over " + JSON.stringify(other));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'targeting-early-call: Toughest and Fliers pick their targets';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    // Acceptance: a level-3 Longshot on Toughest, a grunt at 8 and a brute at 6 (wave 10: the brute takes more than two shots).
+    const tough = await G(page, () => { const W = window.__pw;
+      const run = mode => { W.newGame(1); const g = W.G; g.wave = 10; g.gold = 9999; W.build('long', 4, 5); const t = g.towers[0]; W.upgrade(t); W.upgrade(t); t.mode = mode;
+        W.spawn('grunt', 8); W.spawn('brute', 6); const [gr, br] = g.enemies, h = [gr.hp, br.hp], d = [gr.dist, br.dist]; let shots = 0;
+        for (let i = 0; i < 75; i++) { W.step(1 / 30); shots += g.fx.filter(f => f.k === 'tracer' && f.t === 1 / 30).length; }
+        return { level: t.level, ahead: d[0] > d[1], grunt: gr.hp < h[0], brute: br.hp < h[1], shots, inRange: [gr, br].every(e => Math.hypot(e.x - t.x, e.y - t.y) < 5.2) }; };
+      return { tough: run('tough'), first: run('first') }; });
+    check(tough.tough.level === 3 && tough.tough.ahead && tough.tough.inRange && tough.tough.shots >= 2, 'set-up: a level 3 Longshot with the grunt ahead, both in range, firing twice in 2.5s ' + JSON.stringify(tough.tough));
+    check(tough.tough.brute && !tough.tough.grunt, "Toughest: after 2.5s the brute's hp dropped and the grunt's did not " + JSON.stringify(tough.tough));
+    check(tough.first.grunt && !tough.first.brute, 'First: the same Longshot shoots the grunt ahead instead ' + JSON.stringify(tough.first));
+    // Acceptance: a Bolt on Fliers with a wisp behind a grunt shoots the wisp first.
+    const air = await G(page, () => { const W = window.__pw;
+      const run = (mode, foes) => { W.newGame(1); const g = W.G; g.wave = 5; W.build('bolt', 4, 5); const t = g.towers[0]; t.mode = mode;
+        for (const [k, d] of foes) W.spawn(k, d); const es = g.enemies.slice(); let tg = null;
+        for (let i = 0; i < 18; i++) { W.step(1 / 30); if (!tg && g.projs.length) tg = es.indexOf(g.projs[0].tg); }
+        return { tg, hit: es.map(e => e.hp < e.max) }; };
+      return { air: run('air', [['grunt', 7], ['wisp', 6]]), first: run('first', [['grunt', 7], ['wisp', 6]]), leader: run('air', [['grunt', 6], ['grunt', 7]]) }; });
+    check(air.air.tg === 1 && air.air.hit[1] && !air.air.hit[0], "Fliers: a bolt with a wisp behind a grunt shoots the wisp first (and the grunt isn't hit in 0.6s) " + JSON.stringify(air.air));
+    check(air.first.tg === 0 && air.first.hit[0] && !air.first.hit[1], 'First: the same bolt shoots the grunt ahead ' + JSON.stringify(air.first));
+    check(air.leader.tg === 1, 'Fliers with no flier in range shoots the leader ' + JSON.stringify(air.leader));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'targeting-early-call: 1.0 target modes load as the new ones';
+  {
+    const { ctx, page } = await newPage(browser);
+    const meadow = [{ type: 'long', c: 2, r: 2, mode: 'strong' }, { type: 'bolt', c: 4, r: 2, mode: 'strong' }, { type: 'arc', c: 3, r: 5, mode: 'close' }];
+    // Every other case on Quarry: 'last' becomes First, a Mortar's 'strong' Toughest; a Mortar can't be on Fliers; unknown modes go.
+    const quarry = [{ type: 'frost', c: 0, r: 0, mode: 'last' }, { type: 'mortar', c: 2, r: 0, mode: 'strong' }, { type: 'mortar', c: 6, r: 0, mode: 'air' }, { type: 'bolt', c: 8, r: 0, mode: 'air' },
+      { type: 'frost', c: 2, r: 5, mode: 'laser' }, { type: 'long', c: 5, r: 5, mode: 'tough' }, { type: 'arc', c: 3, r: 10 }];
+    await page.evaluate(([meadow, quarry]) => localStorage.setItem('pathwarden.v1', JSON.stringify({ saves: { meadow: { map: 'meadow', wave: 3, gold: 100, lives: 20, towers: meadow }, quarry: { map: 'quarry', wave: 2, gold: 100, lives: 20, towers: quarry } }, last: 'meadow' })), [meadow, quarry]);
+    await page.reload(); await page.waitForTimeout(250);
+    const sv = await G(page, () => { const s = window.__pw.S.saves, ls = JSON.parse(localStorage.getItem('pathwarden.v1')).saves, m = l => l.towers.map(t => String(t.mode)).join(); return { meadow: m(s.meadow), quarry: m(s.quarry), stored: m(ls.meadow) }; });
+    check(sv.meadow === 'first,tough,first', "a save with towers [{type:'long',mode:'strong'},{type:'bolt',mode:'strong'},{type:'arc',mode:'close'}] loads as modes first, tough, first (" + sv.meadow + ')');
+    check(sv.stored === 'first,tough,first', 'and the migrated modes are written back to storage (' + sv.stored + ')');
+    check(sv.quarry === 'first,tough,undefined,air,undefined,tough,undefined', "'last' becomes first, a Mortar's 'strong' tough; a Mortar on 'air', an unknown mode and no mode load as undefined; air and tough stay (" + sv.quarry + ')');
+    await page.click('#bContinue');
+    const run = await G(page, () => window.__pw.G.towers.map(t => t.mode).join());
+    check(run === 'first,tough,first', 'Continue builds the run with those modes ' + run);
+    await tapTile(page, 4, 2);
+    check((await page.$eval('#bMode small', el => el.textContent)) === 'Toughest', "the 1.0 'Strongest' Bolt reads Target: Toughest");
+    await G(page, () => { window.__pw.G.running = false; }); await page.reload(); await page.waitForTimeout(250); // so the reload doesn't save Meadow over Quarry's test
+    await startMap(page, 2);
+    const q = await G(page, () => window.__pw.G.towers.map(t => t.mode).join());
+    check(q === 'first,tough,first,air,first,tough,first', 'on Quarry every dropped mode starts on First ' + q);
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'targeting-early-call: an early call pays 3x(10+w) and says so on the button';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    check((await G(page, () => window.__pw.CFG.earlyMul)) === 3, 'CFG.earlyMul is 3');
+    await G(page, () => { const W = window.__pw; W.G.running = false; W.build('bolt', 2, 2); W.refreshPanel(); });
+    const s0 = await wbtn(page);
+    check(s0.text === 'Start wave 1' && !s0.early && s0.bg === 'rgb(227, 173, 69)' && s0.color === 'rgb(43, 31, 7)' && s0.shadow !== 'none' && s0.aria === null, "'Start wave' keeps the solid brass primary style " + JSON.stringify(s0));
+    await page.click('#bWave');
+    const s1 = await wbtn(page);
+    check(s1.text === 'Wave 1…' && s1.disabled && !s1.early, 'while wave 1 spawns: Wave 1…, disabled, not early ' + JSON.stringify(s1));
+    // Acceptance: step until the spawn queue is empty with enemies alive.
+    const alive = await G(page, () => { const W = window.__pw, g = W.G; while (g.spawnQ.length) W.step(1 / 30); W.refreshPanel(); return g.enemies.length; });
+    const e1 = await wbtn(page);
+    check(alive > 0 && e1.early && /Call 2 early\s*\+36/.test(e1.text) && /^Call 2 early\s*\+36$/.test(e1.text), "wave 1 on the road: #bWave has class 'early' and reads 'Call 2 early +36' (" + e1.text + ', ' + alive + ' alive)');
+    check(e1.html === 'Call 2 early <small>+36</small>' && !e1.disabled, 'the bonus is a <small> beside the label ' + JSON.stringify(e1.html));
+    check(e1.bg === 'rgb(44, 58, 40)' && e1.color === 'rgb(227, 173, 69)' && e1.border === '1px solid rgb(227, 173, 69)' && e1.shadow === 'none' && e1.small === '12px 800', '#bWave.early: panel-2 background, brass text, a 1px brass border and no shadow; the bonus at 12px, weight 800 ' + JSON.stringify(e1));
+    check(e1.aria === 'Call wave 2 early for 36 bonus gold', 'its aria-label says the wave and the bonus (' + e1.aria + ')');
+    const keep = await G(page, () => { const W = window.__pw, sm = document.querySelector('#bWave small'); W.G.gold += 5; W.refreshPanel(); return document.querySelector('#bWave small') === sm; });
+    check(keep, "a gold change (refreshPanel on every kill) keeps the button's <small>, so a tap on it is never lost");
+    const g0 = await G(page, () => window.__pw.G.gold);
+    await page.click('#bWave');
+    const af = await G(page, () => ({ gold: window.__pw.G.gold, wave: window.__pw.G.wave, toast: document.querySelector('#toast').textContent }));
+    check(af.gold === g0 + 36 && af.wave === 2, 'tapping it adds exactly 36 gold and sends wave 2 ' + JSON.stringify({ g0, ...af }));
+    check(af.toast === 'Called early · +36 gold', 'the toast still says what was paid (' + af.toast + ')');
+    const s2 = await wbtn(page);
+    check(s2.text === 'Wave 2…' && !s2.early && s2.aria === null, 'once called, the button is back to the spawning state ' + JSON.stringify(s2));
+    // Any wave: the label and the payout are CFG.earlyMul*(10+w).
+    const b12 = await G(page, () => { const W = window.__pw, g = W.G; g.spawnQ = []; g.enemies = []; g.W = { 11: { rem: 0, alive: 1 } }; g.wave = 11; W.refreshPanel(); const bw = document.querySelector('#bWave'), label = bw.textContent, g0 = g.gold; bw.click(); return { label, paid: g.gold - g0, wave: g.wave }; });
+    check(/^Call 12 early\s*\+66$/.test(b12.label) && b12.paid === 66 && b12.wave === 12, 'at wave 11 the button reads Call 12 early +66 and pays 66 ' + JSON.stringify(b12));
+    // A calm board again: 'Start wave' and its brass look come back.
+    const s3 = await G(page, () => { const W = window.__pw, g = W.G; g.spawnQ = []; g.enemies = []; g.W = {}; W.refreshPanel(); const bw = document.querySelector('#bWave'); return { text: bw.textContent, early: bw.classList.contains('early'), bg: getComputedStyle(bw).backgroundColor }; });
+    check(s3.text === 'Start wave 13' && !s3.early && s3.bg === 'rgb(227, 173, 69)', 'with the board calm it is Start wave 13 in brass again ' + JSON.stringify(s3));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'targeting-early-call: the early call fits narrow phones';
+  for (const vp of [{ width: 320, height: 640 }, { width: 320, height: 568 }, { width: 360, height: 640 }, { width: 375, height: 667 }, { width: 390, height: 780 }]) {
+    const { ctx, page } = await newPage(browser, { viewport: vp });
+    await startMap(page, 1);
+    const res = await G(page, () => { const W = window.__pw, g = W.G, bw = document.querySelector('#bWave'), m = document.querySelector('#infoMsg'), out = [];
+      g.running = false; W.S.seen = Object.keys(W.ED); W.build('bolt', 2, 2); W.build('mortar', 4, 5);
+      for (const w of [1, 11, 29, 98]) {
+        g.spawnQ = []; g.enemies = []; g.W = { [w]: { rem: 0, alive: 1 } }; g.wave = w; g.selTower = null; W.refreshPanel();
+        const row = { w, text: bw.textContent, early: bw.classList.contains('early'), sw: bw.scrollWidth, cw: bw.clientWidth, h: bw.getBoundingClientRect().height, tips: [] };
+        // Each mode's line beside it, for a Bolt and a Mortar.
+        for (const t of g.towers) { g.selTower = t; for (const mode of ['first', 'tough', 'air']) { if (t.type === 'mortar' && mode === 'air') continue; t.mode = mode; g.modeTip = { t, until: performance.now() + 1e6 };
+          W.refreshPanel(); row.tips.push(m.scrollHeight <= m.clientHeight + 1 && document.querySelector('#info').scrollHeight <= 50); } t.mode = 'first'; }
+        g.modeTip = null; g.selTower = null; W.refreshPanel(); out.push(row);
+      }
+      g.W = {}; W.refreshPanel(); return out; });
+    const narrow = vp.width <= 360;
+    const bad = res.filter(r => !r.early || r.sw > r.cw || r.h !== 42 || !r.tips.every(Boolean) || r.tips.length !== 5 || !(narrow ? /^Call early \+\d+$/ : /^Call \d+ early \+\d+$/).test(r.text) || !r.text.endsWith('+' + 3 * (11 + r.w)));
+    check(bad.length === 0 && res.length === 4, `${vp.width}x${vp.height}: in the early state (waves 2, 12, 30 and 99 next) #bWave scrollWidth <= clientWidth, it reads ${narrow ? "'Call early +N'" : "'Call N early +B'"}, and every Target line fits beside it ` + JSON.stringify(bad.slice(0, 2)));
+    if (vp.width === 320 && vp.height === 640) check(res[0].text.startsWith('Call early') && res[0].sw <= res[0].cw, "acceptance at 320x640: the text starts with 'Call early' and scrollWidth <= clientWidth " + JSON.stringify(res[0]));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+  {
+    // A rotation to a narrow width rewrites the label.
+    const { ctx, page } = await newPage(browser, { viewport: { width: 390, height: 780 } });
+    await startMap(page, 1);
+    await G(page, () => { const W = window.__pw, g = W.G; g.running = false; W.build('bolt', 2, 2); g.W = { 1: { rem: 0, alive: 1 } }; g.wave = 1; W.refreshPanel(); });
+    const wide = await wbtn(page);
+    await page.setViewportSize({ width: 320, height: 640 }); await page.waitForTimeout(250);
+    const slim = await wbtn(page);
+    check(wide.text === 'Call 2 early +36' && slim.text === 'Call early +36' && slim.sw <= slim.cw, 'resized from 390px to 320px, the label drops the wave number ' + JSON.stringify([wide.text, slim.text]));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
