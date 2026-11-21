@@ -2151,17 +2151,19 @@ let BASE;
     const lng = await G(page, () => { const W = window.__pw, g = W.G; W.spawn('brute', 5); const e = g.enemies[0]; W.build('long', 2, 2);
       let n = 0; while (e.hp === e.max && n++ < 300) W.step(1 / 30); return { hit: e.hp < e.max, pierceT: e.pierceT, tinkT: e.tinkT, hitT: e.hitT }; });
     check(lng.hit && lng.pierceT > 0 && lng.tinkT === 0 && lng.hitT <= 0, 'a Longshot hit on a brute sets pierceT > 0 and tinkT === 0 (and no white flash) ' + JSON.stringify(lng));
-    // The 40% rule, Frost's exemption and one spark set at a time (wave-30 brute: armor 3 x 1.87 = 5.61).
+    // The 40% rule, Frost's exemption and one spark set at a time (wave-30 brute: armor 8 x 1.87 = 14.96, so every Bolt level tinks).
+    // (balance: Brute armor 3 -> 8. At armor 5.61 a level-2 Bolt and a level-1 Mortar flashed white; now a level-2 Mortar and a level-3
+    // Arc do, and Bolts tink at every level.)
     await calmBoard(page, 30);
     const rule = await G(page, () => { const W = window.__pw, g = W.G; W.spawn('brute', 5); const e = g.enemies[0], out = {};
       const fresh = () => { e.tinkT = 0; e.hitT = 0; e.pierceT = 0; };
       const hit = (d, p, s) => { fresh(); W.hurt(e, d, p, s); return [+e.tinkT.toFixed(3), +e.hitT.toFixed(3), +e.pierceT.toFixed(3)].join(); };
-      out.bolt1 = hit(11, false, 'bolt'); out.bolt2 = hit(17.6, false, 'bolt'); out.arc = hit(11, false, 'arc'); out.frost = hit(5, false, 'frost'); out.mortar = hit(30, false, 'mortar'); out.long = hit(78, true, 'long');
+      out.bolt1 = hit(11, false, 'bolt'); out.bolt3 = hit(27.5, false, 'bolt'); out.arc = hit(11, false, 'arc'); out.frost = hit(5, false, 'frost'); out.mortar = hit(48, false, 'mortar'); out.arc3 = hit(52.5, false, 'arc'); out.long = hit(78, true, 'long');
       fresh(); W.hurt(e, 11, false, 'bolt'); const a1 = e.tinkA; W.step(0.03); W.hurt(e, 11, false, 'bolt'); out.again = { same: e.tinkA === a1, t: +e.tinkT.toFixed(3) };
       for (let i = 0; i < 3; i++) W.step(0.03); out.ends = +Math.max(0, e.tinkT).toFixed(3); W.hurt(e, 11, false, 'bolt'); out.next = +e.tinkT.toFixed(3);
       out.armor = +e.armor.toFixed(2); return out; });
-    check(rule.bolt1 === '0.1,0,0' && rule.arc === '0.1,0,0', 'a hit whose damage armor cuts by 40% or more (dmg-a < 0.6*dmg) tinks: tinkT 0.1 and no hitT ' + JSON.stringify(rule));
-    check(rule.bolt2 === '0,0.05,0' && rule.mortar === '0,0.05,0', 'a hit armor cuts by less than 40% flashes white as usual (Bolt level 2, Mortar)');
+    check(rule.armor === 14.96 && rule.bolt1 === '0.1,0,0' && rule.bolt3 === '0.1,0,0' && rule.arc === '0.1,0,0', 'a hit whose damage armor cuts by 40% or more (dmg-a < 0.6*dmg) tinks: tinkT 0.1 and no hitT (Bolt levels 1 and 3, an Arc jump) ' + JSON.stringify(rule));
+    check(rule.mortar === '0,0.05,0' && rule.arc3 === '0,0.05,0', 'a hit armor cuts by less than 40% flashes white as usual (Mortar level 2, Arc level 3)');
     check(rule.frost === '0,0.05,0', "Frost never tinks, though armor eats its whole hit (src === 'frost')");
     check(rule.long === '0,0,0.08', 'a Longshot (pierce) hit sets pierceT 0.08 and nothing else');
     check(rule.again.same && rule.again.t < 0.1 && rule.next === 0.1, 'one spark set per enemy at a time: a tink while sparks show keeps that set; a new one starts after it ends ' + JSON.stringify(rule.again) + ' next ' + rule.next);
@@ -2697,7 +2699,7 @@ let BASE;
     const t0 = await G(page, () => performance.now());
     let st = await intel(page);
     check(st.msg.includes('Armor') && st.msg.includes('Longshot ignores armor'), "tap the brute chip at wave 6: #infoMsg includes 'Armor' and 'Longshot ignores armor' (" + st.msg + ')');
-    const head = await G(page, () => { const W = window.__pw, w = 6, hp = Math.round(175 * (1 + W.CFG.hpA * (w - 1) + W.CFG.hpB * (w - 1) ** 2) * W.G.map.hp); return `Brute ×1 · ${hp} HP · Slow · Armor ${(3 * (1 + (w - 1) * 0.03)).toFixed(0)}. `; });
+    const head = await G(page, () => { const W = window.__pw, w = 6, hp = Math.round(175 * (1 + W.CFG.hpA * (w - 1) + W.CFG.hpB * (w - 1) ** 2) * W.G.map.hp); return `Brute ×1 · ${hp} HP · Slow · Armor ${(8 * (1 + (w - 1) * 0.03)).toFixed(0)}. `; });
     check(st.msg.startsWith(head) && st.msg.endsWith('Longshot ignores armor. Costs 2 lives.') && st.fits && st.html.startsWith('<b>Brute</b> ×1'), `the detail: <b>Brute</b> ×n · HP · speed · Armor a, then the blurb, which drops sentences from its front to fit 3 lines (${st.msg})`);
     check(!st.chips && st.off && !st.l1 && !st.l2, 'the chips make way and the detail gets 3 lines ' + JSON.stringify(st));
     check((await page.$eval('#sr', el => el.textContent)) === head + 'Brute. Armored, so small hits do less. Longshot ignores armor. Costs 2 lives.', 'the whole detail is read out to screen readers');
@@ -2717,7 +2719,7 @@ let BASE;
     const hpOf = (base, w) => Math.round(base * (1 + det.cfg.hpA * (w - 1) + det.cfg.hpB * (w - 1) ** 2));
     check(det.grunt6.t === `Grunt ×14 · ${hpOf(42, 6)} HP · Normal. Grunt. Steady and common.` && det.scout6.t === `Scout ×7 · ${hpOf(22, 6)} HP · Fast. Scout. Fast and fragile.`, 'Grunt: Normal; Scout: Fast (speed over 1.3) ' + JSON.stringify([det.grunt6, det.scout6]));
     check(det.wisp6.t === `Wisp ×4 · ${hpOf(36, 6)} HP · Normal. Wisp. Flies. Mortars can't hit it.` && det.splitter9.t === `Splitter ×${det.cfg.split9} · ${hpOf(80, 9)} HP · Normal. Splitter. Bursts into 2 Scouts.`, 'Wisp and Splitter ' + JSON.stringify([det.wisp6, det.splitter9]));
-    check(det.boss20.t === `Warlord ×2 · ${hpOf(900, 20)} HP · Slow · Armor 9. Warlord. Heavy armor. Costs 5 lives.`, 'Warlord at wave 20: Slow, Armor (6*(1+19*0.03)).toFixed(0) = 9 ' + JSON.stringify(det.boss20));
+    check(det.boss20.t === `Warlord ×2 · ${hpOf(900, 20)} HP · Slow · Armor 19. Warlord. Heavy armor. Costs 5 lives.`, 'Warlord at wave 20: Slow, Armor (12*(1+19*0.03)).toFixed(0) = 19 ' + JSON.stringify(det.boss20));
     check(Object.entries(det).every(([k, d]) => k === 'cfg' || d.fits), 'every detail fits its 3 lines at 390px ' + JSON.stringify(Object.keys(det)));
     // A tap anywhere along the row picks the nearest chip (they are only 16px tall); a tile tap closes the detail.
     const box = await rect(page, '#chips');
@@ -3120,22 +3122,27 @@ let BASE;
   current = 'themed-waves-balance: the retune';
   {
     const { ctx, page } = await newPage(browser);
-    const v = await G(page, () => { const W = window.__pw; return { cfg: { ...W.CFG }, hp: W.MAPS.map(m => m.hp), td: Object.fromEntries(Object.entries(W.TD).map(([k, d]) => [k, [d.cost, d.range, d.rate, d.dmg, d.splash || 0, d.slow || 0, d.chain || 0].join()])) }; });
+    const v = await G(page, () => { const W = window.__pw; return { cfg: { ...W.CFG }, hp: W.MAPS.map(m => m.hp), td: Object.fromEntries(Object.entries(W.TD).map(([k, d]) => [k, [d.cost, d.range, d.rate, d.dmg, d.splash || 0, d.slow || 0, d.chain || 0].join()])),
+      armor: Object.entries(W.ED).filter(([, d]) => d.armor).map(([k, d]) => k + ' ' + d.armor).join(), arm: [W.ED.brute, W.ED.boss].map(d => [6, 20, 30].map(w => +(d.armor * (1 + (w - 1) * W.CFG.armorGrow)).toFixed(2)).join('/')) }; });
     // (review fix: retuned for the plan's smart profile, which does not read the coming waves.)
-    check(v.cfg.hpB === 0.021 && v.cfg.themeBudget === 0.85 && v.hp.join() === '0.88,1,1.05', `the shipped retune: CFG.hpB ${v.cfg.hpB}, CFG.themeBudget ${v.cfg.themeBudget}, road hp ${v.hp.join(', ')} (Quarry Run 1.05)`);
+    // (1.1 balance: Brute armor 3 -> 8 and Warlord armor 6 -> 12 give the towers jobs, Bolts only no longer wins; Quarry 1.05 -> 1.06
+    // re-hits Hard for the bot that also spends during waves.)
+    check(v.cfg.hpB === 0.021 && v.cfg.themeBudget === 0.85 && v.hp.join() === '0.88,1,1.06', `the shipped retune: CFG.hpB ${v.cfg.hpB}, CFG.themeBudget ${v.cfg.themeBudget}, road hp ${v.hp.join(', ')} (Quarry Run 1.06)`);
+    check(v.armor === 'brute 8,boss 12' && v.cfg.armorGrow === 0.03 && v.cfg.armorFloor === 0.25 && v.arm.join() === '9.2/12.56/14.96,13.8/18.84/22.44', 'armor: Brute 8 and Warlord 12, growing 3% a wave (Brute 9.2 at wave 6, 15 at 30; Warlord 18.8 at 20), a hit keeps at least 25% ' + JSON.stringify(v));
     check(v.cfg.hpA === 0.25 && v.cfg.goldGrow === 0.01 && v.cfg.bonusA === 15 && v.cfg.bonusB === 2 && v.cfg.startGold === 200 && v.cfg.earlyMul === 3, 'nothing else in CFG moved ' + JSON.stringify(v.cfg));
     check(JSON.stringify(v.td) === JSON.stringify({ bolt: '50,2.4,0.55,11,0,0,0', mortar: '90,2.4,1.5,30,0.95,0,0', frost: '70,2,1,5,0.75,0.42,0', arc: '130,2.2,1.1,21,0,0,3', long: '120,4.6,2.1,78,0,0,0' }), 'no tower stat changed in this pass ' + JSON.stringify(v.td));
     // README 'Balance' records the numbers.
     const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8'), bal = readme.slice(readme.indexOf('## Balance'));
-    check(readme.includes('## Balance') && bal.includes('`CFG.hpB` 0.021') && bal.includes('`CFG.themeBudget` 0.85') && bal.includes('`hp` 1.05') && bal.includes('node tests/balance.js') && /smart \(20 seeds\) \| 20\/20/.test(bal), "README.md has a 'Balance' section with the final numbers and the bot results");
+    check(readme.includes('## Balance') && bal.includes('`CFG.hpB` 0.021') && bal.includes('`CFG.themeBudget` 0.85') && bal.includes('`hp` 1.06') && bal.includes('Brute 8') && bal.includes('Warlord 12') && bal.includes('node tests/balance.js') && /smart \(20 seeds\) \| 20\/20/.test(bal), "README.md has a 'Balance' section with the final numbers and the bot results");
     // tests/balance.js: exists, parses, and holds the spec's profiles and targets. It is run by hand (10-20 minutes budgeted), never from here.
     const bj = path.join(__dirname, 'balance.js'), src = fs.existsSync(bj) ? fs.readFileSync(bj, 'utf8') : '';
     const parse = require('child_process').spawnSync(process.execPath, ['--check', bj], { encoding: 'utf8' });
     check(src && parse.status === 0, 'tests/balance.js exists and parses ' + (parse.stderr || ''));
     // (review fix: smart is the plan's profile again, with no reading ahead; the reading bot is the extra 'reader' profile. Smart and
     // early play Normal on past wave 30 until they fall, so the early target compares how far each gets, not 30 with 30.)
-    check(["smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1] }", "spam: { opts: { allow: ['bolt'], div: 0 }, maps: [0, 1, 2], seeds: range(5) }", "mlf: { opts: { allow: ['mortar', 'long', 'frost'] }, maps: [1], seeds: range(5) }", 'early: { opts: { ...SMART, early: true }', 'const SMART = { frostN: 3, div: 0.3, noise: 0.3 };', "reader: { opts: { ...SMART, look: 4 }", '(P.endless || []).includes(m) ? 100 : 30'].every(x => src.includes(x)), 'it defines the smart (the plan\'s profile), spam, mlf and early profiles over the spec seeds, and plays smart and early on Normal until they fall');
-    check(['smart wins Easy >= 19/20', 'smart wins Normal >= 17/20', 'smart wins Hard 8-12/20', 'dies before wave 24', 'loses at least 1 life on an Air raid wave', 'median cleared wave within +-2 on Normal'].every(x => src.includes(x)) && !/require\(['"][^'"]*balance/.test(fs.readFileSync(__filename, 'utf8')), 'and checks every target; tests/run.js does not run it');
+    // (1.1 balance: spam has smart's noise; every profile spends between waves and once a second during one; new targets.)
+    check(["smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1] }", "spam: { opts: { allow: ['bolt'], div: 0, noise: 0.3 }, maps: [0, 1, 2], seeds: range(5) }", "mlf: { opts: { allow: ['mortar', 'long', 'frost'] }, maps: [1], seeds: range(5) }", 'early: { opts: { ...SMART, early: true }', 'const SMART = { frostN: 3, div: 0.3, noise: 0.3 };', "reader: { opts: { ...SMART, look: 4 }", '(P.endless || []).includes(m) ? MAX_ENDLESS : 30', 'const MAX_ENDLESS = 100;', 'if (n % 30) continue;'].every(x => src.includes(x)), 'it defines the smart (the plan\'s profile), spam, mlf, early and reader profiles over the spec seeds, spends once a second during a wave, and plays smart and early on Normal until they fall');
+    check(['smart wins Easy >= 19/20', 'smart wins Normal >= 17/20', 'smart wins Hard 8-12/20', "const SPAM = [[15, 29], [15, 23], [12, 23]];", 'loses at least 1 life on an Air raid wave in every run', 'median cleared wave within 10', 'median lives at wave 30 within 3', 'early vs smart on Hard: wins within', 'Normal winners earn 3, 2 and 1 stars', 'Hard winners rarely earn 3 stars'].every(x => src.includes(x)) && !/require\(['"][^'"]*balance/.test(fs.readFileSync(__filename, 'utf8')), 'and checks every target; tests/run.js does not run it');
     // A 1.1 save from before this item still loads: its run carries on into the themed waves.
     await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ saves: { meadow: { map: 'meadow', wave: 6, gold: 300, lives: 17, towers: [{ type: 'mortar', c: 2, r: 2, level: 2, spent: 160, mode: 'first' }] } }, last: 'meadow', best: { meadow: 6 } })));
     await page.reload(); await page.waitForTimeout(250);
@@ -3244,11 +3251,11 @@ let BASE;
     const { ctx, page } = await newPage(browser);
     const th = await G(page, () => { const W = window.__pw; return { t: [W.STAR3, W.STAR2], n: [20, 16, 15, 13, 12, 10, 9, 1].map(l => W.starCount(l)) }; });
     check(th.n.join() === '3,3,2,2,2,2,1,1' && th.t.join() === '16,10', '3 stars from 16 lives, 2 from 10, else 1 (20 gives 3, 15 and 12 give 2, 9 gives 1) ' + JSON.stringify(th));
-    // Thresholds against tests/balance.js (the plan's smart bot, 20 seeds; lives when wave 30 clears): Easy 16-20, Normal winners 3-20
-    // (median 10), Hard winners 1-14. At 16/10 the smart Normal winners split 7 / 5 / 7 across 3, 2 and 1 stars, and no Hard winner gets 3.
-    const BOT_NORMAL = [3, 3, 3, 6, 8, 8, 9, 10, 10, 10, 11, 15, 17, 17, 17, 18, 18, 19, 20], BOT_HARD = [1, 2, 2, 3, 4, 4, 5, 10, 14];
+    // Thresholds against tests/balance.js (the plan's smart bot, 20 seeds; lives when wave 30 clears): Easy 20, Normal winners 9-19
+    // (median 13.5), Hard winners 1-8. At 16/10 the smart Normal winners split 3 / 15 / 2 across 3, 2 and 1 stars, and no Hard winner gets 3.
+    const BOT_NORMAL = [9, 9, 10, 11, 12, 13, 13, 13, 13, 13, 14, 14, 15, 15, 15, 15, 15, 18, 18, 19], BOT_HARD = [1, 2, 2, 2, 2, 4, 5, 8, 8];
     const split = await G(page, ([a, b]) => { const W = window.__pw, k = l => [0, 0, 0, 0].map((_, i) => l.filter(x => W.starCount(x) === i).length); return { normal: k(a), hard: k(b) }; }, [BOT_NORMAL, BOT_HARD]);
-    check(split.normal[3] >= 3 && split.normal[2] >= 3 && split.hard[3] === 0, "the bot's Normal winners split across 2 and 3 stars, and its Hard winners earn no 3 stars " + JSON.stringify(split));
+    check(split.normal[3] >= 2 && split.normal[2] >= 2 && split.normal[1] >= 2 && split.hard[3] === 0, "the bot's Normal winners split across 3, 2 and 1 stars, and its Hard winners earn no 3 stars " + JSON.stringify(split));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -3423,7 +3430,7 @@ let BASE;
       W.hurt(e, 10, false, 'bolt'); o.bolt = g.stats.dmg.bolt;
       W.hurt(e, 1000, true, 'long'); o.long = g.stats.dmg.long; o.left = hp - 10; o.kills = g.stats.kills; o.gold = g.stats.gold; o.eg = e.gold;
       g.wave = 4; g.W[4] = { rem: 99, alive: 0 }; W.spawn('brute', 3); const b = g.enemies.find(x => x.type === 'brute');
-      W.hurt(b, 11, false, 'bolt'); o.armor = [b.armor, g.stats.dmg.bolt - 10];
+      W.hurt(b, 20, false, 'bolt'); o.armor = [b.armor, g.stats.dmg.bolt - 10];
       W.hurt(b, 2, false, 'arc'); o.arc = g.stats.dmg.arc;
       const d0 = JSON.stringify(g.stats.dmg); W.hurt(b, 50, true); W.hurtAll(1); o.nosrc = JSON.stringify(g.stats.dmg) === d0 && Object.keys(g.stats.dmg).join() === 'bolt,long,arc';
       // A frost splash counts each enemy it slows.
@@ -3436,7 +3443,7 @@ let BASE;
       return o; });
     check(r.fresh, 'newGame: G.stats is {kills:0, gold:0, leaks:{}, dmg:{}, slowed:0} and G.prevBest is the road best (0)');
     check(Math.abs(r.bolt - 10) < 1e-9 && Math.abs(r.long - r.left) < 1e-9 && r.kills === 1 && r.gold === r.eg, `hurt credits its src: Bolt 10, then Longshot only the ${r.left.toFixed(1)} HP left (not 1000); the kill adds 1 kill and its ${r.eg} gold ` + JSON.stringify(r));
-    check(Math.abs(r.armor[1] - (11 - r.armor[0])) < 1e-9 && Math.abs(r.arc - 0.5) < 1e-9, 'armor is taken off first (11 - armor), and a blunted hit still counts its quarter (2 -> 0.5) ' + JSON.stringify(r));
+    check(Math.abs(r.armor[1] - (20 - r.armor[0])) < 1e-9 && Math.abs(r.arc - 0.5) < 1e-9, 'armor is taken off first (20 - armor), and a blunted hit still counts its quarter (2 -> 0.5) ' + JSON.stringify(r));
     check(r.nosrc, 'a hit with no src (hurtAll) is not credited to any tower');
     check(r.slowed === 3 && r.slowNow === 3 && Math.abs(r.frost - 15) < 1e-9, 'one frost splash over 3 grunts: slowed 3, Frost dmg 15 ' + JSON.stringify(r));
     check(r.leaks.brute === 4 && r.leaks.scout === 1 && Object.keys(r.leaks).length === 2 && r.lives === 15, 'leaks count lives by type: 2 Brutes 4, 1 Scout 1 ' + JSON.stringify(r));
