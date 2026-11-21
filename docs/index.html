@@ -23,7 +23,7 @@
   --ink:#d6e1e3; --ink-dim:#8b9ea4;
   --brass:#c9a35a; --brass-ink:#1b1408;
   --field:#e6eef0; --field-edge:#a7bcc2; --field-ink:#1c2c33;
-  --algae:#7d9a33; --meat:#a4513a; --danger:#e2553f; --eyespot:#c23b22;
+  --algae:#7d9a33; --meat:#a4513a; --danger:#e2553f; --danger-ink:#ef7d69; --eyespot:#c23b22; /* danger-ink: small red text on the dark panels (6.8:1) */
   --hud-grazer:#7f9ee2; --hud-hunter:#b680dc; --hud-kin:#ee7ea6;
   --f-display:'Unbounded','Arial Black',system-ui,sans-serif;
   --f-body:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
@@ -101,9 +101,19 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 .pips i.on{background:var(--brass)}
 .cost{white-space:nowrap;flex:none;font-family:var(--f-mono);font-size:11px;color:var(--brass);font-variant-numeric:tabular-nums}
 .up:not(.can) .cost{color:var(--ink-dim)}
-#burst{pointer-events:auto;flex:none;width:76px;background:var(--panel);border:1px solid var(--line);border-radius:8px;cursor:pointer;display:grid;place-content:center;gap:2px;font-weight:600;font-size:13px}
+#burst{pointer-events:auto;flex:none;width:76px;background:var(--panel);border:1px solid var(--line);border-radius:8px;cursor:pointer;display:grid;place-content:center;gap:2px;font-weight:600;font-size:13px;position:relative;overflow:hidden}
 #burst small{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);font-weight:400}
-#burst.cool{opacity:.5}
+/* not ready (recharging or under 8 energy): the label dims; the recharge bar and 'low energy' stay readable */
+#burst.cool>.bl,#burst.cool>small{opacity:.5}
+/* the recharge bar along the bottom edge fills over the cooldown (scaleX, written by refreshHud), then hides */
+#burst .bcd{position:absolute;left:0;bottom:0;width:100%;height:3px;background:var(--brass);transform:scaleX(0);transform-origin:0 50%;opacity:0;transition:transform .1s linear;pointer-events:none}
+#burst.cd .bcd{opacity:1}
+#burst .blow{display:none;font-family:var(--f-mono);font-size:9.5px;font-weight:500;line-height:1.1;color:var(--danger-ink);white-space:nowrap} /* compact and touch screens; one line */
+#burst.nope{animation:shake .3s} /* tapped while not ready (item 02's 'no') */
+#burst.nope>.bl{animation:bad .6s}
+#burst.fired{animation:fired .45s ease-out} /* a burst fired: a brief brass flash */
+@keyframes fired{from{background:var(--brass);border-color:var(--brass);color:var(--brass-ink)}}
+@keyframes firedRM{from{background:rgba(201,163,90,.3);border-color:var(--brass)}}
 .overlay{position:fixed;inset:0;z-index:5;display:grid;place-items:center;background:rgba(6,10,12,.45);
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
   padding-block:calc(env(safe-area-inset-top,0px) + 16px) calc(env(safe-area-inset-bottom,0px) + 16px)}
@@ -139,6 +149,10 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .goal-wide{display:none}
   .up{width:auto;padding:7px 8px;gap:4px;align-content:space-between;grid-template-columns:minmax(0,1fr)}
   .up-fx,.up kbd,#burst small{display:none}
+  #burst.low>.blow{display:block}
+  /* a drag that starts on a tray button steers (tray0 in the script). Only here: the wider tray of tablets and
+     desktops is a strip that scrolls sideways under a finger */
+  .tray button{touch-action:none}
   .up-name{font-size:12.5px}
   .nm-full{display:none}
   .nm-short{display:inline}
@@ -212,6 +226,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .up-name{font-size:11.5px}
   .up{padding-inline:5px}
   .pips{gap:1px}
+  #burst{padding-inline:3px} /* 'low energy' stays one line in the 68 px button at 320 px */
 }
 @media (max-width:319px){
   /* narrower than any phone held upright (the first Galaxy Fold's 280 px cover screen): the panels stack and the tray
@@ -221,8 +236,9 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .tray{grid-template-columns:repeat(3,minmax(0,1fr))}
   #burst{grid-column:span 2}
 }
-@media (hover:none) and (pointer:coarse){.up kbd,#burst small{display:none}}
-@media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}.up.nope{animation:none}}
+@media (hover:none) and (pointer:coarse){.up kbd,#burst small{display:none}#burst.low>.blow{display:block}}
+@media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}.up.nope{animation:none}
+  #burst.nope{animation:none}#burst .bcd{transition:none}#burst.fired{animation:firedRM .4s step-end} /* a static brief tint */}
 </style>
 <style>body{margin:0}</style>
 </head>
@@ -254,7 +270,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   <div class="tray" id="tray">
     <div class="dna" id="dnaBox"><span class="eyebrow">DNA</span><span id="dna">0</span></div>
     <div class="ups" id="ups" aria-label="Evolve a trait"></div>
-    <button id="burst" type="button">Burst<small>Space</small></button>
+    <button id="burst" type="button"><span class="bl">Burst</span><small>Space</small><span class="blow">low energy</span><i class="bcd" id="bcd" aria-hidden="true"></i></button>
   </div>
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
@@ -313,6 +329,8 @@ const tok=n=>rs.getPropertyValue(n).trim();
 const COL={stage:tok('--stage'),field:tok('--field'),edge:tok('--field-edge'),fink:tok('--field-ink'),algae:tok('--algae'),meat:tok('--meat'),danger:tok('--danger'),brass:tok('--brass'),dim:tok('--ink-dim'),eyespot:tok('--eyespot'),line:tok('--line'),g:tok('--hud-grazer'),h:tok('--hud-hunter'),k:tok('--hud-kin')};
 const INK_BRASS='#7a5714'; // brass text on the bright field: 5.58:1 on --field (raw --brass is 2.01:1)
 const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+// the compact layouts (phones, upright or sideways), as in the CSS: read COMPACT.matches when needed, it changes on rotation
+const COMPACT=matchMedia('(max-width:560px),(max-height:520px)');
 const TAU=Math.PI*2;
 
 const DISH=1300,CAP=70,ALGAE_CAP=450,ALGAE_RATE=13;
@@ -626,9 +644,59 @@ const ptr={x:0,y:0,on:false};
 const joy={on:false,id:null,ox:0,oy:0,x:0,y:0};
 cv.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'){ptr.x=e.clientX;ptr.y=e.clientY;ptr.on=true}else if(joy.on&&e.pointerId===joy.id){joy.x=e.clientX;joy.y=e.clientY}});
 cv.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'){ptr.x=e.clientX;ptr.y=e.clientY;ptr.on=true}else{joy.on=true;joy.id=e.pointerId;joy.ox=joy.x=e.clientX;joy.oy=joy.y=e.clientY}try{cv.setPointerCapture(e.pointerId)}catch(_){}});
-const pUp=e=>{if(e.pointerId===joy.id){joy.on=false;joy.id=null}};
+const pUp=e=>{if(e.pointerId===joy.id){joy.on=false;joy.id=null}
+  if(e.pointerId===trayJoy){trayJoy=null;traySw=performance.now()+700}};
 cv.addEventListener('pointerup',pUp);cv.addEventListener('pointercancel',pUp);
 cv.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')ptr.on=false});
+// A drag that starts on a tray button steers too, in the compact layouts, where the tray fills the bottom of the screen
+// that thumbs reach (wider trays scroll sideways under a finger instead). Once a touch on a button has moved 12 px it
+// becomes the joystick, centred where it went down, unless another finger already steers: a second finger never takes
+// the joystick over from here. The dish then captures the pointer, so its pointerup/cancel/lostpointercapture handlers
+// end the drag, and the button never acts on it (onTap below). A click on the tray during the drag or 700 ms after it is
+// swallowed as a safeguard (browsers make none for a moved touch).
+const tray0={id:null,x:0,y:0};
+let trayJoy=null,traySw=0; // the pointer a tray drag turned into the joystick; tray clicks are swallowed until traySw
+$('tray').addEventListener('pointerdown',e=>{
+  if(e.pointerType!=='mouse'&&COMPACT.matches&&e.target.closest&&e.target.closest('button')){tray0.id=e.pointerId;tray0.x=e.clientX;tray0.y=e.clientY}});
+$('tray').addEventListener('pointermove',e=>{
+  if(e.pointerId!==tray0.id||Math.hypot(e.clientX-tray0.x,e.clientY-tray0.y)<=12)return;
+  tray0.id=null;if(joy.on)return;
+  joy.on=true;joy.id=e.pointerId;joy.ox=tray0.x;joy.oy=tray0.y;joy.x=e.clientX;joy.y=e.clientY;
+  trayJoy=e.pointerId;traySw=Infinity;
+  try{cv.setPointerCapture(e.pointerId)}catch(_){}});
+const tray0End=e=>{if(e.pointerId===tray0.id)tray0.id=null};
+$('tray').addEventListener('pointerup',tray0End);$('tray').addEventListener('pointercancel',tray0End);
+$('tray').addEventListener('click',e=>{if(performance.now()<traySw){traySw=0;e.stopPropagation();e.preventDefault()}},true);
+// Tray buttons act on a touch themselves instead of waiting for its click: a browser makes no click for a tap while
+// another finger is down, so Burst and the traits did nothing while the player steered. With onDown, fn runs on the
+// touch's pointerdown (Burst: a dash can't wait for the finger to lift); otherwise on its pointerup, if that pointer
+// moved under 12 px and did not become steering (tray0 above). Mouse and keyboard (Enter/Space on a focused button)
+// keep the click. A click that follows a touch activation is ignored (a touch click, or any within 700 ms of a touch),
+// so a tap acts once. Item 09's trait taps use this path too.
+// That click must not land anywhere else either: buying the 9th Membrane level on lift opens the win card, and on the
+// smallest phones 'Keep evolving' then sits under the finger, so the tap's click closed the card unseen. So a touch
+// that acted cancels its touchend (Chrome and Safari then make no click), and as a fallback (a pen, a browser that
+// clicks anyway, a touchend the browser doesn't deliver) a pointer click within 700 ms and 32 px of where a touch acted
+// is dropped on whatever it hits (tapGhost). Its own button still gets it, and ignores it as above.
+let tapGhost=null;
+document.addEventListener('click',e=>{const g=tapGhost;if(!g||!e.detail)return; // detail 0: keyboard or script
+  if(performance.now()-g.t>700){tapGhost=null;return}
+  if(g.b.contains(e.target)||Math.hypot(e.clientX-g.x,e.clientY-g.y)>32)return;
+  e.stopPropagation();e.preventDefault()},true);
+function onTap(b,fn,o={}){
+  const isT=e=>!!e.pointerType&&e.pointerType!=='mouse';
+  let id=null,x=0,y=0,tT=-1e9,act=false;
+  const run=e=>{tapGhost={t:performance.now(),x:e.clientX,y:e.clientY,b};if(e.pointerType==='touch')act=true;fn(e)};
+  b.addEventListener('pointerdown',e=>{if(!isT(e))return;tT=performance.now();
+    if(o.onDown)run(e);else{id=e.pointerId;x=e.clientX;y=e.clientY}});
+  b.addEventListener('pointermove',e=>{if(e.pointerId===id&&Math.hypot(e.clientX-x,e.clientY-y)>12)id=null});
+  b.addEventListener('pointerup',e=>{if(!isT(e))return;tT=performance.now();if(e.pointerId!==id)return;id=null;
+    if(joy.id!==e.pointerId&&Math.hypot(e.clientX-x,e.clientY-y)<=12)run(e)});
+  b.addEventListener('pointercancel',e=>{if(e.pointerId===id)id=null;if(isT(e))tT=performance.now()});
+  b.addEventListener('touchend',e=>{if(act){act=false;if(e.cancelable)e.preventDefault()}},{passive:false});
+  b.addEventListener('touchcancel',()=>{act=false});
+  b.addEventListener('click',e=>{if(!isT(e)&&performance.now()-tT>=700)fn(e);if(e.detail>0)b.blur()});
+}
 const KEYMAP={ArrowLeft:'l',KeyA:'l',ArrowRight:'r',KeyD:'r',ArrowUp:'u',KeyW:'u',ArrowDown:'d',KeyS:'d'};
 const onButton=e=>!!(e.target&&e.target.closest&&e.target.closest('button'));
 addEventListener('keydown',e=>{
@@ -640,10 +708,10 @@ addEventListener('keydown',e=>{
   if(mode==='play'&&!paused&&/^Digit[1-7]$/.test(e.code)){buy(+e.code.slice(5)-1)}
 });
 addEventListener('keyup',e=>{if(e.key==='Meta'){keys.clear();return}if(KEYMAP[e.code])keys.delete(KEYMAP[e.code]);if(e.code==='Space'&&mode==='play'&&!paused&&!onButton(e))e.preventDefault()});
-const resetInput=()=>{keys.clear();joy.on=false;joy.id=null;ptr.on=false};
+const resetInput=()=>{keys.clear();joy.on=false;joy.id=null;ptr.on=false;tray0.id=trayJoy=null;traySw=0};
 addEventListener('blur',resetInput);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)resetInput()});
-cv.addEventListener('lostpointercapture',e=>{if(e.pointerId===joy.id){joy.on=false;joy.id=null}});
+cv.addEventListener('lostpointercapture',pUp);
 function playerInput(){
   let kx=0,ky=0;
   if(keys.has('l'))kx--;if(keys.has('r'))kx++;if(keys.has('u'))ky--;if(keys.has('d'))ky++;
@@ -651,7 +719,10 @@ function playerInput(){
   if(joy.on){
     let dx=joy.x-joy.ox,dy=joy.y-joy.oy;const d=Math.hypot(dx,dy);
     if(d>JOY){joy.ox=joy.x-dx/d*JOY;joy.oy=joy.y-dy/d*JOY}
-    if(d>6){steer.x=dx/d;steer.y=dy/d;steer.m=clamp((d-6)/(JOY-12),0,1);return}
+    if(d>6){
+      // near a screen edge the finger can't travel a full JOY radius that way: full speed comes sooner in that direction
+      const ux=dx/d,uy=dy/d,room=Math.min(ux>0?(W-joy.ox)/ux:ux<0?-joy.ox/ux:1e9,uy>0?(H-joy.oy)/uy:uy<0?-joy.oy/uy:1e9),R=clamp(room-3,18,JOY);
+      steer.x=ux;steer.y=uy;steer.m=clamp((d-6)/(R-12),0,1);return}
     steer.x=steer.y=steer.m=0;return;
   }
   if(ptr.on){
@@ -668,10 +739,14 @@ function drawJoy(){
   ctx.save();ctx.strokeStyle=COL.brass;ctx.fillStyle=COL.brass;ctx.globalAlpha=.5;ctx.lineWidth=2;
   ctx.beginPath();ctx.arc(joy.ox,joy.oy,JOY,0,TAU);ctx.stroke();ctx.globalAlpha=.35;ctx.beginPath();ctx.arc(joy.ox+dx,joy.oy+dy,20,0,TAU);ctx.fill();ctx.restore();
 }
+const BURST_CD=2.5;
+// Space, a click, or a touch going down on the button. Not ready: the button shakes ('no'); fired: it flashes brass.
 function burst(){
   if(!player||mode!=='play'||paused)return;
-  if(player.burstCd>0||player.en<8)return;
-  player.burst=.6;player.burstCd=2.5;player.en-=6;
+  const b=$('burst');
+  if(player.burstCd>0||player.en<8){b.classList.remove('fired');bumpEl(b,'nope');return}
+  player.burst=.6;player.burstCd=BURST_CD;player.en-=6;
+  b.classList.remove('nope');bumpEl(b,'fired');refreshHud(); // dim it and start the recharge bar now, not on the next HUD tick
 }
 
 /* ---------- simulation ---------- */
@@ -916,8 +991,21 @@ function drawCell(c,px){
   if(c.flash>0){ctx.strokeStyle=COL.danger;ctx.globalAlpha=c.flash/.15;ctx.lineWidth=Math.max(px*2,r*.08);ctx.beginPath();ctx.arc(0,0,r*1.04,0,TAU);ctx.stroke();ctx.globalAlpha=1}
   ctx.restore();
 }
+// A burst shows on the field: fading ghosts of the player trail back along its velocity, under every cell. Drawn in the
+// world transform before the frame layer, so nothing spills past the rim; flat fills, no gradients. Reduced motion: a
+// static brass tint around the player while the burst lasts.
+function drawWake(){
+  const p=player;if(!p||!(p.burst>0))return;
+  if(RM){ctx.fillStyle=COL.brass;ctx.globalAlpha=.2;ctx.beginPath();ctx.arc(p.x,p.y,p.r*1.3,0,TAU);ctx.fill();ctx.globalAlpha=1;return}
+  const v=Math.hypot(p.vx,p.vy);if(v<15)return;
+  const ux=p.vx/v,uy=p.vy/v,gap=Math.min(p.r*.8,v*.045),k=Math.min(1,p.burst/.6);
+  ctx.fillStyle=hsl(p.hue,50,46,1);
+  for(let i=4;i>=1;i--){ctx.globalAlpha=.24*k*(1-i/5);ctx.beginPath();ctx.arc(p.x-ux*gap*i,p.y-uy*gap*i,p.r*(1-.1*i),0,TAU);ctx.fill()}
+  ctx.globalAlpha=1;
+}
 function drawCells(px){
   const vis=cells.filter(c=>inView(c.x,c.y,c.r*2.5)).sort((a,b)=>a.r-b.r);
+  drawWake();
   for(const c of vis)drawCell(c,px);
   if(!player)return;
   const warn=player.sense*(player.g.eye?1.8:1);
@@ -1006,10 +1094,10 @@ const upBtns=UP.map((u,i)=>{
   const b=document.createElement('button');b.type='button';b.className='up';b.id='up-'+u.k;
   const nm=u.short?`<span class="nm-full">${u.name}</span><span class="nm-short">${u.short}</span>`:u.name; // short: compact tray
   b.innerHTML=`<span class="up-top"><span class="up-name">${nm}</span><kbd>${i+1}</kbd></span><span class="up-fx">${u.fx}</span><span class="up-foot"><span class="pips">${'<i></i>'.repeat(MAX[u.k])}</span><span class="cost"></span></span>`;
-  b.addEventListener('click',e=>{buy(i);if(e.detail>0)b.blur()});
+  onTap(b,()=>buy(i)); // a touch buys on lifting (also while another finger steers); mouse and keys on the click
   $('ups').appendChild(b);return b;
 });
-$('burst').addEventListener('click',e=>{burst();if(e.detail>0)e.currentTarget.blur()});
+onTap($('burst'),burst,{onDown:true}); // a touch bursts as it goes down, also while another finger steers
 function cost(u){return u.base+u.step*player.lv[u.k]}
 function buy(i){
   if(mode!=='play'||!player||paused)return;
@@ -1053,7 +1141,15 @@ function refreshHud(force){
       b.querySelectorAll('.pips i').forEach((p,j)=>p.classList.toggle('on',j<lv));
       b.querySelector('.cost').innerHTML=mx?'max':c+DNA_U;
       b.setAttribute('aria-label',`${u.name.replace('&shy;','')}, level ${lv} of ${MAX[u.k]}, ${mx?'maxed':'costs '+c+' DNA'}. ${u.fx}`)});
-    const cool=player.burstCd>0||player.en<8;if(hudC.cool!==cool){hudC.cool=cool;hEl('burst').classList.toggle('cool',cool)}
+    // Burst's readiness: dim while not ready, 'low energy' under 8 energy (compact and touch screens), and while it
+    // recharges a bar along the bottom fills (scaleX 0 -> 1 over BURST_CD, 2% steps, eased by a .1 s transition; reset
+    // to 0 while hidden, so it never visibly runs backwards)
+    const cd=player.burstCd>0,low=player.en<8,cool=cd||low,bt=hEl('burst');
+    if(hudC.cool!==cool){hudC.cool=cool;bt.classList.toggle('cool',cool)}
+    if(hudC.low!==low){hudC.low=low;bt.classList.toggle('low',low)}
+    if(hudC.cd!==cd){hudC.cd=cd;bt.classList.toggle('cd',cd)}
+    const f=cd?Math.round(clamp(1-player.burstCd/BURST_CD,0,1)*50)/50:0;
+    if(hudC.bcd!==f){hudC.bcd=f;hEl('bcd').style.transform='scaleX('+f+')'}
   }else if(!hudC.noPlayer){
     hudC.noPlayer=true;
     UP.forEach((u,i)=>{delete hudC['up'+i];const b=upBtns[i];b.disabled=true;b.classList.remove('can');b.querySelector('.cost').innerHTML=u.base+DNA_U});
