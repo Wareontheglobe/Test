@@ -186,6 +186,27 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .how b{color:var(--ink)}
 .result{font-family:var(--font-display);font-size:15px;color:var(--muted);margin:0}
 .result b{color:var(--ink);font-size:22px}
+.tag.rec{background:var(--brass);color:var(--brass-ink)}
+/* Stars per road: brass when earned, a muted outline when not. 12px on the road cards, 28px on the win card. */
+.star{display:block;flex:none;width:12px;height:12px}
+.star path{fill:none;stroke:var(--muted);stroke-width:1.6;stroke-linejoin:round}
+.star.on path{fill:#e3ad45;stroke:#e3ad45}
+.stars{display:inline-flex;gap:1px;margin-right:6px;vertical-align:-1px}
+#endStars{display:flex;gap:6px}
+#endStars .star{width:28px;height:28px}
+/* A star this run newly earned pops in (scale .4 to 1 over 200ms, 150ms after the one before). */
+.star.pop{animation:starpop .2s ease-out both}
+@keyframes starpop{from{transform:scale(.4)}to{transform:scale(1)}}
+#endHint{margin:-8px 0 0;font-size:13px;color:var(--muted)}
+/* The run report: kills and gold, what got through, each tower's share of the damage, and on a loss one tip. */
+#endStats{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+#endStats .ok{color:var(--good)}
+#endStats .tip{color:var(--ink)}
+#endStats .nw{white-space:nowrap}
+/* An endless run's 'New record' sits on its own line under the result. */
+#endText .tag.rec{display:table;margin:8px 0 0}
+#endStats .dbar{display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--panel-2);margin-bottom:4px}
+#endStats .dbar i{display:block;height:100%;flex:none}
 .foot{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted)}
 .pills{display:flex;flex-wrap:wrap;gap:8px}
 .pill{height:44px;padding:0 14px;border-radius:999px;background:var(--panel-2);border:1px solid var(--line);font-weight:700;font-size:13px;
@@ -195,7 +216,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .pill.off .i-off{display:inline}
 .pill.off{color:var(--muted)}
 
-@media (prefers-reduced-motion:reduce){#toast{transition:none}.tw.ready .cost,.act.up.ready small,#sGold.short,#sLives.hurt svg,#sLives.low svg,#sGold.gain{animation:none}#sGold.gain span{text-shadow:none;color:var(--brass)}}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}.tw.ready .cost,.act.up.ready small,#sGold.short,#sLives.hurt svg,#sLives.low svg,#sGold.gain,.star.pop{animation:none}#sGold.gain span{text-shadow:none;color:var(--brass)}}
 /* Short landscape screens: board on the left, HUD and controls stacked on the right. */
 @media (orientation:landscape) and (max-height:560px){
   #app{display:grid;max-width:none;grid-template-columns:minmax(0,1fr) minmax(300px,360px);grid-template-rows:auto minmax(0,1fr);
@@ -241,7 +262,7 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
     <h1 class="title" id="menuTitle">Path<span>warden</span></h1>
     <p class="sub">Hold the road for 30 waves. Build on the grass, upgrade what works, and don't let anything reach the keep.</p>
     <button class="big" id="bContinue" hidden>Continue</button>
-    <p class="eyebrow">Choose a road</p>
+    <p class="eyebrow" id="roadHead">Choose a road</p>
     <div class="maps" id="maps"></div>
     <ul class="how">
       <li><b>Tap grass</b>, pick a tower, tap it again to build.</li>
@@ -264,7 +285,10 @@ button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 <div class="ov" id="endOv" role="dialog" aria-modal="true" aria-labelledby="endTitle" hidden>
   <div class="card">
     <h2 class="title" style="font-size:30px" id="endTitle">The keep has fallen</h2>
+    <div id="endStars" role="img" hidden></div>
+    <p id="endHint" hidden></p>
     <p class="result" id="endText"></p>
+    <div id="endStats"></div>
     <button class="big" id="bEndMain">Try again</button>
     <button class="ghost" id="bEndAlt">Main menu</button>
   </div>
@@ -404,6 +428,9 @@ if(!S.best||typeof S.best!=='object'||Array.isArray(S.best))S.best={};
     const top=Math.min(60,Math.max(0,...Object.values(S.best).filter(Number.isFinite)));S.seen=['grunt'];
     for(let w=1;w<=top;w++)for(const [t] of buildWave(w))if(!S.seen.includes(t))S.seen.push(t);
   }
+  // Stars per road (1-3), earned by winning the campaign. Before 1.1 a win only left a best of 30, which counts as 1 star.
+  const st=S.stars&&typeof S.stars==='object'&&!Array.isArray(S.stars)?S.stars:{};S.stars={};
+  for(const m of MAPS){const v=st[m.id],b=S.best[m.id];if([1,2,3].includes(v))S.stars[m.id]=v;else if(Number.isFinite(b)&&b>=FINAL_WAVE)S.stars[m.id]=1}
   persist();
 }
 // Drop anything in a stored run that this version can't rebuild, rather than failing to start.
@@ -418,7 +445,20 @@ function validSave(sv){
   }).map(t=>({type:t.type,c:t.c,r:t.r,level:[1,2,3].includes(t.level)?t.level:1,
     spent:Number.isFinite(t.spent)&&t.spent>0?Math.round(t.spent):TD[t.type].cost,mode:migrateMode(t.type,t.mode)}));
   sv.won=!!sv.won;
+  // The run report so far. A save from before 1.1 (or a damaged one) starts the report over rather than failing to load.
+  sv.stats=validStats(sv.stats);
+  if(!int(sv.prevBest,0))delete sv.prevBest;
   return sv;
+}
+// A run's report: kills, gold earned (kills, wave bonuses, early calls), lives lost per enemy type (leaks), damage dealt per
+// tower type (dmg) and how many times Frost slowed something. Used as stored only if every number is finite and >= 0 and every
+// key is an enemy (leaks) or tower (dmg) type; otherwise a fresh report. Always returns a copy.
+function freshStats(){return {kills:0,gold:0,leaks:{},dmg:{},slowed:0}}
+function validStats(s){
+  const num=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0;
+  const tally=(o,keys)=>!!o&&typeof o==='object'&&!Array.isArray(o)&&Object.entries(o).every(([k,v])=>keys.includes(k)&&num(v));
+  if(!s||typeof s!=='object'||!num(s.kills)||!num(s.gold)||!num(s.slowed)||!tally(s.leaks,Object.keys(ED))||!tally(s.dmg,TKEYS))return freshStats();
+  return {kills:s.kills,gold:s.gold,leaks:{...s.leaks},dmg:{...s.dmg},slowed:s.slowed};
 }
 function persist(){try{localStorage.setItem(STORE,JSON.stringify(S))}catch(e){}}
 
@@ -496,11 +536,15 @@ function newGame(map,save){
   // banner: the one big line on the board ({s, sub, c, t, dur}); bannerNext waits behind 'WARLORD DOWN'. bossBar: the pinned Warlord bar. shakeT: board shake left (real time).
   // chipTip: a tapped wave chip's detail in #info ({type, key, until}), shown until performance.now() passes until.
   // modeTip: what a tap on Target set the selected tower to, said in #info ({t, until}) the same way.
+  // stats: the run report (see validStats). prevBest: this road's best wave before the run began, for 'New record'. A resumed run
+  // keeps both from its save, so a record set before the app was closed still counts as this run's.
   G={map,grid:map.grid.slice(),wave:0,gold:CFG.startGold,lives:20,towers:[],enemies:[],projs:[],fx:[],spawnQ:[],W:{},time:0,
      speed:speedPref,paused:false,over:false,won:false,cleared:0,sel:null,selTower:null,pending:null,armKept:false,selAt:0,sellArm:false,sellArmAt:0,sendArmAt:0,
-     poorWas:{},upWas:null,hintTiles:[],gateFlash:0,hurtT:0,hurtDur:0.45,banner:null,bannerNext:null,bossBar:null,shakeT:0,chipTip:null,modeTip:null,running:true};
+     poorWas:{},upWas:null,hintTiles:[],gateFlash:0,hurtT:0,hurtDur:0.45,banner:null,bannerNext:null,bossBar:null,shakeT:0,chipTip:null,modeTip:null,running:true,
+     stats:freshStats(),prevBest:S.best[map.id]||0,starRes:null};
   if(save){
-    G.wave=save.wave;G.cleared=save.wave;G.gold=save.gold;G.lives=save.lives;G.won=!!save.won;
+    G.wave=save.wave;G.cleared=save.wave;G.gold=save.gold;G.lives=save.lives;G.won=!!save.won;G.stats=validStats(save.stats);
+    if(Number.isInteger(save.prevBest))G.prevBest=save.prevBest;
     for(const t of save.towers)placeTower(t.type,t.c,t.r,t.level,t.spent,t.mode);
   }
   // A player's first run: point at two good tiles until the first build.
@@ -605,7 +649,7 @@ function startWave(){
   let t=G.time+0.4,count=0;
   for(const [type,cnt,iv,delay] of buildWave(w)){t+=delay;for(let i=0;i<cnt;i++){G.spawnQ.push({at:t,type,w});t+=iv;count++}}
   G.W[w]={rem:count,alive:0,leaked:0};
-  if(early){const b=earlyBonus(w);G.gold+=b;toast(`Called early · +${b} gold`);goldGain()}
+  if(early){const b=earlyBonus(w);G.gold+=b;G.stats.gold+=b;toast(`Called early · +${b} gold`);goldGain()}
   const sub=bannerSub(w);markSeen(w); // the sub names what is new, so it is worked out before the wave counts as met
   setBanner({s:`WAVE ${w}`,sub,c:bossWave(w)?'#a487ff':'#f0e9d2',dur:1.3,say:`Wave ${w}${sub?'. '+sub:''}`});
   sfx('wave');refreshPanel();
@@ -641,9 +685,11 @@ function waveDone(w){
   const s=G.W[w];if(!s)return false;s.alive--;
   if(s.rem<=0&&s.alive<=0&&!G.over){
     delete G.W[w];
-    const b=CFG.bonusA+CFG.bonusB*w;G.gold+=b;G.cleared=Math.max(G.cleared,w);
+    const b=CFG.bonusA+CFG.bonusB*w,c0=G.cleared;G.gold+=b;G.stats.gold+=b;G.cleared=Math.max(G.cleared,w);
     // The run only saves when the road is calm, so record a new best right away: leaving mid-wave must not lose it.
     if(G.cleared>(S.best[G.map.id]||0))recordBest();
+    // Once a run, as it first passes the road's best from before it began (not on a first run, which has none).
+    if(G.prevBest>0&&c0<=G.prevBest&&G.cleared>G.prevBest)toast(`New record · wave ${G.cleared}`);
     const calm=!activeWaves()&&!G.spawnQ.length,victory=calm&&G.cleared>=FINAL_WAVE&&!G.won,flawless=calm&&!s.leaked;
     // Overlapping waves get no banner: the next one is already on the road.
     if(calm)setBanner({s:`CLEARED +${b}`,sub:flawless?'FLAWLESS':'',c:'#e3ad45',dur:1.0,say:`Wave ${w} cleared. +${b} gold${flawless?'. Flawless':''}`});
@@ -651,7 +697,7 @@ function waveDone(w){
     sfx(victory?'win':flawless?'flawless':'clear');
     if(calm){
       saveRun();
-      if(victory){G.won=true;recordBest();saveRun();showEnd(true)}
+      if(victory){G.won=true;recordBest();awardStars();saveRun();showEnd(true)}
     }
     refreshPanel();
     return victory;
@@ -660,9 +706,12 @@ function waveDone(w){
 }
 // src is the attacking tower's type. A Longshot (pierce) hit flashes a red rim. A hit whose damage armor cut by 40% or more
 // sparks off the armor with a tink instead of the white flash (not Frost, whose small hits would tink all the time).
+// The run report credits src with the damage that landed, up to the HP the enemy had left.
 function hurt(e,dmg,pierce,src){
   if(e.dead)return;
-  const a=pierce?0:e.armor;e.hp-=Math.max(dmg*0.25,dmg-a);
+  const a=pierce?0:e.armor,d=Math.max(dmg*0.25,dmg-a);
+  if(src)G.stats.dmg[src]=(G.stats.dmg[src]||0)+Math.max(0,Math.min(e.hp,d));
+  e.hp-=d;
   if(pierce)e.pierceT=0.08;
   else if(src!=='frost'&&dmg-a<0.6*dmg){
     // One spark set per enemy at a time: a tink while sparks still show keeps that set.
@@ -672,7 +721,7 @@ function hurt(e,dmg,pierce,src){
   if(e.hp<=0)kill(e);
 }
 function kill(e){
-  e.dead=true;G.gold+=e.gold;
+  e.dead=true;G.gold+=e.gold;G.stats.kills++;G.stats.gold+=e.gold;
   const boss=!!e.d.boss;
   // A white pop where it stood, so a kill reads as a kill and not a disappearance.
   G.fx.push({k:'pop',x:e.x,y:e.y-(e.fly?LIFT:0),r:e.r,t:0,dur:0.16});
@@ -699,6 +748,7 @@ function keepPos(){const P=G.map.path.P,b=P[P.length-1];return {x:clamp(b.x,0.4,
 function leak(e){
   e.dead=true;G.lives=Math.max(0,G.lives-e.d.lives);G.gateFlash=0.6;
   if(G.W[e.w])G.W[e.w].leaked=(G.W[e.w].leaked||0)+1;
+  G.stats.leaks[e.type]=(G.stats.leaks[e.type]||0)+e.d.lives;
   bossGone(e);
   if(S.vibe!==false){try{navigator.vibrate&&navigator.vibrate(e.d.boss?[60,40,60]:30)}catch(x){}}
   // A red vignette (real time, see frame()), the lives lost above the keep, and the HUD heart. A new leak refreshes the vignette; it never stacks.
@@ -798,7 +848,7 @@ function step(dt){
       p.done=true;
       if(p.k==='bolt')hurt(e,p.dmg,false,p.src);
       else{
-        for(const o of G.enemies.slice()){if(o.dead||o.dist<0.1)continue;if(Math.hypot(o.x-e.x,o.y-e.y)<=p.splash){o.slow=Math.max(o.slow,p.slow*(o.d.boss?0.5:1));o.slowT=p.slowDur;hurt(o,p.dmg,false,p.src)}}
+        for(const o of G.enemies.slice()){if(o.dead||o.dist<0.1)continue;if(Math.hypot(o.x-e.x,o.y-e.y)<=p.splash){o.slow=Math.max(o.slow,p.slow*(o.d.boss?0.5:1));o.slowT=p.slowDur;G.stats.slowed++;hurt(o,p.dmg,false,p.src)}}
         G.fx.push({k:'ring',x:e.x,y:e.y,t:0,dur:0.3,r:p.splash,c:'#c9f3ff'});
       }
     }else{p.x+=dx/d*mv;p.y+=dy/d*mv}
@@ -830,7 +880,7 @@ function saveRun(){
   // No empty runs. If everything built before wave 1 was sold, the slot would only bring the towers back.
   if(G.wave===0&&G.towers.length===0){if(S.saves[id]){delete S.saves[id];persist()}return}
   S.saves[id]={map:id,wave:G.wave,gold:G.gold,lives:G.lives,won:G.won,
-    towers:G.towers.map(t=>({type:t.type,c:t.c,r:t.r,level:t.level,spent:t.spent,mode:t.mode}))};
+    towers:G.towers.map(t=>({type:t.type,c:t.c,r:t.r,level:t.level,spent:t.spent,mode:t.mode})),stats:validStats(G.stats),prevBest:G.prevBest};
   S.last=id;
   if(G.cleared>(S.best[id]||0))S.best[id]=G.cleared;
   persist();
@@ -844,12 +894,63 @@ function gameOver(){
   G.hurtT=0.9;G.bannerNext=null;if(G.banner)G.banner.cut=0.4;syncInert();
   const g=G;setTimeout(()=>{if(G===g&&G.over&&$('#endOv').hidden)showEnd(false)},900);
 }
+// Stars for winning the campaign, by the lives left: 3 from STAR3, 2 from STAR2, else 1. Set against the balance bot (tests/balance.js):
+// its smart Normal winners finish with 2-15 lives (median 10), so they split across 1, 2 and 3 stars; on Hard they finish with 1-7.
+const STAR3=13,STAR2=10;
+const starCount=l=>l>=STAR3?3:l>=STAR2?2:1;
+const STAR_D='M12 1.9L15 8.9L22.7 9.6L16.9 14.7L18.6 22.1L12 18.2L5.4 22.1L7.1 14.7L1.3 9.6L9 8.9z';
+// Three stars, the first n earned. Stars from index `from` up pop in, 150ms apart (not under reduced motion).
+function starsHtml(n,from=3){
+  return [0,1,2].map(i=>{const pop=i<n&&i>=from&&!rm();
+    return `<svg class="star${i<n?' on':''}${pop?' pop':''}"${pop?` style="animation-delay:${(i-from)*150}ms"`:''} viewBox="0 0 24 24" aria-hidden="true"><path d="${STAR_D}"/></svg>`}).join('');
+}
+// The first time the campaign is won (G.won): the road keeps its most stars.
+function awardStars(){const id=G.map.id,n=starCount(G.lives),was=S.stars[id]||0;S.stars[id]=Math.max(was,n);persist();G.starRes={n,was}}
+// Numbers under 1000 as they are, then '1.2k'.
+const fmtK=n=>n<1000?String(Math.round(n)):(n/1000).toFixed(1)+'k';
+// The lesson a lost run ends on, for the type that cost it the most lives.
+const END_TIP={wisp:"Wisps fly. Mortars can't hit them, but Bolt, Frost, Arc and Longshot can.",brute:'Armor blunts small hits. Longshot ignores armor.',
+  boss:'Armor blunts small hits. Longshot ignores armor.',scout:'Scouts are fast. Frost slows them down.',
+  splitter:'Splitters burst into 2 Scouts. Hit them early on the road.',grunt:'Build where the road bends so one tower covers two stretches.'};
+// #endStats: kills and gold; up to 3 types that got through, by lives lost; each tower type's share of the damage as a bar and a
+// line (types at 1% or more), with how often Frost slowed something; and on a loss, the tip.
+// Each part is kept whole on a narrow card, and a separator stays with the part before it, so no line starts with '·'.
+// The text is still the parts joined with sep.
+const nwJoin=(parts,sep)=>parts.map((p,i)=>`<span class="nw">${p}${i<parts.length-1?sep.trimEnd():''}</span>`).join(' ');
+function endStatsHtml(loss){
+  const s=G.stats,out=[],en=n=>n.toLocaleString('en-US');
+  out.push(`<div>${nwJoin([`${en(s.kills)} kill${s.kills===1?'':'s'}`,`${en(s.gold)} gold earned`],' · ')}</div>`);
+  const lk=Object.entries(s.leaks).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]||INTRO.indexOf(a[0])-INTRO.indexOf(b[0]));
+  out.push(lk.length?`<div>Got through: ${nwJoin(lk.slice(0,3).map(([t,v])=>{const n=Math.round(v/ED[t].lives);return `${n} ${ED[t].name}${n===1?'':'s'} (-${v})`}),', ')}</div>`
+    :'<div class="ok">Nothing got through.</div>');
+  const tot=TKEYS.reduce((a,k)=>a+(s.dmg[k]||0),0);
+  if(tot>0){
+    const ds=TKEYS.filter(k=>s.dmg[k]>0).map(k=>[k,100*s.dmg[k]/tot]).sort((a,b)=>b[1]-a[1]);
+    const line=ds.filter(([,p])=>Math.round(p)>=1).map(([k,p])=>`${TD[k].name} ${Math.round(p)}%`);
+    if(s.slowed>0)line.push(`Frost slowed ${fmtK(s.slowed)}`);
+    out.push(`<div><div class="dbar" aria-hidden="true">${ds.map(([k,p])=>`<i data-t="${k}" style="width:${p.toFixed(3)}%;background:${TD[k].color}"></i>`).join('')}</div><div class="dmg">${nwJoin(line,' · ')}</div></div>`);
+  }
+  if(loss&&lk.length)out.push(`<div class="tip">${END_TIP[lk[0][0]]}</div>`);
+  return out.join('');
+}
 function showEnd(win){
-  $('#endTitle').textContent=win?'The road holds':'The keep has fallen';
+  // A run lost after the campaign was won is an endless run: it is measured by how far past wave 30 it got.
+  const endless=!win&&G.won;
+  $('#endTitle').textContent=win?'The road holds':endless?'Endless run over':'The keep has fallen';
   $('#endText').innerHTML=win
     ?`All <b>${FINAL_WAVE}</b> waves cleared on ${G.map.name} with <b>${G.lives}</b> lives left. Keep going for endless waves, or head back to try another road.`
+    :endless?`Cleared <b>${G.cleared}</b> waves, ${G.cleared-FINAL_WAVE} past the campaign.${G.cleared>G.prevBest?' <span class="tag rec">New record</span>':''}`
     :`You held <b>${G.cleared}</b> wave${G.cleared===1?'':'s'} on ${G.map.name}. Best here: <b>${S.best[G.map.id]||0}</b>.`;
-  $('#bEndMain').textContent=win?'Keep going':'Try again';
+  // The win's stars, the ones new to this road popping in, and how to earn the next.
+  const sr=G.starRes||{n:starCount(G.lives),was:3},stars=$('#endStars'),hint=$('#endHint');
+  stars.hidden=hint.hidden=!win;
+  if(win){
+    stars.innerHTML=starsHtml(sr.n,sr.was);stars.setAttribute('aria-label',`${sr.n} of 3 stars`);
+    hint.textContent=sr.n===1?`Finish with ${STAR2} or more lives for a second star.`:sr.n===2?`Finish with ${STAR3} or more lives for the third star.`:'';
+    hint.hidden=sr.n>=3;
+  }
+  $('#endStats').innerHTML=endStatsHtml(!win);
+  $('#bEndMain').textContent=win?'Keep going':endless?'New run':'Try again';
   $('#endOv').hidden=false;syncOv();
   // A win pauses the run behind the dialog. Banners and the shake from the winning moment would only play after 'Keep going'.
   if(win){G.paused=true;G.banner=G.bannerNext=null;G.shakeT=0}
@@ -1664,9 +1765,11 @@ function showMenu(){
   for(const m of MAPS){
     const b=document.createElement('button');b.className='mapbtn';
     const c=document.createElement('canvas');const txt=document.createElement('div');
-    const best=S.best[m.id]||0,sv=S.saves[m.id];
-    const md=sv?`<div class="md prog">In progress · wave ${sv.wave+1}</div>`
-      :`<div class="md">${best?`Best: wave ${best}${best>=FINAL_WAVE?' · conquered':''}`:'Not yet played'}</div>`;
+    // Line 2: the road's stars once it has a best wave, then the run in progress or the best wave.
+    const best=S.best[m.id]||0,sv=S.saves[m.id],n=S.stars[m.id]||0;
+    const stars=best>0?`<span class="stars" role="img" aria-label="${n} of 3 stars">${starsHtml(n)}</span>`:'';
+    const md=sv?`<div class="md prog">${stars}In progress · wave ${sv.wave+1}</div>`
+      :`<div class="md">${best?`${stars}Best wave ${best}`:'Not yet played'}</div>`;
     txt.innerHTML=`<div class="mn">${m.name}<span class="tag ${m.diff}">${m.diff}</span></div>${md}`;
     b.append(c,txt);box.append(b);
     // A road with a saved run resumes it. Starting over is Pause > Restart road.
@@ -1674,6 +1777,7 @@ function showMenu(){
     requestAnimationFrame(()=>{const dpr=Math.min(3,window.devicePixelRatio||1),ts=5;const img=buildBG(m,ts,dpr);
       c.width=img.width;c.height=img.height;c.getContext('2d').drawImage(img,0,0)});
   }
+  $('#roadHead').textContent=`Choose a road · ★ ${MAPS.reduce((a,m)=>a+(S.stars[m.id]||0),0)}/${MAPS.length*3}`;
   const sm=continueMap(),cont=$('#bContinue');
   cont.hidden=!sm;
   if(sm)cont.textContent=`Continue · ${sm.name}, wave ${S.saves[sm.id].wave+1}`;
@@ -1717,7 +1821,7 @@ newGame(MAPS[1]);G.running=false;
 G.gold=200;G.hintTiles=[];
 paintIcons();showMenu();requestAnimationFrame(frame);
 
-window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,mixedWave,waveTheme,waveSummary:w=>waveSummary(w),refreshPanel,bannerSub:w=>bannerSub(w),newTypes:w=>newTypes(w),BLURB,TIP_MS,sellValue,hintTiles:i=>hintTiles(MAPS[i]),step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
+window.__pw={get G(){return G},get S(){return S},AU,sfx,ED,buildWave,mixedWave,waveTheme,waveSummary:w=>waveSummary(w),refreshPanel,bannerSub:w=>bannerSub(w),newTypes:w=>newTypes(w),BLURB,TIP_MS,starCount,STAR3,STAR2,fmtK,END_TIP,sellValue,hintTiles:i=>hintTiles(MAPS[i]),step:dt=>step(dt),startWave,newGame:i=>{newGame(MAPS[i]);G.running=false},
   build:(k,c,r)=>{if(G.grid[r*COLS+c]||G.gold<TD[k].cost)return false;G.gold-=TD[k].cost;placeTower(k,c,r);return true},
   CFG,tstats,coverage,upgrade:t=>{const c=upCost(t);if(!c||G.gold<c)return false;G.gold-=c;t.spent+=c;t.level++;return true},MAPS,TD,COLS,ROWS,
   hurtAll:d=>{for(const e of G.enemies.slice())hurt(e,d,true)},hurt:(e,d,p,src)=>hurt(e,d,p,src),LIFT,

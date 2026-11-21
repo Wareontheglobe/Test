@@ -3082,6 +3082,390 @@ let BASE;
   }
 
   // ---------------------------------------------------------------
+  // stars-run-report: stars per road for winning the campaign (by lives left), shown on the win card and the road cards; a run report
+  // on the end card (kills, gold, what got through, each tower's share of the damage, a tip on a loss); a 'New record' toast; and an
+  // endless run's own end card.
+  // winAt(page, lives): win wave 30 on the current road with that many lives (step + hurtAll until #endOv shows).
+  // endCard(page): what the end card shows. pcts(line): the percentages in a line. loseNow(page): one grunt walks in with 1 life left.
+  const winAt = (page, lives) => G(page, lives => { const W = window.__pw, g = W.G; g.wave = 29; g.cleared = 29; g.lives = lives; W.startWave(); let t = 0;
+    while (document.querySelector('#endOv').hidden && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; } return { stars: W.S.stars[g.map.id], won: g.won, lives: g.lives }; }, lives);
+  const endCard = page => G(page, () => { const q = s => document.querySelector(s), ov = q('#endOv'), st = q('#endStats');
+    return { shown: !ov.hidden, title: q('#endTitle').textContent, text: q('#endText').textContent, html: q('#endText').innerHTML, main: q('#bEndMain').textContent,
+      on: ov.querySelectorAll('.star.on').length, n: ov.querySelectorAll('.star').length, popAt: [...ov.querySelectorAll('.star')].map(s => s.classList.contains('pop') ? s.style.animationDelay : '-'),
+      starsHidden: q('#endStars').hidden, aria: q('#endStars').getAttribute('aria-label'), hint: q('#endHint').hidden ? null : q('#endHint').textContent,
+      stats: st.textContent, lines: [...st.children].map(c => c.textContent), tip: (st.querySelector('.tip') || {}).textContent || null, focus: document.activeElement.id }; });
+  const pcts = line => (line.match(/\d+%/g) || []).map(x => parseInt(x));
+  const loseNow = page => G(page, () => { const W = window.__pw, g = W.G; g.lives = 1; W.spawn('grunt', g.map.path.len - 0.3); let n = 0; while (!g.over && n++ < 60) W.step(1 / 30); return g.over; });
+  const runWave = page => G(page, () => { const W = window.__pw, g = W.G; W.startWave(); let t = 0; while ((g.spawnQ.length || g.enemies.length) && !g.over && t < 400) { W.step(1 / 30); t += 1 / 30; } return !g.spawnQ.length && !g.enemies.length; });
+  const menuCards = page => G(page, () => [...document.querySelectorAll('.mapbtn')].map(b => ({ on: b.querySelectorAll('.star.on').length, n: b.querySelectorAll('.star').length, md: b.querySelector('.md').textContent,
+    prog: b.querySelector('.md').classList.contains('prog'), aria: (b.querySelector('.stars') || { getAttribute: () => null }).getAttribute('aria-label') })));
+
+  current = 'stars-run-report: stars for a win, on the win card and the road cards';
+  {
+    const { ctx, page } = await newPage(browser);
+    check((await text(page, '#roadHead')) === 'Choose a road · ★ 0/9', "a fresh store: the eyebrow reads 'Choose a road · ★ 0/9' (" + (await text(page, '#roadHead')) + ')');
+    let cards = await menuCards(page);
+    check(cards.every(c => c.n === 0 && c.md === 'Not yet played'), 'never-played roads keep "Not yet played" and show no stars ' + JSON.stringify(cards));
+    await startMap(page, 1);
+    // Acceptance: G.wave=29, G.cleared=29, G.lives=16, startWave, then step+hurtAll(1e9) until #endOv shows.
+    const w = await winAt(page, 16);
+    let c = await endCard(page);
+    check(w.stars === 3 && c.shown && c.on === 3 && c.n === 3, 'acceptance: Meadow won with 16 lives: S.stars.meadow === 3 and the win card has 3 .star.on ' + JSON.stringify({ w, on: c.on }));
+    check((await stored(page)).stars.meadow === 3, 'the stars are saved (localStorage stars.meadow === 3)');
+    check(c.title === 'The road holds' && c.main === 'Keep going' && c.aria === '3 of 3 stars' && c.hint === null, 'the win card: three stars (read as "3 of 3 stars") and no hint at 3 stars ' + JSON.stringify(c));
+    check(c.popAt.join() === '0ms,150ms,300ms', 'all three are new to this road, so they pop in 150ms apart ' + JSON.stringify(c.popAt));
+    const look = await G(page, () => { const q = s => document.querySelector(s), s0 = q('#endStars .star'), cs = getComputedStyle(s0), r = { width: parseFloat(cs.width), height: parseFloat(cs.height) }, on = getComputedStyle(q('#endStars .star.on path'));
+      let kf = ''; for (const sh of document.styleSheets) for (const rule of sh.cssRules) if (rule.type === CSSRule.KEYFRAMES_RULE && rule.name === 'starpop') kf = rule.cssText;
+      const kids = [...q('#endOv .card').children].map(e => e.id); return { w: r.width, h: r.height, anim: cs.animationName, dur: cs.animationDuration, kf, fill: on.fill, kids }; });
+    check(look.w === 28 && look.h === 28 && look.fill === 'rgb(227, 173, 69)', 'the win card stars are 28px and filled #e3ad45 ' + JSON.stringify(look));
+    check(look.anim === 'starpop' && look.dur === '0.2s' && /(from|0%)\s*\{\s*transform: scale\(0\.4\)/.test(look.kf) && /(to|100%)\s*\{\s*transform: scale\(1\)/.test(look.kf), 'the pop is a CSS scale from .4 to 1 over 200ms ' + JSON.stringify(look));
+    check(look.kids.join() === 'endTitle,endStars,endHint,endText,endStats,bEndMain,bEndAlt', 'the stars sit above #endText, and #endStats between #endText and the buttons ' + JSON.stringify(look.kids));
+    // The road cards.
+    await page.click('#bEndAlt'); await page.waitForTimeout(100);
+    cards = await menuCards(page);
+    const head = await text(page, '#roadHead');
+    check(cards[1].on === 3 && /★ 3\/9/.test(head), 'acceptance: the menu Meadow card has 3 .star.on and the eyebrow matches /★ 3\\/9/ (' + head + ')');
+    check(cards[1].n === 3 && cards[1].md === 'In progress · wave 31' && cards[1].prog && cards[1].aria === '3 of 3 stars', "the won run is saved, so the card's stars are followed by 'In progress · wave 31' " + JSON.stringify(cards[1]));
+    check(cards[0].n === 0 && cards[2].n === 0 && cards[0].md === 'Not yet played', 'the other roads still read "Not yet played" ' + JSON.stringify([cards[0], cards[2]]));
+    const small = await G(page, () => { const b = document.querySelectorAll('.mapbtn')[1], s = b.querySelector('.star'), r = s.getBoundingClientRect(); return { w: r.width, h: r.height, fill: getComputedStyle(b.querySelector('.star.on path')).fill, svg: s.tagName.toLowerCase() }; });
+    check(small.w === 12 && small.h === 12 && small.svg === 'svg' && small.fill === 'rgb(227, 173, 69)', 'the card stars are 12px inline SVGs filled #e3ad45 ' + JSON.stringify(small));
+    // Acceptance: replaying with 9 lives keeps the 3 stars.
+    await G(page, () => { delete window.__pw.S.saves.meadow; });
+    await startMap(page, 1);
+    check((await G(page, () => window.__pw.G.wave)) === 0, 'with the saved run gone, the Meadow card starts a fresh run');
+    const w9 = await winAt(page, 9);
+    c = await endCard(page);
+    check(w9.stars === 3 && (await stored(page)).stars.meadow === 3, 'acceptance: replaying with lives=9 keeps S.stars.meadow === 3 ' + JSON.stringify(w9));
+    check(c.on === 1 && c.n === 3 && c.aria === '1 of 3 stars' && c.popAt.every(p => p === '-'), "the win card shows this run's 1 star, and nothing pops (the road already has more) " + JSON.stringify(c));
+    check(c.hint === 'Finish with 10 or more lives for a second star.', "1 star: the hint reads 'Finish with 10 or more lives for a second star.' (" + c.hint + ')');
+    // With no run saved, the card reads 'Best wave 30' after its stars.
+    await G(page, () => { delete window.__pw.S.saves.meadow; });
+    await page.click('#bEndAlt'); await page.waitForTimeout(100);
+    cards = await menuCards(page);
+    check(cards[1].on === 3 && cards[1].md === 'Best wave 30' && !cards[1].prog, "with no run in progress the card's stars are followed by 'Best wave 30' " + JSON.stringify(cards[1]));
+    // Outline stars: a road with a best wave and no win yet.
+    await G(page, () => { const W = window.__pw; W.S.best.quarry = 12; W.S.saves.quarry = { map: 'quarry', wave: 12, gold: 100, lives: 20, towers: [], won: false, stats: { kills: 0, gold: 0, leaks: {}, dmg: {}, slowed: 0 } }; });
+    await startMap(page, 1); await page.click('#bPause'); await page.click('#bMenu'); await page.waitForTimeout(100);
+    cards = await menuCards(page);
+    const off = await G(page, () => { const p = document.querySelectorAll('.mapbtn')[2].querySelector('.star path'), cs = getComputedStyle(p); return { fill: cs.fill, stroke: cs.stroke }; });
+    check(cards[2].n === 3 && cards[2].on === 0 && cards[2].md === 'In progress · wave 13' && cards[2].aria === '0 of 3 stars', 'a road with a best wave but no win: 3 outline stars, then its run in progress ' + JSON.stringify(cards[2]));
+    check(off.fill === 'none' && off.stroke === 'rgb(167, 177, 153)', 'an unearned star is an outline in var(--muted) ' + JSON.stringify(off));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'stars-run-report: 2 stars and 1 star, the hint, and the thresholds';
+  for (const [lives, n, hint] of [[12, 2, 'Finish with 13 or more lives for the third star.'], [9, 1, 'Finish with 10 or more lives for a second star.']]) {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const w = await winAt(page, lives);
+    const c = await endCard(page);
+    check(w.stars === n && (await stored(page)).stars.meadow === n && c.on === n && c.n === 3, `acceptance: a fresh context won with lives=${lives} gives ${n} star${n > 1 ? 's' : ''} ` + JSON.stringify({ w, on: c.on }));
+    check(c.hint === hint && c.aria === `${n} of 3 stars`, `${n} star${n > 1 ? 's' : ''}: the hint reads '${hint}' (${c.hint})`);
+    check(c.popAt.join() === (n === 2 ? '0ms,150ms,-' : '0ms,-,-'), 'the newly earned stars pop in, 150ms apart ' + JSON.stringify(c.popAt));
+    if (n === 2) {
+      // A better win later: only the star new to this road pops.
+      await G(page, () => { delete window.__pw.S.saves.meadow; });
+      await page.click('#bEndAlt'); await startMap(page, 1);
+      const w3 = await winAt(page, 13);
+      const c3 = await endCard(page);
+      check(w3.stars === 3 && c3.on === 3 && c3.popAt.join() === '-,-,0ms' && c3.hint === null, 'winning again with 13 lives earns the third star, and only that one pops ' + JSON.stringify({ w3, pop: c3.popAt }));
+    }
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await newPage(browser);
+    const th = await G(page, () => { const W = window.__pw; return { t: [W.STAR3, W.STAR2], n: [20, 16, 13, 12, 10, 9, 1].map(l => W.starCount(l)) }; });
+    check(th.n.join() === '3,3,3,2,2,1,1' && th.t.join() === '13,10', '3 stars from 13 lives, 2 from 10, else 1 (16 and 20 give 3, 12 gives 2, 9 gives 1) ' + JSON.stringify(th));
+    // Thresholds against tests/balance.js (smart bot, 20 seeds; lives when wave 30 clears): Easy 19-20, Normal 2-15 (median 10), Hard winners
+    // 1-7. At 13/10 the smart Normal winners split 5 / 7 / 8 across 3, 2 and 1 stars, and no smart Hard winner reaches 3.
+    const BOT_NORMAL = [2, 6, 7, 7, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 12, 13, 13, 14, 15, 15], BOT_HARD = [1, 2, 2, 3, 3, 4, 5, 6, 7, 7];
+    const split = await G(page, ([a, b]) => { const W = window.__pw, k = l => [0, 0, 0, 0].map((_, i) => l.filter(x => W.starCount(x) === i).length); return { normal: k(a), hard: k(b) }; }, [BOT_NORMAL, BOT_HARD]);
+    check(split.normal[3] >= 3 && split.normal[2] >= 3 && split.hard[3] === 0, "the bot's Normal winners split across 2 and 3 stars, and its Hard winners earn no 3 stars " + JSON.stringify(split));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+  {
+    // Reduced motion: the stars are simply there.
+    const { ctx, page } = await newPage(browser);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await startMap(page, 1);
+    await winAt(page, 16);
+    const c = await endCard(page), anim = await page.$$eval('#endStars .star', els => els.map(e => getComputedStyle(e).animationName));
+    check(c.on === 3 && c.popAt.every(p => p === '-') && anim.every(a => a === 'none'), 'reduced motion: three stars, none popping ' + JSON.stringify({ pop: c.popAt, anim }));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'stars-run-report: stars for players from before 1.1';
+  {
+    const { ctx, page } = await newPage(browser);
+    const load = async v => { await page.evaluate(v => localStorage.setItem('pathwarden.v1', JSON.stringify(v)), v); await page.reload(); await page.waitForTimeout(250);
+      return { stars: await G(page, () => window.__pw.S.stars), ls: (await stored(page)).stars, head: await text(page, '#roadHead'), cards: await menuCards(page) }; };
+    let r = await load({ best: { switch: 30 } });
+    check(r.stars.switch === 1 && r.ls.switch === 1, 'acceptance: storage {best:{switch:30}} without stars loads with S.stars.switch === 1, and it is written back ' + JSON.stringify(r.stars));
+    check(r.cards[0].on === 1 && r.cards[0].n === 3 && r.cards[0].md === 'Best wave 30' && r.head === 'Choose a road · ★ 1/9', "its card: 1 star then 'Best wave 30'; the eyebrow counts it " + JSON.stringify([r.cards[0], r.head]));
+    r = await load({ best: { switch: 30, meadow: 12 }, stars: { switch: 3 } });
+    check(JSON.stringify(r.stars) === '{"switch":3}' && r.cards[1].n === 3 && r.cards[1].on === 0 && r.cards[1].md === 'Best wave 12', 'stored stars are kept; a road not yet won has none, and its card shows 3 outline stars and its best ' + JSON.stringify(r));
+    r = await load({ best: { quarry: 31 }, stars: 'x' });
+    check(JSON.stringify(r.stars) === '{"quarry":1}', 'stars that are not an object start over: {}, then 1 for a best of 30 or more ' + JSON.stringify(r.stars));
+    r = await load({ best: { meadow: 'x' }, stars: { meadow: 7, quarry: 2, nowhere: 3, switch: '3' } });
+    check(JSON.stringify(r.stars) === '{"quarry":2}' && r.head === 'Choose a road · ★ 2/9', 'only 1-3 on a real road is kept ' + JSON.stringify(r));
+    r = await load({ stars: [3, 3, 3] });
+    check(JSON.stringify(r.stars) === '{}' && r.head === 'Choose a road · ★ 0/9', 'an array is not a stars object ' + JSON.stringify(r.stars));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'stars-run-report: what got through, and the tip a loss ends on';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    // Acceptance: G.lives=3; spawn('wisp', path.len-0.3) three times; step until over and wait 1000ms.
+    await G(page, () => { const W = window.__pw, g = W.G; g.lives = 3; for (let i = 0; i < 3; i++) W.spawn('wisp', g.map.path.len - 0.3); let n = 0; while (!g.over && n++ < 300) W.step(1 / 30); });
+    await page.waitForTimeout(1000);
+    let c = await endCard(page);
+    check(c.shown && c.stats.includes('Wisps') && c.stats.includes("Mortars can't hit"), "acceptance: #endStats includes 'Wisps' and \"Mortars can't hit\" " + JSON.stringify(c.lines));
+    check(c.lines[0] === '0 kills · 0 gold earned' && c.lines[1] === 'Got through: 3 Wisps (-3)' && c.tip === "Wisps fly. Mortars can't hit them, but Bolt, Frost, Arc and Longshot can." && c.lines.length === 3,
+      "kills and gold, 'Got through: 3 Wisps (-3)', no damage line (no tower hit anything), and the Wisp tip " + JSON.stringify(c.lines));
+    check(c.title === 'The keep has fallen' && c.main === 'Try again' && c.starsHidden && c.hint === null && c.focus === 'bEndMain', 'a loss before the campaign is won: the usual title, no stars, and focus on Try again ' + JSON.stringify(c));
+    const css = await G(page, () => { const cs = getComputedStyle(document.querySelector('#endStats')); return [cs.fontSize, cs.color, cs.display, cs.flexDirection, cs.rowGap].join('|'); });
+    check(css === '13px|rgb(167, 177, 153)|flex|column|6px', '#endStats is 13px var(--muted), its lines 6px apart ' + css);
+    // At most 3 types, by lives lost, with the count of enemies (lives / ED lives); the tip follows the type that cost the most.
+    await page.click('#bEndMain');
+    await G(page, () => { window.__pw.G.stats.leaks = { grunt: 2, scout: 1, brute: 4, boss: 5, splitter: 1 }; });
+    await loseNow(page); await page.waitForTimeout(1000);
+    c = await endCard(page);
+    check(c.lines[1] === 'Got through: 1 Warlord (-5), 2 Brutes (-4), 3 Grunts (-3)' && c.tip === 'Armor blunts small hits. Longshot ignores armor.', 'three types at most, most lives first: 1 Warlord (-5), 2 Brutes (-4), 3 Grunts (-3); the Warlord tip ' + JSON.stringify(c.lines));
+    await page.click('#bEndMain');
+    await G(page, () => { window.__pw.G.stats.leaks = { scout: 4, splitter: 3 }; });
+    await loseNow(page); await page.waitForTimeout(1000);
+    c = await endCard(page);
+    check(c.lines[1] === 'Got through: 4 Scouts (-4), 3 Splitters (-3), 1 Grunt (-1)' && c.tip === 'Scouts are fast. Frost slows them down.', 'the Scout tip when Scouts cost the most ' + JSON.stringify(c.lines));
+    const tips = await G(page, () => window.__pw.END_TIP);
+    check(JSON.stringify(tips) === JSON.stringify({ wisp: "Wisps fly. Mortars can't hit them, but Bolt, Frost, Arc and Longshot can.", brute: 'Armor blunts small hits. Longshot ignores armor.', boss: 'Armor blunts small hits. Longshot ignores armor.',
+      scout: 'Scouts are fast. Frost slows them down.', splitter: 'Splitters burst into 2 Scouts. Hit them early on the road.', grunt: 'Build where the road bends so one tower covers two stretches.' }), 'the tip for every type is the spec copy ' + JSON.stringify(tips));
+    await page.click('#bEndMain');
+    await loseNow(page); await page.waitForTimeout(1000);
+    c = await endCard(page);
+    check(c.tip === 'Build where the road bends so one tower covers two stretches.' && c.lines[1] === 'Got through: 1 Grunt (-1)', 'a Grunt that walks in: the Grunt tip ' + JSON.stringify(c.lines));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'stars-run-report: kills, gold and the damage each tower dealt';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    // Acceptance: build frost, mortar and long; run wave 1; force a loss.
+    const built = await G(page, () => { const W = window.__pw, g = W.G; g.running = false; g.gold = 1000; return [['frost', 2, 2], ['mortar', 4, 2], ['long', 3, 5]].map(([k, c, r]) => W.build(k, c, r)).every(Boolean); });
+    check(built, 'built a Frost, a Mortar and a Longshot on Meadow');
+    const calm = await runWave(page);
+    const over = await loseNow(page);
+    await page.waitForTimeout(1000);
+    const st = await G(page, () => JSON.parse(JSON.stringify(window.__pw.G.stats)));
+    let c = await endCard(page);
+    const dline = c.lines.find(l => l.includes('%')) || '', p = pcts(dline), sum = p.reduce((a, b) => a + b, 0), kills = +((c.lines[0].match(/^([\d,]+) kills/) || [])[1] || '-1').replace(/,/g, '');
+    check(calm && over && sum >= 99 && sum <= 101 && c.stats.includes('Frost slowed') && kills === st.kills && st.kills > 0, `acceptance: the damage percentages sum to ${sum}, the text includes 'Frost slowed', and the kills number ${kills} equals G.stats.kills ${st.kills} > 0 ` + JSON.stringify(c.lines));
+    const names = dline.split(' · ').filter(x => x.includes('%')).map(x => x.split(' ')[0]);
+    check(['Frost', 'Mortar', 'Longshot'].every(n => names.includes(n)) && p.every((x, i) => i === 0 || x <= p[i - 1]) && p.every(x => x >= 1), 'every tower that hit something is listed, largest share first ' + dline);
+    check(dline.endsWith(` · Frost slowed ${st.slowed}`) && st.slowed > 0, `then ' · Frost slowed ${st.slowed}' ` + dline);
+    check(c.lines[0] === `${st.kills} kills · ${st.gold} gold earned` && st.gold > 0, 'line 1: kills and gold earned ' + c.lines[0]);
+    const bar = await G(page, () => { const b = document.querySelector('#endStats .dbar'), r = b.getBoundingClientRect(), cs = getComputedStyle(b);
+      return { h: r.height, rad: cs.borderTopLeftRadius, w: r.width, segs: [...b.children].map(i => ({ t: i.dataset.t, bg: getComputedStyle(i).backgroundColor, w: i.getBoundingClientRect().width })), next: b.nextElementSibling && b.nextElementSibling.textContent }; });
+    const rgb = h => `rgb(${parseInt(h.slice(1, 3), 16)}, ${parseInt(h.slice(3, 5), 16)}, ${parseInt(h.slice(5, 7), 16)})`;
+    const TDC = { bolt: '#d39a45', mortar: '#79808c', frost: '#8fd6ea', arc: '#a487ff', long: '#cf5547' };
+    check(bar.h === 8 && bar.rad === '4px' && bar.segs.length === names.length && bar.segs.every(s => s.bg === rgb(TDC[s.t])) && Math.abs(bar.segs.reduce((a, s) => a + s.w, 0) - bar.w) < 1 && bar.next === dline,
+      'line 3: an 8px stacked bar with radius 4, one segment per tower type in its colour, filling the bar, with the line below it ' + JSON.stringify(bar));
+    check(bar.segs.map(s => s.t).join() === names.map(n => ({ Frost: 'frost', Mortar: 'mortar', Longshot: 'long', Bolt: 'bolt', Arc: 'arc' })[n]).join(), 'the bar and the line are in the same order ' + JSON.stringify(bar.segs.map(s => s.t)));
+    // The formats: thousands separators, shares under 1% dropped from the line (not the bar), and fmt for 'Frost slowed'.
+    await page.click('#bEndMain');
+    await G(page, () => { window.__pw.G.stats = { kills: 12345, gold: 1234567, leaks: {}, dmg: { long: 590, mortar: 240, arc: 110, bolt: 50, frost: 4 }, slowed: 1234 }; });
+    await loseNow(page); await page.waitForTimeout(1000);
+    c = await endCard(page);
+    const segs = await page.$$eval('#endStats .dbar i', els => els.length);
+    check(c.lines[0] === '12,345 kills · 1,234,567 gold earned', "toLocaleString('en-US'): '12,345 kills · 1,234,567 gold earned' (" + c.lines[0] + ')');
+    check(c.lines[2] === 'Longshot 59% · Mortar 24% · Arc 11% · Bolt 5% · Frost slowed 1.2k' && segs === 5, "'Longshot 59% · Mortar 24% · Arc 11% · Bolt 5% · Frost slowed 1.2k': Frost's 0.4% is in the bar but not the line (" + c.lines[2] + ')');
+    const f = await G(page, () => [0, 7, 999, 1000, 1234, 15678].map(window.__pw.fmtK));
+    check(f.join() === '0,7,999,1.0k,1.2k,15.7k', 'fmt: under 1000 as is, else one decimal and k ' + f.join());
+    // A win where nothing got through.
+    await page.click('#bEndMain');
+    await winAt(page, 20);
+    c = await endCard(page);
+    const good = await page.$eval('#endStats .ok', el => getComputedStyle(el).color);
+    check(c.lines.includes('Nothing got through.') && good === 'rgb(159, 211, 106)' && c.tip === null, "a win with no leaks: 'Nothing got through.' in var(--good), and no tip on a win " + JSON.stringify(c.lines));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'stars-run-report: what the run report counts';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const r = await G(page, () => { const W = window.__pw, g = W.G, o = {}; g.running = false;
+      o.fresh = JSON.stringify(g.stats) === '{"kills":0,"gold":0,"leaks":{},"dmg":{},"slowed":0}' && g.prevBest === 0;
+      // hurt: the damage that landed, up to the HP left, goes to the tower type that dealt it.
+      g.wave = 1; g.W = { 1: { rem: 99, alive: 0 } }; W.spawn('grunt', 3); const e = g.enemies[0], hp = e.hp;
+      W.hurt(e, 10, false, 'bolt'); o.bolt = g.stats.dmg.bolt;
+      W.hurt(e, 1000, true, 'long'); o.long = g.stats.dmg.long; o.left = hp - 10; o.kills = g.stats.kills; o.gold = g.stats.gold; o.eg = e.gold;
+      g.wave = 4; g.W[4] = { rem: 99, alive: 0 }; W.spawn('brute', 3); const b = g.enemies.find(x => x.type === 'brute');
+      W.hurt(b, 11, false, 'bolt'); o.armor = [b.armor, g.stats.dmg.bolt - 10];
+      W.hurt(b, 2, false, 'arc'); o.arc = g.stats.dmg.arc;
+      const d0 = JSON.stringify(g.stats.dmg); W.hurt(b, 50, true); W.hurtAll(1); o.nosrc = JSON.stringify(g.stats.dmg) === d0 && Object.keys(g.stats.dmg).join() === 'bolt,long,arc';
+      // A frost splash counts each enemy it slows.
+      g.enemies = []; g.projs = []; g.W = { 1: { rem: 99, alive: 0 } }; g.wave = 1; for (let i = 0; i < 3; i++) W.spawn('grunt', 3 + i * 0.1); const t = g.enemies[0];
+      g.projs.push({ k: 'frost', x: t.x, y: t.y, tg: t, spd: 6, dmg: 5, splash: 0.75, slow: 0.42, slowDur: 1.6, src: 'frost' }); W.step(1 / 60);
+      o.slowed = g.stats.slowed; o.frost = g.stats.dmg.frost; o.slowNow = g.enemies.filter(x => x.slow > 0).length;
+      // A leak counts the lives it cost, by type.
+      g.enemies = []; g.W = {}; g.lives = 20; g.wave = 4; W.spawn('brute', g.map.path.len - 0.3); W.spawn('scout', g.map.path.len - 0.25); W.spawn('brute', g.map.path.len - 0.28);
+      for (let i = 0; i < 30; i++) W.step(1 / 30); o.leaks = { ...g.stats.leaks }; o.lives = g.lives;
+      return o; });
+    check(r.fresh, 'newGame: G.stats is {kills:0, gold:0, leaks:{}, dmg:{}, slowed:0} and G.prevBest is the road best (0)');
+    check(Math.abs(r.bolt - 10) < 1e-9 && Math.abs(r.long - r.left) < 1e-9 && r.kills === 1 && r.gold === r.eg, `hurt credits its src: Bolt 10, then Longshot only the ${r.left.toFixed(1)} HP left (not 1000); the kill adds 1 kill and its ${r.eg} gold ` + JSON.stringify(r));
+    check(Math.abs(r.armor[1] - (11 - r.armor[0])) < 1e-9 && Math.abs(r.arc - 0.5) < 1e-9, 'armor is taken off first (11 - armor), and a blunted hit still counts its quarter (2 -> 0.5) ' + JSON.stringify(r));
+    check(r.nosrc, 'a hit with no src (hurtAll) is not credited to any tower');
+    check(r.slowed === 3 && r.slowNow === 3 && Math.abs(r.frost - 15) < 1e-9, 'one frost splash over 3 grunts: slowed 3, Frost dmg 15 ' + JSON.stringify(r));
+    check(r.leaks.brute === 4 && r.leaks.scout === 1 && Object.keys(r.leaks).length === 2 && r.lives === 15, 'leaks count lives by type: 2 Brutes 4, 1 Scout 1 ' + JSON.stringify(r));
+    // Gold earned: kills, the wave bonus and an early call's bonus. A sale is not earned.
+    const gd = await G(page, () => { const W = window.__pw; W.newGame(1); const g = W.G, g0 = g.gold;
+      W.startWave(); while (g.spawnQ.length) W.step(1 / 30); W.startWave(); const early = g.gold; let t = 0; while ((g.spawnQ.length || g.enemies.length) && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; }
+      return { earned: g.stats.gold, delta: g.gold - g0, kills: g.stats.kills, early, cleared: g.cleared }; });
+    check(gd.cleared === 2 && gd.earned === gd.delta && gd.earned > 0, 'over a wave and an early-called wave, gold earned is exactly the gold gained (kills, 2 wave bonuses, the early bonus) ' + JSON.stringify(gd));
+    await G(page, () => { const W = window.__pw, g = W.G; g.running = true; });
+    await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]'); await tapTile(page, 2, 2); await page.click('#bSell'); await page.click('#bSell');
+    const sold = await G(page, () => ({ towers: window.__pw.G.towers.length, earned: window.__pw.G.stats.gold }));
+    check(sold.towers === 0 && sold.earned === gd.earned, 'selling a tower is not gold earned ' + JSON.stringify(sold));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'stars-run-report: the report is saved with the run';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await G(page, () => { const W = window.__pw; W.G.running = false; W.G.gold = 1000; [['bolt', 2, 2], ['mortar', 4, 2], ['long', 3, 5]].forEach(([k, c, r]) => W.build(k, c, r)); });
+    await runWave(page);
+    const live = await G(page, () => JSON.parse(JSON.stringify(window.__pw.G.stats)));
+    let sv = (await stored(page)).saves.meadow;
+    check(sv && sv.stats && sv.stats.kills === live.kills && live.kills > 0, `acceptance: after a wave clears, the saved run includes stats.kills (${sv && sv.stats && sv.stats.kills})`);
+    check(JSON.stringify(sv.stats) === JSON.stringify(live) && sv.prevBest === 0, 'the whole report is saved, and the best the run began with ' + JSON.stringify(sv));
+    // The save holds a copy: a kill after it does not change the stored run until the next save.
+    const alias = await G(page, () => { const W = window.__pw, g = W.G; g.W = { 1: { rem: 99, alive: 0 } }; W.spawn('grunt', 3); W.hurtAll(1e9); return { live: g.stats.kills, saved: W.S.saves.meadow.stats.kills }; });
+    check(alias.live === alias.saved + 1, 'the saved report is a copy of the live one ' + JSON.stringify(alias));
+    await page.reload(); await page.waitForTimeout(250);
+    await page.click('#bContinue'); await page.waitForTimeout(80);
+    const back = await G(page, () => JSON.parse(JSON.stringify(window.__pw.G.stats)));
+    check(JSON.stringify(back) === JSON.stringify(sv.stats), 'Continue brings the report back with the run ' + JSON.stringify(back));
+    // Acceptance: old saves without stats load with zeroed stats.
+    await G(page, () => { window.__pw.G.running = false; });
+    await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ saves: { meadow: { map: 'meadow', wave: 3, gold: 150, lives: 20, towers: [{ type: 'bolt', c: 2, r: 2 }] } }, last: 'meadow', best: { meadow: 3 } })));
+    await page.reload(); await page.waitForTimeout(250);
+    await page.click('#bContinue'); await page.waitForTimeout(80);
+    const old = await G(page, () => ({ stats: JSON.stringify(window.__pw.G.stats), prev: window.__pw.G.prevBest, wave: window.__pw.G.wave, towers: window.__pw.G.towers.length }));
+    check(old.stats === '{"kills":0,"gold":0,"leaks":{},"dmg":{},"slowed":0}' && old.wave === 3 && old.towers === 1 && old.prev === 3, 'acceptance: an old save without stats loads with zeroed stats (and prevBest from the best wave) ' + JSON.stringify(old));
+    // Damaged reports start over; a good one is kept.
+    await G(page, () => { window.__pw.G.running = false; });
+    const base = { wave: 3, gold: 150, lives: 20, towers: [] }, good = { kills: 5, gold: 40, leaks: { wisp: 1 }, dmg: { bolt: 120.5, long: 3 }, slowed: 2 };
+    const variants = [{ ...good, kills: -1 }, { ...good, gold: '40' }, { ...good, leaks: { dragon: 2 } }, { ...good, dmg: { bolt: null } }, { ...good, dmg: { grunt: 3 } }, { kills: 1, gold: 1, leaks: {}, dmg: {} }, { ...good, leaks: [1] }, 7];
+    const res = [];
+    for (let i = 0; i < variants.length; i += 2) {
+      await page.evaluate(([base, a, b, good]) => localStorage.setItem('pathwarden.v1', JSON.stringify({ saves: { meadow: { ...base, map: 'meadow', stats: a }, quarry: { ...base, map: 'quarry', stats: b }, switch: { ...base, map: 'switch', stats: good, prevBest: 9 } } })), [base, variants[i], variants[i + 1], good]);
+      await page.reload(); await page.waitForTimeout(250);
+      res.push(...(await G(page, () => { const s = window.__pw.S.saves; return [JSON.stringify(s.meadow.stats), JSON.stringify(s.quarry.stats), JSON.stringify(s.switch.stats) + ':' + s.switch.prevBest]; })));
+    }
+    const fresh = '{"kills":0,"gold":0,"leaks":{},"dmg":{},"slowed":0}', goodS = JSON.stringify(good) + ':9';
+    check(res.filter((_, i) => i % 3 < 2).every(x => x === fresh), 'a report with a negative, non-number or missing field, or a key that is not an enemy (leaks) or tower (dmg) type, starts over ' + JSON.stringify(res));
+    check(res.filter((_, i) => i % 3 === 2).every(x => x === goodS), 'a sound report (and prevBest) loads as saved ' + JSON.stringify(res.filter((_, i) => i % 3 === 2)));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = "stars-run-report: 'New record' and the end of an endless run";
+  {
+    const { ctx, page } = await newPage(browser);
+    await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ best: { meadow: 37 } })));
+    await page.reload(); await page.waitForTimeout(250);
+    await startMap(page, 1);
+    await toastLog(page);
+    // Acceptance: with best.meadow=37 stored: set wave 36, cleared 36, won=true, run 2 waves.
+    await G(page, () => { const g = window.__pw.G; g.running = false; g.wave = 36; g.cleared = 36; g.won = true; });
+    check((await G(page, () => window.__pw.G.prevBest)) === 37, 'G.prevBest is the stored best, 37');
+    await killWaves(page, 1);
+    const t37 = await toasts(page);
+    await killWaves(page, 1);
+    const t38 = await toasts(page);
+    check(t38.includes('New record · wave 38'), "acceptance: a #toast text 'New record · wave 38' was observed " + JSON.stringify(t38));
+    check(!t37.some(t => t.startsWith('New record')), 'wave 37 only equals the best: no toast ' + JSON.stringify(t37));
+    // Once a run, even after the app is closed and the run continued.
+    check((await stored(page)).saves.meadow.prevBest === 37, 'the saved run keeps the best it began with');
+    await page.reload(); await page.waitForTimeout(250);
+    await page.click('#bContinue'); await page.waitForTimeout(80);
+    await toastLog(page);
+    await G(page, () => { window.__pw.G.running = false; });
+    await killWaves(page, 1);
+    const t39 = await toasts(page);
+    check((await G(page, () => window.__pw.G.prevBest)) === 37 && !t39.some(t => t.startsWith('New record')), 'continued, the run still measures from 37 and does not toast a record again at 39 ' + JSON.stringify(t39));
+    // Acceptance: a later loss.
+    await loseNow(page); await page.waitForTimeout(1000);
+    let c = await endCard(page);
+    check(c.title === 'Endless run over' && c.main === 'New run', "acceptance: a later loss shows #endTitle 'Endless run over' and #bEndMain 'New run' " + JSON.stringify(c));
+    check(c.html === 'Cleared <b>39</b> waves, 9 past the campaign. <span class="tag rec">New record</span>' && c.starsHidden && c.tip === 'Build where the road bends so one tower covers two stretches.',
+      "'Cleared <b>39</b> waves, 9 past the campaign.' with a 'New record' tag, and the loss tip " + c.html);
+    const tag = await page.$eval('#endText .tag.rec', el => { const cs = getComputedStyle(el); return [cs.backgroundColor, cs.color, cs.textTransform].join('|'); });
+    check(tag === 'rgb(227, 173, 69)|rgb(43, 31, 7)|uppercase', 'the tag is brass ' + tag);
+    await page.click('#bEndMain');
+    const nr = await G(page, () => ({ wave: window.__pw.G.wave, won: window.__pw.G.won, over: window.__pw.G.over, map: window.__pw.G.map.id, prev: window.__pw.G.prevBest }));
+    check(nr.wave === 0 && !nr.won && !nr.over && nr.map === 'meadow' && nr.prev === 39, 'New run starts the road again from wave 0, measured against the new best ' + JSON.stringify(nr));
+    // An endless run that ends short of the best: no tag.
+    await G(page, () => { const W = window.__pw, g = W.G; W.S.best.meadow = 45; W.newGame(1); W.G.wave = 36; W.G.cleared = 36; W.G.won = true; });
+    await toastLog(page);
+    await killWaves(page, 1);
+    await loseNow(page); await page.waitForTimeout(1000);
+    c = await endCard(page);
+    check(c.title === 'Endless run over' && c.html === 'Cleared <b>37</b> waves, 7 past the campaign.' && !(await toasts(page)).some(t => t.startsWith('New record')), 'below the best: the same card with no tag, and no toast ' + c.html);
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+  {
+    // A player's first run has no best to beat: no toast.
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    await toastLog(page);
+    await G(page, () => { window.__pw.G.running = false; });
+    await killWaves(page, 2);
+    check(!(await toasts(page)).some(t => t.startsWith('New record')) && (await G(page, () => window.__pw.G.prevBest)) === 0, 'a first run (no best yet) never toasts a record ' + JSON.stringify(await toasts(page)));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'stars-run-report: the end card on a 320x568 phone';
+  {
+    const { ctx, page } = await newPage(browser, { viewport: { width: 320, height: 568 } });
+    await startMap(page, 1);
+    // The longest report: 3 types through, all 5 towers in the line, five-digit numbers, and a tip.
+    await G(page, () => { window.__pw.G.stats = { kills: 12345, gold: 123456, leaks: { boss: 10, wisp: 9, splitter: 8, brute: 2 }, dmg: { long: 400, mortar: 250, arc: 150, bolt: 120, frost: 80 }, slowed: 23456 }; });
+    await loseNow(page); await page.waitForTimeout(1000);
+    const fit = () => G(page, () => { const ov = document.querySelector('#endOv'), card = ov.querySelector('.card').getBoundingClientRect(), st = document.querySelector('#endStats');
+      const whole = [...st.querySelectorAll('.nw')].every(s => s.getClientRects().length === 1);
+      const inside = [...ov.querySelectorAll('.card > *')].every(el => { const r = el.getBoundingClientRect(); return !r.width || (r.left >= card.left && r.right <= card.right + 0.5); });
+      ov.scrollTop = 0; const title = document.querySelector('#endTitle').getBoundingClientRect().top;
+      ov.scrollTop = 1e6; const alt = document.querySelector('#bEndAlt').getBoundingClientRect();
+      const res = { whole, inside, lines: [...st.children].map(c => c.textContent), noX: st.scrollWidth <= st.clientWidth && document.documentElement.scrollWidth <= innerWidth, title: title >= 0, alt: alt.bottom <= innerHeight && alt.top >= 0 };
+      ov.scrollTop = 0; return res; });
+    let f = await fit();
+    check(f.whole && f.inside && f.noX && f.alt && f.title, "320x568, the longest loss report: every part kept whole (no line starts with '·'), inside the card, no sideways scroll, and both buttons reachable " + JSON.stringify(f));
+    await page.screenshot({ path: path.join(__dirname, 'out', 'stars-loss-320.png') });
+    await page.click('#bEndMain');
+    await winAt(page, 11);
+    f = await fit();
+    check(f.whole && f.inside && f.noX && f.alt && f.title, '320x568, a 2-star win card with its hint and report fits the same way ' + JSON.stringify(f));
+    await page.screenshot({ path: path.join(__dirname, 'out', 'stars-win-320.png') });
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------
   current = 'long run soak (30 waves, all roads)';
   for (let mi = 0; mi < 3; mi++) {
     const { ctx, page } = await newPage(browser);
