@@ -204,7 +204,8 @@ nav.tabs button.on { border-color: var(--sky); background: rgba(70,168,224,.12);
 nav.tabs .dot { position: absolute; top: 2px; right: 10px; background: var(--coral); color: #fff; font-size: 11px; font-weight: 900;
   min-width: 18px; height: 18px; border-radius: 999px; display: grid; place-items: center; padding: 0 5px; }
 
-#toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 12px); transform: translate(-50%, -150%);
+#toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 62px); transform: translate(-50%, -150%);
   background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-weight: 700; font-size: 15px;
-  transition: transform .25s; z-index: 40; max-width: calc(100% - 32px); text-align: center; }
-#toast.show { transform: translate(-50%, 0); }
+  transition: transform .25s, opacity .25s, visibility .25s; z-index: 40; max-width: calc(100% - 32px); text-align: center;
+  opacity: 0; visibility: hidden; }
+#toast.show { transform: translate(-50%, 0); opacity: 1; visibility: visible; }

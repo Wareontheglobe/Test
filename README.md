@@ -12,9 +12,10 @@ A gamified, offline-first phone app for fact-checking a travel blog. Each lesson
    - Repository access: *Only select repositories* → the private data repo.
    - Permissions: **Contents → Read and write**. Nothing else.
    - Expiration: whatever you're comfortable with (1 year is fine).
-2. **Open the app** on the phone, go to ⚙️ Settings, paste the key, and tap *Save & sync*.
-   Or skip the typing: open `https://<pages-url>/#token=<key>` once on the phone. The key is saved on the phone and removed from the address bar. Only send this link privately, because anyone with it can read and write the data repo.
-3. **Add it to the home screen.** iPhone: Share → *Add to Home Screen*. Android: ⋮ → *Install app*.
+2. **Add it to the home screen first.** iPhone: Share → *Add to Home Screen*. Android: ⋮ → *Install app*.
+3. **Open it from the home screen,** copy the key, and tap **📋 Paste key** on the welcome screen. The app checks the key before saving it.
+   On iPhone, the home-screen app keeps its own storage separate from Safari, so connect *inside* the installed app.
+   On Android, you can also open `https://<pages-url>/#token=<key>` once. The key is saved and removed from the address bar. Only send that link privately.
 
 ## Files
 

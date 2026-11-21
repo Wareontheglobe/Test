@@ -26,6 +26,8 @@ const DEFAULTS = {
   badges: {},       // badgeId -> date earned
   lastSync: "",
   restored: false,
+  live: {},         // cardId -> fix-log entry, for answers that are now live on the blog
+  seenLive: 0,      // how many live fixes she has already been told about
 };
 
 let S = load();
@@ -120,6 +122,8 @@ const BADGES = [
   { id: "sleuth", e: "🕵️", name: "Sleuth", how: "Add your own source", test: () => Object.values(S.answers).some((a) => a.extra_source_url) },
   { id: "stamp", e: "🛂", name: "Stamped", how: "Finish every card on a post", test: () => posts().some((p) => p.done && p.done === p.cards.length) },
   { id: "miles500", e: "✈️", name: "Frequent Flyer", how: "Earn 500 miles", test: () => S.xp >= 500 },
+  { id: "live", e: "📰", name: "Published", how: "A fix you chose goes live", test: () => Object.keys(S.live || {}).length >= 1 },
+  { id: "live10", e: "🏆", name: "Editor in Chief", how: "10 fixes live on the blog", test: () => Object.keys(S.live || {}).length >= 10 },
 ];
 function checkBadges() {
   const fresh = [];
@@ -130,7 +134,7 @@ function checkBadges() {
 /* ---------------- GitHub sync ---------------- */
 function gh(path, opts = {}) {
   const { token, repo } = S.settings;
-  return fetch(`https://api.github.com/repos/${repo}/${path}`, {
+  return fetch(`https://api.github.com/repos/${repo}${path ? "/" + path : ""}`, {
     ...opts,
     headers: { Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "2022-11-28", Accept: "application/vnd.github+json", ...(opts.headers || {}) },
   });
@@ -232,19 +236,51 @@ async function sync({ quiet = false } = {}) {
     const sent = await flushOutbox();
     const added = await pullDecks();
     await restoreAnswered();
+    const newlyLive = await pullFixLog();
     S.lastSync = new Date().toISOString(); save();
-    if (!quiet || sent || added) {
+    if (!quiet || sent || added || newlyLive) {
       const bits = [];
       if (sent) bits.push(`${sent} answer${sent === 1 ? "" : "s"} uploaded`);
       if (added) bits.push(`${added} new card${added === 1 ? "" : "s"}`);
+      if (newlyLive) bits.push(`🎉 ${newlyLive} of your fixes ${newlyLive === 1 ? "is" : "are"} live on the blog!`);
       toast(bits.length ? bits.join(" · ") : "All synced ✓");
     }
   } catch (e) {
     if (!quiet) toast(e.message || "Sync failed — will retry");
   } finally {
     syncing = false;
-    if (view.name !== "lesson") render();
+    refreshAfterSync();
   }
+}
+
+// Re-draw only screens with nothing she could be typing into.
+function refreshAfterSync() {
+  updateIconBadge();
+  if (["home", "later", "passport"].includes(view.name)) render();
+  else if (view.name === "complete") { const el = $(".sync-line"); if (el) el.textContent = syncLine(); }
+}
+
+// fixes/applied.json is written when her answers are applied to the blog.
+async function pullFixLog() {
+  const res = await gh(`contents/fixes/applied.json?ref=${encodeURIComponent(S.settings.branch)}`, { headers: { Accept: "application/vnd.github.raw+json" } });
+  if (!res.ok) return 0;
+  let log; try { log = await res.json(); } catch (e) { return 0; }
+  S.live = {};
+  Object.entries(log || {}).forEach(([id, e]) => { if (e && e.status === "applied") S.live[id] = e; });
+  const n = Object.keys(S.live).length;
+  const fresh = Math.max(0, n - (S.seenLive || 0));
+  S.seenLive = n;
+  checkBadges();
+  save();
+  return fresh;
+}
+
+function updateIconBadge() {
+  try {
+    const n = openCards().length;
+    if (!("setAppBadge" in navigator)) return;
+    n ? navigator.setAppBadge(n) : navigator.clearAppBadge();
+  } catch (e) {}
 }
 
 /* ---------------- answering ---------------- */
@@ -290,6 +326,7 @@ function render() {
   app.innerHTML = html + (view.name === "lesson" || view.name === "complete" ? "" : navView());
   bind();
   window.scrollTo(0, 0);
+  updateIconBadge();
 }
 
 function topbar() {
@@ -319,6 +356,18 @@ function homeView() {
   const pct = Math.min(100, Math.round((doneToday / goal) * 100));
   const ps = posts().sort((a, b) => (b.open > 0) - (a.open > 0));
   const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  if (!S.settings.token) return `${topbar()}
+    <div class="hero">${pip("happy", 104)}<div class="bubble">Hi! I'm Pip 👋 I hunt for things on the blog that might be out of date. Let's get connected!</div></div>
+    ${!standalone ? `<div class="tip">📲 <b>Do this first:</b> add Blog Quest to your home screen, then open it from there and connect. (iPhone: Share → <i>Add to Home Screen</i>. Android: ⋮ → <i>Install app</i>.) The home-screen app keeps its own storage, so connecting in the browser won't carry over.</div>` : ""}
+    <div class="card">
+      <b>Step 1 · Connect</b>
+      <p class="small muted" style="margin:6px 0 12px">Copy the access key you were sent, then tap Paste.</p>
+      <button class="btn teal" data-act="paste-key">📋 Paste key</button>
+      <details class="extra"><summary>Or type it in</summary>
+        <input type="password" id="token" autocomplete="off" placeholder="github_pat_…">
+        <button class="btn ghost" data-act="save-key" style="margin-top:10px">Connect</button>
+      </details>
+    </div>`;
   return `${topbar()}
     <div class="hero">${pip(open.length ? "happy" : "sleepy", 104)}<div class="bubble">${esc(greeting(open.length))}</div></div>
     <div class="goal">
@@ -354,7 +403,8 @@ function lessonView() {
   const pct = Math.round((lesson.i / lesson.cards.length) * 100);
   const sev = c.severity || "low";
   const sevText = { high: "Readers may act on this", medium: "Worth updating", low: "Minor" }[sev] || "";
-  const options = (c.options || []).map((o, n) => ({ key: String.fromCharCode(65 + n), id: `opt:${o.id}`, label: o.label, sub: o.new_text && o.action !== "remove" ? `“${o.new_text}”` : o.action === "remove" ? "Removes it from the post" : "" }));
+  // An option can carry "valid_until": "YYYY-MM-DD" (e.g. "add a final-weekend note") and is hidden after that date.
+  const options = (c.options || []).filter((o) => !o.valid_until || o.valid_until >= today()).map((o, n) => ({ key: String.fromCharCode(65 + n), id: `opt:${o.id}`, label: o.label, sub: o.new_text && o.action !== "remove" ? `“${o.new_text}”` : o.action === "remove" ? "Removes it from the post" : "" }));
   options.push({ key: "✓", id: "fine", label: "The post is fine as is", sub: "The sources are wrong or don't apply" });
   options.push({ key: "✎", id: "other", label: "Something else…", sub: "Tell us what to change" });
   const sel = lesson.selected;
@@ -369,6 +419,7 @@ function lessonView() {
       <div class="posttitle">${safeUrl(c.post?.url) ? `<a href="${esc(c.post.url)}" target="_blank" rel="noopener">${esc(c.post?.title)}</a>` : esc(c.post?.title)}${c.claim?.section ? ` · ${esc(c.claim.section)}` : ""}</div>
       <div class="label-sm">Your post says</div>
       <blockquote class="claim">${esc(c.claim?.quote)}</blockquote>
+      ${(c.also_in || []).length ? `<div class="small muted" style="margin-top:6px">📌 Also in this post: ${c.also_in.map(esc).join(" · ")}. Any fix gets applied there too.</div>` : ""}
       <div class="think">${pip("think", 58)}<div class="bubble">${esc(c.summary)}</div></div>
       <div class="label-sm">What I found</div>
       ${(c.sources || []).map((s, n) => `<div class="source">
@@ -401,9 +452,12 @@ function showSheet({ later = false, earned = 0, title }) {
   sheet.classList.toggle("later", later);
   $(".in", sheet).innerHTML = `<div class="row">${pip(later ? "wow" : "cheer", 64)}<div><h3>${esc(title)}</h3>
     <div class="xp">${later ? "Saved to Investigate 🕵️" : `+${earned} miles ✈️`}</div></div></div>
-    <button class="btn ${later ? "sun" : "teal"}" data-act="next">Continue</button>`;
+    <button class="btn ${later ? "sun" : "teal"}" data-act="next">Continue</button>
+    <button class="linkbtn undo" data-act="undo" style="display:block;margin:6px auto 0;color:inherit">↩︎ Undo</button>`;
   requestAnimationFrame(() => sheet.classList.add("show"));
+  const milesPill = $(".lesson-top .pill.miles"); if (milesPill) milesPill.textContent = `✈️ ${S.xp}`;
   $("[data-act=next]", sheet).addEventListener("click", nextCard);
+  $("[data-act=undo]", sheet).addEventListener("click", undoLast);
   $(".lesson-actions").style.visibility = "hidden";
 }
 
@@ -425,22 +479,47 @@ function checkAnswer() {
     const o = (c.options || []).find((x) => `opt:${x.id}` === sel);
     decision = { kind: "apply_option", option: o ? { id: o.id, label: o.label, action: o.action, new_text: o.new_text ?? "" } : null };
   }
+  lesson.undo = snapshot(c);
   const earned = recordAnswer(c, decision, { note: lesson.note, source: lesson.source });
-  lesson.earned += earned; lesson.answered++;
+  lesson.earned += earned; lesson.answered++; lesson.undo.earned = earned; lesson.undo.kind = "answer";
   chime("ok"); buzz(20);
   showSheet({ earned, title: pick(PRAISE) });
 }
 
 function parkLater() {
   const c = lesson.cards[lesson.i];
+  lesson.undo = { ...snapshot(c), earned: XP.later, kind: "later" };
   if (!S.later.includes(c.id)) S.later.push(c.id);
   S.xp += XP.later; lesson.earned += XP.later; lesson.parked++;
   save(); chime("later"); buzz(10);
   showSheet({ later: true, title: "Good call — no guessing!" });
 }
 
+// Everything an answer can change, so a mis-tap can be taken back before moving on.
+function snapshot(c) {
+  return { cardId: c.id, xp: S.xp, streak: { ...S.streak }, day: S.days[today()] || 0,
+    later: [...S.later], pendingLen: S.pending.length, note: lesson.note, source: lesson.source, selected: lesson.selected };
+}
+
+function undoLast() {
+  const u = lesson.undo;
+  if (!u) return;
+  // Only possible while the answer is still on the phone (not yet packaged for upload).
+  if (u.kind === "answer" && S.pending.length !== u.pendingLen + 1) { toast("Already uploaded — can't undo this one"); return; }
+  if (u.kind === "answer") { S.pending.pop(); delete S.answers[u.cardId]; lesson.answered--; }
+  else lesson.parked--;
+  S.xp = u.xp; S.streak = u.streak; S.later = u.later;
+  if (u.day) S.days[today()] = u.day; else delete S.days[today()];
+  lesson.earned -= u.earned;
+  lesson.undo = null;
+  lesson.note = u.note; lesson.source = u.source; lesson.selected = u.selected;
+  save();
+  render();
+  toast("Undone — pick again");
+}
+
 function nextCard() {
-  lesson.i++; lesson.selected = null; lesson.note = ""; lesson.source = "";
+  lesson.i++; lesson.selected = null; lesson.note = ""; lesson.source = ""; lesson.undo = null;
   if (lesson.i >= lesson.cards.length) return finishLesson();
   render();
 }
@@ -514,6 +593,7 @@ function passportView() {
       <div class="kpi"><div class="v">${resolvedCount()}</div><div class="l">Cards checked</div></div>
       <div class="kpi"><div class="v">${fixes}</div><div class="l">Fixes sent</div></div>
     </div>
+    <div class="kpi" style="margin-top:10px"><div class="v">📰 ${Object.keys(S.live || {}).length}</div><div class="l">Fixes live on the blog</div></div>
     <h2>Badges</h2>
     <div class="badges">${BADGES.map((b) => `<div class="badge ${S.badges[b.id] ? "" : "locked"}"><span class="e">${b.e}</span><b>${esc(b.name)}</b><small>${esc(b.how)}</small></div>`).join("")}</div>
     <h2>Stamps</h2>
@@ -574,6 +654,20 @@ function act(a) {
       packagePending(); view = { name: "home" }; render(); sync({ quiet: true }); break;
     case "home": view = { name: "home" }; render(); break;
     case "sync": if (!S.settings.token) { view = { name: "settings" }; render(); } else sync(); break;
+    case "paste-key":
+      (async () => {
+        let k = "";
+        try { k = (await navigator.clipboard.readText()).trim(); } catch (e) {}
+        if (!/^(github_pat_|ghp_)\w+/.test(k)) { toast("No key on the clipboard — copy it, or type it in below"); const d = $("details.extra"); if (d) d.open = true; return; }
+        connectWith(k);
+      })();
+      break;
+    case "save-key": {
+      const k = ($("#token")?.value || "").trim();
+      if (!k) { toast("Paste or type the key first"); return; }
+      connectWith(k); break;
+    }
+    case "undo": undoLast(); break;
     case "save-settings":
       S.settings.token = $("#token").value.trim();
       S.settings.repo = $("#repo").value.trim() || DEFAULTS.settings.repo;
@@ -587,6 +681,19 @@ function act(a) {
       }
       break;
   }
+}
+
+async function connectWith(key) {
+  S.settings.token = key; save();
+  toast("Checking the key…");
+  const res = await gh("").catch(() => null);
+  if (!res || !res.ok) {
+    S.settings.token = ""; save();
+    toast(res ? await ghError(res) : "Can't reach GitHub — are you online?");
+    return;
+  }
+  toast("Connected! Pulling your cards…");
+  render(); sync({ quiet: true });
 }
 
 /* ---------------- boot ---------------- */
