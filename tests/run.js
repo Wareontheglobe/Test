@@ -165,11 +165,11 @@ let BASE;
     const label = await text(page, '#bWave');
     const enemiesLeft = await G(page, () => window.__pw.G.enemies.length);
     if (enemiesLeft) {
-      check(/^Call 2 early\s*\+36$/.test(label), 'offers early call once wave fully arrived, with its bonus (' + label + ')');
+      check(/^Call 2 early\s*\+24$/.test(label), 'offers early call once wave fully arrived, with its bonus (' + label + ')');
       // Hold the run still, so no kill lands between reading the gold and the tap.
       const g0 = await G(page, () => { window.__pw.G.running = false; return window.__pw.G.gold; });
       await page.click('#bWave');
-      check((await G(page, () => { window.__pw.G.running = true; return window.__pw.G.gold; })) === g0 + 36, 'early call pays a bonus of 36');
+      check((await G(page, () => { window.__pw.G.running = true; return window.__pw.G.gold; })) === g0 + 24, 'early call pays a bonus of 24 (CFG.earlyMul 2)');
     }
     await runUntilCalm(page);
     await page.waitForTimeout(50);
@@ -1672,11 +1672,11 @@ let BASE;
 
     // Overlapping waves: wave 3 clears while wave 4 (called early) is on its way, so no banner and only the clear cue.
     const ov = await G(page, () => { const W = window.__pw, g = W.G; W.startWave(); while (g.spawnQ.length) W.step(1 / 30); W.refreshPanel(); return { label: document.querySelector('#bWave').textContent, n: g.enemies.length, gold: g.gold }; });
-    check(/^Call 4 early\s*\+42$/.test(ov.label) && ov.n > 0, 'wave 3 is all on the road ' + JSON.stringify(ov));
+    check(/^Call 4 early\s*\+28$/.test(ov.label) && ov.n > 0, 'wave 3 is all on the road ' + JSON.stringify(ov));
     await page.click('#bWave');
     const early = await page.evaluate(() => ({ toast: document.querySelector('#toast').textContent, banner: window.__pw.G.banner.s, gain: document.querySelector('#sGold').classList.contains('gain'), gold: window.__pw.G.gold }));
-    check(early.toast.includes('Called early') && early.toast === 'Called early · +42 gold', "the #bWave early-call toast still includes 'Called early' (targeting-early-call: 3x(10+4) = 42) (" + early.toast + ')');
-    check(early.banner === 'WAVE 4' && early.gain && early.gold === ov.gold + 42, "an early call also shows the WAVE 4 banner, and #sGold pops as the bonus pays " + JSON.stringify(early));
+    check(early.toast.includes('Called early') && early.toast === 'Called early · +28 gold', "the #bWave early-call toast still includes 'Called early' (CFG.earlyMul 2: 2x(10+4) = 28) (" + early.toast + ')');
+    check(early.banner === 'WAVE 4' && early.gain && early.gold === ov.gold + 28, "an early call also shows the WAVE 4 banner, and #sGold pops as the bonus pays " + JSON.stringify(early));
     await clearRec(page, 30);
     const o3 = await G(page, () => { const W = window.__pw, g = W.G; for (const e of g.enemies) if (e.w === 3) e.hp = 0.1; W.hurtAll(0.5); return { w3: !!g.W[3], w4: !!g.W[4], banner: g.banner.s, next: g.bannerNext }; });
     check(!o3.w3 && o3.w4 && o3.banner === 'WAVE 4' && !o3.next, 'wave 3 cleared under wave 4: no CLEARED banner, the WAVE 4 banner stays ' + JSON.stringify(o3));
@@ -2696,7 +2696,7 @@ let BASE;
     const brute = r.filter(x => x.w === 4).map(x => x.msg);
     // (While wave 3 marches in, the shorter 'Wave 3…' leaves room for 'Longshot ignores armor.' as well.)
     // (release review: armor decides runs, so where it can't all fit 'Costs 2 lives.' goes before 'Longshot ignores armor.'.)
-    if (vp.width === 320) check(brute[0] === 'New: Brute. Longshot ignores armor.' && brute[1] === brute[0] && brute[2] === 'New: Brute. Longshot ignores armor. Costs 2 lives.' && r.filter(x => x.w === 5).every(x => x.tag) && r.find(x => x.w === 5 && x.st === 'early').label === 'Call early +45', "320px: the Brute's line is 'New: Brute. Longshot ignores armor.' (beside 'Wave 3…' it keeps 'Costs 2 lives.' too), and the wave-5 Swarm keeps its tag, also beside 'Call early +45' " + JSON.stringify(brute));
+    if (vp.width === 320) check(brute[0] === 'New: Brute. Longshot ignores armor.' && brute[1] === brute[0] && brute[2] === 'New: Brute. Longshot ignores armor. Costs 2 lives.' && r.filter(x => x.w === 5).every(x => x.tag) && r.find(x => x.w === 5 && x.st === 'early').label === 'Call early +30', "320px: the Brute's line is 'New: Brute. Longshot ignores armor.' (beside 'Wave 3…' it keeps 'Costs 2 lives.' too), and the wave-5 Swarm keeps its tag, also beside 'Call early +30' " + JSON.stringify(brute));
     if (vp.width === 390) check(brute.every(x => x === 'New: Brute. Longshot ignores armor. Costs 2 lives.'), "390px: 'New: Brute. Longshot ignores armor. Costs 2 lives.' " + JSON.stringify(brute));
     if (vp.width === 320) await page.screenshot({ path: path.join(__dirname, 'out', 'new-intro-320.png') });
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
@@ -2910,11 +2910,11 @@ let BASE;
     await ctx.close();
   }
 
-  current = 'targeting-early-call: an early call pays 3x(10+w) and says so on the button';
+  current = 'targeting-early-call: an early call pays CFG.earlyMul x (10+w) (2 since the release balance) and says so on the button';
   {
     const { ctx, page } = await newPage(browser);
     await startMap(page, 1);
-    check((await G(page, () => window.__pw.CFG.earlyMul)) === 3, 'CFG.earlyMul is 3');
+    check((await G(page, () => window.__pw.CFG.earlyMul)) === 2, 'CFG.earlyMul is 2 (lowered from 3 at release: see README Balance)');
     await G(page, () => { const W = window.__pw; W.G.running = false; W.build('bolt', 2, 2); W.refreshPanel(); });
     const s0 = await wbtn(page);
     check(s0.text === 'Start wave 1' && !s0.early && s0.bg === 'rgb(227, 173, 69)' && s0.color === 'rgb(43, 31, 7)' && s0.shadow !== 'none' && s0.aria === null, "'Start wave' keeps the solid brass primary style " + JSON.stringify(s0));
@@ -2924,22 +2924,22 @@ let BASE;
     // Acceptance: step until the spawn queue is empty with enemies alive.
     const alive = await G(page, () => { const W = window.__pw, g = W.G; while (g.spawnQ.length) W.step(1 / 30); W.refreshPanel(); return g.enemies.length; });
     const e1 = await wbtn(page);
-    check(alive > 0 && e1.early && /Call 2 early\s*\+36/.test(e1.text) && /^Call 2 early\s*\+36$/.test(e1.text), "wave 1 on the road: #bWave has class 'early' and reads 'Call 2 early +36' (" + e1.text + ', ' + alive + ' alive)');
-    check(e1.html === 'Call 2 early <small>+36</small>' && !e1.disabled, 'the bonus is a <small> beside the label ' + JSON.stringify(e1.html));
+    check(alive > 0 && e1.early && /Call 2 early\s*\+24/.test(e1.text) && /^Call 2 early\s*\+24$/.test(e1.text), "wave 1 on the road: #bWave has class 'early' and reads 'Call 2 early +24' (" + e1.text + ', ' + alive + ' alive)');
+    check(e1.html === 'Call 2 early <small>+24</small>' && !e1.disabled, 'the bonus is a <small> beside the label ' + JSON.stringify(e1.html));
     check(e1.bg === 'rgb(44, 58, 40)' && e1.color === 'rgb(227, 173, 69)' && e1.border === '1px solid rgb(227, 173, 69)' && e1.shadow === 'none' && e1.small === '12px 800', '#bWave.early: panel-2 background, brass text, a 1px brass border and no shadow; the bonus at 12px, weight 800 ' + JSON.stringify(e1));
-    check(e1.aria === 'Call wave 2 early for 36 bonus gold', 'its aria-label says the wave and the bonus (' + e1.aria + ')');
+    check(e1.aria === 'Call wave 2 early for 24 bonus gold', 'its aria-label says the wave and the bonus (' + e1.aria + ')');
     const keep = await G(page, () => { const W = window.__pw, sm = document.querySelector('#bWave small'); W.G.gold += 5; W.refreshPanel(); return document.querySelector('#bWave small') === sm; });
     check(keep, "a gold change (refreshPanel on every kill) keeps the button's <small>, so a tap on it is never lost");
     const g0 = await G(page, () => window.__pw.G.gold);
     await page.click('#bWave');
     const af = await G(page, () => ({ gold: window.__pw.G.gold, wave: window.__pw.G.wave, toast: document.querySelector('#toast').textContent }));
-    check(af.gold === g0 + 36 && af.wave === 2, 'tapping it adds exactly 36 gold and sends wave 2 ' + JSON.stringify({ g0, ...af }));
-    check(af.toast === 'Called early · +36 gold', 'the toast still says what was paid (' + af.toast + ')');
+    check(af.gold === g0 + 24 && af.wave === 2, 'tapping it adds exactly 24 gold and sends wave 2 ' + JSON.stringify({ g0, ...af }));
+    check(af.toast === 'Called early · +24 gold', 'the toast still says what was paid (' + af.toast + ')');
     const s2 = await wbtn(page);
     check(s2.text === 'Wave 2…' && !s2.early && s2.aria === null, 'once called, the button is back to the spawning state ' + JSON.stringify(s2));
     // Any wave: the label and the payout are CFG.earlyMul*(10+w).
     const b12 = await G(page, () => { const W = window.__pw, g = W.G; g.spawnQ = []; g.enemies = []; g.W = { 11: { rem: 0, alive: 1 } }; g.wave = 11; W.refreshPanel(); const bw = document.querySelector('#bWave'), label = bw.textContent, g0 = g.gold; bw.click(); return { label, paid: g.gold - g0, wave: g.wave }; });
-    check(/^Call 12 early\s*\+66$/.test(b12.label) && b12.paid === 66 && b12.wave === 12, 'at wave 11 the button reads Call 12 early +66 and pays 66 ' + JSON.stringify(b12));
+    check(/^Call 12 early\s*\+44$/.test(b12.label) && b12.paid === 44 && b12.wave === 12, 'at wave 11 the button reads Call 12 early +44 and pays 44 ' + JSON.stringify(b12));
     // A calm board again: 'Start wave' and its brass look come back.
     const s3 = await G(page, () => { const W = window.__pw, g = W.G; g.spawnQ = []; g.enemies = []; g.W = {}; W.refreshPanel(); const bw = document.querySelector('#bWave'); return { text: bw.textContent, early: bw.classList.contains('early'), bg: getComputedStyle(bw).backgroundColor }; });
     check(s3.text === 'Start wave 13' && !s3.early && s3.bg === 'rgb(227, 173, 69)', 'with the board calm it is Start wave 13 in brass again ' + JSON.stringify(s3));
@@ -2964,7 +2964,7 @@ let BASE;
       }
       g.W = {}; W.refreshPanel(); return out; });
     const narrow = vp.width <= 360;
-    const bad = res.filter(r => !r.early || r.sw > r.cw || r.h !== 42 || !r.tips.every(Boolean) || r.tips.length !== 5 || !(narrow ? /^Call early \+\d+$/ : /^Call \d+ early \+\d+$/).test(r.text) || !r.text.endsWith('+' + 3 * (11 + r.w)));
+    const bad = res.filter(r => !r.early || r.sw > r.cw || r.h !== 42 || !r.tips.every(Boolean) || r.tips.length !== 5 || !(narrow ? /^Call early \+\d+$/ : /^Call \d+ early \+\d+$/).test(r.text) || !r.text.endsWith('+' + 2 * (11 + r.w)));
     check(bad.length === 0 && res.length === 4, `${vp.width}x${vp.height}: in the early state (waves 2, 12, 30 and 99 next) #bWave scrollWidth <= clientWidth, it reads ${narrow ? "'Call early +N'" : "'Call N early +B'"}, and every Target line fits beside it ` + JSON.stringify(bad.slice(0, 2)));
     if (vp.width === 320 && vp.height === 640) check(res[0].text.startsWith('Call early') && res[0].sw <= res[0].cw, "acceptance at 320x640: the text starts with 'Call early' and scrollWidth <= clientWidth " + JSON.stringify(res[0]));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
@@ -2978,7 +2978,7 @@ let BASE;
     const wide = await wbtn(page);
     await page.setViewportSize({ width: 320, height: 640 }); await page.waitForTimeout(250);
     const slim = await wbtn(page);
-    check(wide.text === 'Call 2 early +36' && slim.text === 'Call early +36' && slim.sw <= slim.cw, 'resized from 390px to 320px, the label drops the wave number ' + JSON.stringify([wide.text, slim.text]));
+    check(wide.text === 'Call 2 early +24' && slim.text === 'Call early +24' && slim.sw <= slim.cw, 'resized from 390px to 320px, the label drops the wave number ' + JSON.stringify([wide.text, slim.text]));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -3090,8 +3090,8 @@ let BASE;
       }
       g.W = {}; g.spawnQ = []; W.refreshPanel(); return { bad, tags, back: !document.querySelector('#chips .theme').hidden }; });
     check(fit.bad.length === 0, `${vp.width}px: beside 'Start wave 7', 'Wave 6…' and the early call, the Air raid line and every chip fit ` + JSON.stringify(fit));
-    // (review fix) Where one row can't hold it all (320px beside 'Call early +51'), the row first closes up its gaps, which keeps the tag.
-    check(fit.tags.every(t => t.endsWith(':tag')) && fit.back && (vp.width === 390 || fit.tags[2] === 'Call early +51:tag'), `${vp.width}px: the tag shows beside every wave button label ` + JSON.stringify(fit));
+    // (review fix) Where one row can't hold it all (320px beside 'Call early +34'), the row first closes up its gaps, which keeps the tag.
+    check(fit.tags.every(t => t.endsWith(':tag')) && fit.back && (vp.width === 390 || fit.tags[2] === 'Call early +34:tag'), `${vp.width}px: the tag shows beside every wave button label ` + JSON.stringify(fit));
     // Only where even that is not enough does the tag go, not a chip; it is back once there is room. (#info squeezed to force it.)
     const squeeze = await G(page, () => { const W = window.__pw, g = W.G, c = document.querySelector('#chips'), i = document.querySelector('#info'); g.wave = 6; g.W = { 6: { rem: 0, alive: 1 } }; g.spawnQ = [];
       const st = () => ({ tag: !c.querySelector('.theme').hidden, tight: c.classList.contains('tight'), whole: [...c.querySelectorAll('.chip')].every(x => x.getBoundingClientRect().bottom <= c.getBoundingClientRect().bottom + 0.5) });
@@ -3143,11 +3143,11 @@ let BASE;
     // re-hits Hard for the bot that also spends during waves.)
     check(v.cfg.hpB === 0.021 && v.cfg.themeBudget === 0.85 && v.hp.join() === '0.88,1,1.06', `the shipped retune: CFG.hpB ${v.cfg.hpB}, CFG.themeBudget ${v.cfg.themeBudget}, road hp ${v.hp.join(', ')} (Quarry Run 1.06)`);
     check(v.armor === 'brute 8,boss 12' && v.cfg.armorGrow === 0.03 && v.cfg.armorFloor === 0.25 && v.arm.join() === '9.2/12.56/14.96,13.8/18.84/22.44', 'armor: Brute 8 and Warlord 12, growing 3% a wave (Brute 9.2 at wave 6, 15 at 30; Warlord 18.8 at 20), a hit keeps at least 25% ' + JSON.stringify(v));
-    check(v.cfg.hpA === 0.25 && v.cfg.goldGrow === 0.01 && v.cfg.bonusA === 15 && v.cfg.bonusB === 2 && v.cfg.startGold === 200 && v.cfg.earlyMul === 3, 'nothing else in CFG moved ' + JSON.stringify(v.cfg));
+    check(v.cfg.hpA === 0.25 && v.cfg.goldGrow === 0.01 && v.cfg.bonusA === 15 && v.cfg.bonusB === 2 && v.cfg.startGold === 200 && v.cfg.earlyMul === 2, 'nothing else in CFG moved (earlyMul is 2 since the release balance) ' + JSON.stringify(v.cfg));
     check(JSON.stringify(v.td) === JSON.stringify({ bolt: '50,2.4,0.55,11,0,0,0', mortar: '90,2.4,1.5,30,0.95,0,0', frost: '70,2,1,5,0.75,0.42,0', arc: '130,2.2,1.1,21,0,0,3', long: '120,4.6,2.1,78,0,0,0' }), 'no tower stat changed in this pass ' + JSON.stringify(v.td));
     // README 'Balance' records the numbers.
     const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8'), bal = readme.slice(readme.indexOf('## Balance'));
-    check(readme.includes('## Balance') && bal.includes('`CFG.hpB` 0.021') && bal.includes('`CFG.themeBudget` 0.85') && bal.includes('`hp` 1.06') && bal.includes('Brute 8') && bal.includes('Warlord 12') && bal.includes('node tests/balance.js') && /smart \(20 seeds, 40 on Normal\) \| 20\/20/.test(bal), "README.md has a 'Balance' section with the final numbers and the bot results");
+    check(readme.includes('## Balance') && bal.includes('`CFG.hpB` 0.021') && bal.includes('`CFG.themeBudget` 0.85') && bal.includes('`hp` 1.06') && bal.includes('Brute 8') && bal.includes('Warlord 12') && bal.includes('node tests/balance.js') && /smart \(20 seeds, 40 on Normal, 60 on Hard\) \| 20\/20/.test(bal) && bal.includes('`CFG.earlyMul` 2'), "README.md has a 'Balance' section with the final numbers (earlyMul 2 since the release balance) and the bot results");
     // tests/balance.js: exists, parses, and holds the spec's profiles and targets. It is run by hand (10-20 minutes budgeted), never from here.
     const bj = path.join(__dirname, 'balance.js'), src = fs.existsSync(bj) ? fs.readFileSync(bj, 'utf8') : '';
     const parse = require('child_process').spawnSync(process.execPath, ['--check', bj], { encoding: 'utf8' });
@@ -3156,8 +3156,9 @@ let BASE;
     // early play Normal on past wave 30 until they fall, so the early target compares how far each gets, not 30 with 30.)
     // (1.1 balance: spam has smart's noise; every profile spends between waves and once a second during one; new targets.)
     // (release review: a second Bolts-only profile, spamUp, upgrades first; smart and early play their endless Normal on 40 seeds.)
-    check(["smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40) }", "spam: { opts: { allow: ['bolt'], div: 0, noise: 0.3 }, maps: [0, 1, 2], seeds: range(5) }",
-      "spamUp: { opts: { allow: ['bolt'], div: 0, noise: 0.3, depth: 3 }, maps: [0, 1, 2], seeds: range(5) }", "early: { opts: { ...SMART, early: true }, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40) }", "mlf: { opts: { allow: ['mortar', 'long', 'frost'] }, maps: [1], seeds: range(5) }", 'early: { opts: { ...SMART, early: true }', 'const SMART = { frostN: 3, div: 0.3, noise: 0.3 };', "reader: { opts: { ...SMART, look: 4 }", '(P.endless || []).includes(m) ? MAX_ENDLESS : 30', 'const MAX_ENDLESS = 100;', 'if (n % 30) continue;'].every(x => src.includes(x)), 'it defines the smart (the plan\'s profile), spam, spamUp, mlf, early and reader profiles over the spec seeds, spends once a second during a wave, and plays smart and early on Normal until they fall');
+    // (release balance: smart and early play Hard on 60 seeds, since 20 seeds move Hard wins by as much as the early target allows.)
+    check(["smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40), roadSeeds: { 2: range(60) } }", "spam: { opts: { allow: ['bolt'], div: 0, noise: 0.3 }, maps: [0, 1, 2], seeds: range(5) }",
+      "spamUp: { opts: { allow: ['bolt'], div: 0, noise: 0.3, depth: 3 }, maps: [0, 1, 2], seeds: range(5) }", "early: { opts: { ...SMART, early: true }, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40), roadSeeds: { 2: range(60) } }", "mlf: { opts: { allow: ['mortar', 'long', 'frost'] }, maps: [1], seeds: range(5) }", 'early: { opts: { ...SMART, early: true }', 'const SMART = { frostN: 3, div: 0.3, noise: 0.3 };', "reader: { opts: { ...SMART, look: 4 }", '(P.endless || []).includes(m) ? MAX_ENDLESS : 30', 'const MAX_ENDLESS = 100;', 'if (n % 30) continue;'].every(x => src.includes(x)), 'it defines the smart (the plan\'s profile), spam, spamUp, mlf, early and reader profiles over the spec seeds, spends once a second during a wave, and plays smart and early on Normal until they fall');
     check(['smart wins Easy >= 19/20', 'smart wins Normal >= 17/20', 'smart wins Hard 8-12/20', "const SPAM = [[15, 29], [15, 23], [12, 23]];", 'loses at least 1 life on an Air raid wave in every run', 'mean cleared wave within 3', 'median lives at wave 30 within 3', 'wins any road', 'const UP = [[15, 30], [15, 27], [15, 27]];', 'early vs smart on Hard: wins within', 'Normal winners earn 3, 2 and 1 stars', 'Hard winners rarely earn 3 stars'].every(x => src.includes(x)) && !/require\(['"][^'"]*balance/.test(fs.readFileSync(__filename, 'utf8')), 'and checks every target; tests/run.js does not run it');
     // A 1.1 save from before this item still loads: its run carries on into the themed waves.
     await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ saves: { meadow: { map: 'meadow', wave: 6, gold: 300, lives: 17, towers: [{ type: 'mortar', c: 2, r: 2, level: 2, spent: 160, mode: 'first' }] } }, last: 'meadow', best: { meadow: 6 } })));
@@ -3300,7 +3301,7 @@ let BASE;
     await G(page, () => { const g = window.__pw.G; g.running = false; g.wave = 28; g.cleared = 28; g.lives = 18; });
     await onRoad();
     const w29 = await btn();
-    check(w29.early && !w29.disabled && /^Call 30 early\s*\+120$/.test(w29.text), "wave 29 on the road: 'Call 30 early +120' as before " + JSON.stringify(w29));
+    check(w29.early && !w29.disabled && /^Call 30 early\s*\+80$/.test(w29.text), "wave 29 on the road: 'Call 30 early +80' as before " + JSON.stringify(w29));
     await G(page, () => { const W = window.__pw, g = W.G; g.enemies = []; g.W = {}; g.cleared = 29; W.refreshPanel(); });
     const n30 = await onRoad();
     const w30 = await btn();
@@ -3314,7 +3315,7 @@ let BASE;
     await G(page, () => { window.__pw.G.running = false; });
     await onRoad();
     const w31 = await btn();
-    check(w31.wave === 31 && w31.early && /^Call 32 early\s*\+126$/.test(w31.text), "past the campaign the early call is back: 'Call 32 early +126' during wave 31 " + JSON.stringify(w31));
+    check(w31.wave === 31 && w31.early && /^Call 32 early\s*\+84$/.test(w31.text), "past the campaign the early call is back: 'Call 32 early +84' during wave 31 " + JSON.stringify(w31));
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }

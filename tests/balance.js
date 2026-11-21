@@ -1,6 +1,6 @@
 // Balance check for Pathwarden: a greedy bot plays every road many times and the summary is checked against the release targets.
 // Not part of tests/run.js. Run it by hand from the repo root after changing CFG, MAPS[i].hp, TD, ED or the waves:
-//   node tests/balance.js            every profile: 255 runs, about 80 seconds on 4 cores
+//   node tests/balance.js            every profile: 335 runs, about 90 seconds on 4 cores
 //   node tests/balance.js --profiles=smart,spam --seeds=5 --bruteArmor=5 --boltDmg=10   a quick look while tuning
 // Overrides (applied in the page before each run; without them the game's own values are used):
 //   --hpB --budget --earlyMul --armorGrow --floor      CFG.hpB, CFG.themeBudget, CFG.earlyMul, CFG.armorGrow, CFG.armorFloor
@@ -9,7 +9,7 @@
 //   --boltCost --boltDmg --boltRate --boltRange        TD.bolt (rate is seconds between shots)
 //   --profiles=smart,spam plays only those profiles; --roads=2 (or 0,2) only those roads (0 Easy, 1 Normal, 2 Hard).
 //   --seeds=5 plays at most 5 seeds per profile and road; --seedFrom=21 plays seeds 21, 22, ... (a fresh sample of the same size).
-//   (smart and early play 40 seeds on their endless road, Normal, and 20 elsewhere: see PROFILES.)
+//   (smart and early play 40 seeds on their endless road, Normal, 60 on Hard and 20 on Easy: see PROFILES.)
 //   --file=path/to/index.html plays another copy (an older build, to compare); --json=out.json saves every run.
 // The bot only uses window.__pw (build, upgrade, startWave, step, buildWave, G), so it plays index.html as shipped. The game's
 // randomness is drawing only, so a seed always plays the same run.
@@ -43,14 +43,16 @@ const range = n => Array.from({ length: SEEDS ? Math.min(SEEDS, n) : n }, (_, i)
 // endless: roads where the bot plays on past wave 30 until it falls (up to wave 100), so 'mean cleared' there can tell smart and
 // early apart. Capped at 30, both win nearly every Normal run and the early target would compare 30 with 30. Every endless run
 // falls on a Warlord wave (40, 50, 60), so a median moves in steps of 10; the target compares means instead, over 40 seeds
-// (endlessSeeds), because 20 seeds of either bot can move its mean by 2 or more.
+// (endlessSeeds), because 20 seeds of either bot can move its mean by 2 or more. On Hard, smart and early play 60 seeds (roadSeeds):
+// a sample of 20 can move either one's wins by 5 (9, 9 and 12 of 20 for smart on seeds 1-20, 21-40 and 41-60), which is as wide as
+// the early target itself. The per-20 targets scale with the number of seeds played.
 const SMART = { frostN: 3, div: 0.3, noise: 0.3 };
 const PROFILES = {
-  smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40) },
+  smart: { opts: SMART, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40), roadSeeds: { 2: range(60) } },
   spam: { opts: { allow: ['bolt'], div: 0, noise: 0.3 }, maps: [0, 1, 2], seeds: range(5) },
   spamUp: { opts: { allow: ['bolt'], div: 0, noise: 0.3, depth: 3 }, maps: [0, 1, 2], seeds: range(5) },
   mlf: { opts: { allow: ['mortar', 'long', 'frost'] }, maps: [1], seeds: range(5) },
-  early: { opts: { ...SMART, early: true }, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40) },
+  early: { opts: { ...SMART, early: true }, maps: [0, 1, 2], seeds: range(20), endless: [1], endlessSeeds: range(40), roadSeeds: { 2: range(60) } },
   reader: { opts: { ...SMART, look: 4 }, maps: [0, 1, 2], seeds: range(20) },
 };
 const want = (arg('profiles') || Object.keys(PROFILES).join(',')).split(',');
@@ -158,7 +160,7 @@ function BOT(o) {
   const t0 = Date.now();
   const browser = await chromium.launch();
   const jobs = [];
-  for (const p of want) { const P = PROFILES[p]; if (!P) throw new Error('unknown profile ' + p); for (const m of P.maps) for (const s of ((P.endless || []).includes(m) && P.endlessSeeds) || P.seeds) jobs.push({ p, m, s, o: { ...P.opts, seed: s, maxWave: (P.endless || []).includes(m) ? MAX_ENDLESS : 30 } }); }
+  for (const p of want) { const P = PROFILES[p]; if (!P) throw new Error('unknown profile ' + p); for (const m of P.maps) for (const s of ((P.endless || []).includes(m) && P.endlessSeeds) || (P.roadSeeds && P.roadSeeds[m]) || P.seeds) jobs.push({ p, m, s, o: { ...P.opts, seed: s, maxWave: (P.endless || []).includes(m) ? MAX_ENDLESS : 30 } }); }
   // The longest runs first, so the workers finish together.
   jobs.sort((a, b) => b.o.maxWave - a.o.maxWave);
   const out = []; let next = 0, done = 0;
@@ -215,7 +217,7 @@ function BOT(o) {
   if (want.includes('smart')) {
     if (n('smart', 0)) target('smart wins Easy >= 19/20', wins('smart', 0) >= Math.ceil(19 / 20 * n('smart', 0)), `${wins('smart', 0)}/${n('smart', 0)}`);
     if (n('smart', 1)) target(`smart wins Normal >= 17/20 (${Math.ceil(17 / 20 * n('smart', 1))}/${n('smart', 1)})`, wins('smart', 1) >= Math.ceil(17 / 20 * n('smart', 1)), `${wins('smart', 1)}/${n('smart', 1)}`);
-    if (n('smart', 2)) target('smart wins Hard 8-12/20', wins('smart', 2) >= Math.floor(8 / 20 * n('smart', 2)) && wins('smart', 2) <= Math.ceil(12 / 20 * n('smart', 2)), `${wins('smart', 2)}/${n('smart', 2)}`);
+    if (n('smart', 2)) target(`smart wins Hard 8-12/20 (${Math.floor(8 / 20 * n('smart', 2))}-${Math.ceil(12 / 20 * n('smart', 2))}/${n('smart', 2)})`, wins('smart', 2) >= Math.floor(8 / 20 * n('smart', 2)) && wins('smart', 2) <= Math.ceil(12 / 20 * n('smart', 2)), `${wins('smart', 2)}/${n('smart', 2)}`);
     // Stars (STAR3/STAR2): the Normal winners should spread across 1, 2 and 3 stars, and Hard winners should rarely earn 3.
     if (n('smart', 1)) { const s = stars(runs('smart', 1)), k = Math.max(1, Math.round(n('smart', 1) / 10));
       target(`smart's Normal winners earn 3, 2 and 1 stars (at least ${k} runs each)`, s.every(x => x >= k), `3/2/1 stars: ${s.join('/')}`); }
