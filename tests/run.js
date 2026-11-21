@@ -42,6 +42,8 @@ async function tapTile(page, c, r) {
 const text = (page, sel) => page.$eval(sel, el => el.textContent.trim());
 const hidden = (page, sel) => page.$eval(sel, el => el.hidden || getComputedStyle(el).display === 'none');
 async function startMap(page, i) { await page.click(`.mapbtn >> nth=${i}`); await page.waitForTimeout(80); }
+// Tap the wave button. At wave 0 with no towers the wave-1 guard only warns ('Send anyway?'), so tap it a second time.
+async function sendWave(page) { await page.click('#bWave'); if ((await text(page, '#bWave')) === 'Send anyway?') await page.click('#bWave'); }
 async function runUntilCalm(page, maxSec = 400) {
   return G(page, max => { const W = window.__pw; let t = 0; while ((W.G.spawnQ.length || W.G.enemies.length) && !W.G.over && t < max) { W.step(1 / 30); t += 1 / 30; } return t; }, maxSec);
 }
@@ -75,9 +77,11 @@ let BASE;
 
     await tapTile(page, 1, 3); // path tile
     check((await G(page, () => window.__pw.G.sel)) === null, 'tapping the road selects nothing');
-    check(await page.$eval('.tw', el => el.classList.contains('dim')), 'palette dimmed with no tile selected');
+    check(await page.$$eval('.tw', els => els.length === 5 && els.every(el => !el.classList.contains('dim'))), 'no .tw has .dim');
     await page.click('.tw[data-t="bolt"]');
-    check((await text(page, '#info')).includes('Tap a grass tile first'), 'palette tap without a tile explains what to do');
+    check((await page.$eval('.tw[data-t="bolt"]', el => el.classList.contains('armed'))) && (await text(page, '#info')).includes('Tap grass'), 'palette tap without a tile arms the tower and says to tap grass');
+    await page.click('.tw[data-t="bolt"]');
+    check((await G(page, () => window.__pw.G.pending)) === null, 'tapping the armed tower again disarms it');
 
     await tapTile(page, 2, 2);
     check(JSON.stringify(await G(page, () => window.__pw.G.sel)) === '{"c":2,"r":2}', 'grass tile selected');
@@ -115,7 +119,7 @@ let BASE;
     check((await G(page, () => window.__pw.G.towers.length)) === 1 && (await text(page, '#bSell')).startsWith('Confirm'), 'first sell tap asks to confirm');
     await page.click('#bSell');
     check((await G(page, () => window.__pw.G.towers.length)) === 0, 'second sell tap sells');
-    check((await G(page, () => window.__pw.G.gold)) === goldBefore + Math.floor(spent * 0.7), 'refund is 70% of total spent');
+    check(spent === 160 && (await G(page, () => window.__pw.G.gold)) === goldBefore + spent, 'built and upgraded before wave 1, so the refund is everything spent (' + spent + ')');
     check((await G(page, () => window.__pw.G.grid[2 * 9 + 2])) === 0, 'tile is free again after selling');
 
     // double-tap tile to build
@@ -209,7 +213,7 @@ let BASE;
     const { ctx, page } = await newPage(browser);
     await startMap(page, 2);
     await G(page, () => { window.__pw.G.lives = 1; });
-    await page.click('#bWave');
+    await sendWave(page);
     await runUntilCalm(page);
     await page.waitForTimeout(80);
     check(await G(page, () => window.__pw.G.over), 'game ends at 0 lives');
@@ -281,8 +285,9 @@ let BASE;
   {
     const { ctx, page } = await newPage(browser, { init: () => { Storage.prototype.getItem = () => { throw new Error('blocked'); }; Storage.prototype.setItem = () => { throw new Error('blocked'); }; } });
     await startMap(page, 1);
-    await page.click('#bWave');
+    await sendWave(page);
     await page.waitForTimeout(300);
+    check((await G(page, () => window.__pw.G.wave)) === 1, 'wave 1 starts with storage blocked');
     check(page.errors.length === 0, 'plays with storage blocked (private mode): ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -298,7 +303,7 @@ let BASE;
       check(g.map === 'meadow' && g.wave === 3 && g.towers === 0, 'Continue resumes the migrated run, bad towers dropped ' + JSON.stringify(g));
     } else if (!(await hidden(page, '#bContinue'))) { await page.click('#bContinue'); await page.waitForTimeout(100); }
     else { await startMap(page, 1); }
-    await page.click('#bWave'); await page.waitForTimeout(200);
+    await sendWave(page); await page.waitForTimeout(200);
     check(page.errors.length === 0, 'no crash: ' + page.errors.join('|'));
     await ctx.close();
   }
@@ -451,7 +456,7 @@ let BASE;
     await page.click('#bSell');
     check((await text(page, '#bSell')).startsWith('Confirm'), 'first Sell tap arms');
     await page.waitForTimeout(3700);
-    check((await text(page, '#bSell')).startsWith('Sell'), 'Sell disarms after 3.5s (' + (await text(page, '#bSell')) + ')');
+    check((await text(page, '#bSell')).startsWith('Undo'), 'Sell disarms after 3.5s, back to Undo for a tower built between waves (' + (await text(page, '#bSell')) + ')');
     check((await G(page, () => !window.__pw.G.sellArm && window.__pw.G.towers.length === 1)), 'tower kept, arm cleared');
     await page.click('#bSell');
     check((await text(page, '#bSell')).startsWith('Confirm'), 'Sell can be armed again after the timeout');
@@ -519,7 +524,7 @@ let BASE;
 
     await startMap(page, 2); // Quarry Run
     check((await G(page, () => document.querySelector('#app').inert)) === false, 'starting a road clears #app.inert');
-    await page.click('#bWave');
+    await sendWave(page);
     await page.waitForTimeout(250);
     const ts = await rect(page, '#toast'), cv = await rect(page, '#cv');
     check((await text(page, '#toast')) === 'Wave 1' && (await page.$eval('#toast', el => el.classList.contains('show'))), 'wave 1 toast showing');
@@ -548,7 +553,7 @@ let BASE;
     await G(page, () => { document.activeElement.blur(); window.__pw.G.running = false; window.__pw.G.gold = 500; });
     await page.waitForTimeout(100); // let the HUD pick up the gold change before the hint is written
     await page.keyboard.press('2');
-    check((await text(page, '#info')).startsWith('Mortar') && (await text(page, '#info')).includes('Tap a grass tile first'), 'key 2 with no tile explains Mortar (' + (await text(page, '#info')) + ')');
+    check((await G(page, () => window.__pw.G.pending)) === 'mortar' && (await text(page, '#info')).startsWith('Mortar ready') && (await text(page, '#info')).includes('Tap grass'), 'key 2 with no tile arms Mortar (' + (await text(page, '#info')) + ')');
     await tapTile(page, 2, 2);
     await page.keyboard.press('3');
     check((await G(page, () => window.__pw.G.pending)) === 'frost', 'key 3 arms Frost');
@@ -759,7 +764,7 @@ let BASE;
     await page.click('#bWave');
     // The audio clock follows the game clock here, so the 0.06s throttle lets a realistic number of voices through.
     await G(page, () => { const W = window.__pw, g = W.G; g.running = false; let t = 0; while ((g.spawnQ.length || g.enemies.length) && !g.over && t < 400) { W.step(1 / 30); t += 1 / 30; window.__at = 1 + t; } g.running = true; });
-    await page.click('#bPause'); await page.click('#bMenu'); await startMap(page, 0); await page.click('#bWave');
+    await page.click('#bPause'); await page.click('#bMenu'); await startMap(page, 0); await sendWave(page);
     const wiring = await G(page, () => ({ osc: window.__osc, dest: window.__dest, comp: window.__comp }));
     check(wiring.osc > 20, `a wave made plenty of voices (${wiring.osc})`);
     check(wiring.dest.length === 1 && wiring.dest[0] === 'DynamicsCompressorNode', 'only the compressor connects to the speakers; every voice goes through the master bus ' + JSON.stringify(wiring.dest.slice(0, 5)));
@@ -914,6 +919,267 @@ let BASE;
   }
 
   // ---------------------------------------------------------------
+  // build-flow-onboarding: the palette never dims, towers can be armed before a tile (with a double-tap guard),
+  // a ready pulse and short-gold flash, first-run coaching with hint tiles, the wave-1 guard, and a full refund until the next wave.
+  const cls = (page, sel, c) => page.$eval(sel, (el, c) => el.classList.contains(c), c);
+  // Set gold, then give the frame loop time to run refreshPanel on the change.
+  const setGold = async (page, v) => { await G(page, v => { window.__pw.G.gold = v; }, v); await page.waitForTimeout(100); };
+
+  current = 'build-flow-onboarding: palette look and tower-first arming';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1); // Meadow Bend
+    check(await page.$$eval('.tw', els => els.length === 5 && els.every(el => !el.classList.contains('dim') && getComputedStyle(el).opacity === '1')), 'no .tw has class dim, and the palette is fully opaque with nothing selected');
+    await setGold(page, 60);
+    const look = await page.evaluate(() => { const cs = (s, p) => getComputedStyle(document.querySelector(s), p); return { arc: cs('.tw[data-t=arc] canvas').filter, bolt: cs('.tw[data-t=bolt] canvas').filter, cost: cs('.tw[data-t=arc] .cost').color, dot: cs('.tw[data-t=arc] .cost', '::before').backgroundColor, boltCost: cs('.tw[data-t=bolt] .cost').color }; });
+    check(look.arc.includes('grayscale') && look.bolt === 'none', 'gold 60: the Arc icon filter has grayscale and the Bolt icon filter is none ' + JSON.stringify(look));
+    check(look.cost === 'rgb(255, 154, 133)' && look.dot === 'rgb(255, 154, 133)' && look.boltCost === 'rgb(227, 173, 69)', 'an unaffordable price and its dot are #ff9a85; an affordable one stays brass');
+    await setGold(page, 200);
+
+    await page.click('.tw[data-t="bolt"]');
+    check((await G(page, () => window.__pw.G.pending)) === 'bolt' && (await cls(page, '.tw[data-t="bolt"]', 'armed')), "tap Bolt with nothing selected: G.pending === 'bolt' and it has .armed");
+    const ready = await text(page, '#info');
+    check(ready.startsWith('Bolt ready. Tap grass to place it.') && ready.endsWith('Dmg 11 · Range 2.4 · 1.8/s') && (await page.$eval('#info', el => el.innerHTML.includes('<b>Bolt</b> ready.') && el.innerHTML.includes('<br>'))), '#info: "<b>Bolt</b> ready. Tap grass to place it.<br>" and the Bolt stats (' + ready + ')');
+    await G(page, () => new Promise(res => { let n = 0; const f = () => { if (n % 15 === 0) window.__pw.G.gold = 100 + n; if (++n < 120) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); }));
+    await page.waitForTimeout(100);
+    check((await text(page, '#info')).includes('ready') && (await G(page, () => window.__pw.G.gold)) === 205, 'gold set 8 times over 120 frames: #info still includes "ready" (' + (await text(page, '#info')) + ')');
+    await setGold(page, 200);
+
+    // Tower-first: a tile tap selects, a second tap on it builds, and the tower stays armed for the next one.
+    await tapTile(page, 2, 5);
+    check(JSON.stringify(await G(page, () => window.__pw.G.sel)) === '{"c":2,"r":5}' && (await G(page, () => window.__pw.G.towers.length)) === 0, 'a grass tap with Bolt armed selects the tile and builds nothing yet');
+    const ghost = await tileHash(page, 3, 5, 0);
+    await G(page, () => { window.__pw.G._p = window.__pw.G.pending; window.__pw.G.pending = null; });
+    const noGhost = await tileHash(page, 3, 5, 0);
+    await G(page, () => { window.__pw.G.pending = window.__pw.G._p; });
+    check(ghost !== noGhost, 'the range ring of the armed tower shows around the selected tile');
+    await page.waitForTimeout(300); await tapTile(page, 2, 5);
+    check((await G(page, () => window.__pw.G.towers.length)) === 1 && (await G(page, () => window.__pw.G.pending)) === 'bolt', "tapTile(2,5), wait 300ms, tapTile(2,5): towers.length === 1 and G.pending === 'bolt'");
+    check((await G(page, () => window.__pw.G.sel)) === null && (await cls(page, '.tw[data-t="bolt"]', 'armed')), 'after the build only the tile clears; Bolt stays armed');
+    await tapTile(page, 4, 5); await page.waitForTimeout(300); await tapTile(page, 4, 5);
+    check((await G(page, () => window.__pw.G.towers.length)) === 2, 'tapTile(4,5), wait 300ms, tapTile(4,5): towers.length === 2');
+
+    // Double-tap guard: only for a tile picked while a tower was already armed.
+    await tapTile(page, 5, 9); await page.waitForTimeout(60); await tapTile(page, 5, 9);
+    check((await G(page, () => window.__pw.G.towers.length)) === 2, 'with Bolt armed, tapTile(5,9) twice 60ms apart builds nothing');
+    await page.waitForTimeout(300); await tapTile(page, 5, 9);
+    check((await G(page, () => window.__pw.G.towers.length)) === 3, 'a tap on the same tile after 250ms builds it');
+    await setGold(page, 500);
+    await tapTile(page, 1, 3);
+    check((await G(page, () => window.__pw.G.pending === null && window.__pw.G.sel === null)), 'tapping road disarms');
+    await tapTile(page, 2, 9); await page.click('.tw[data-t="frost"]'); await tapTile(page, 2, 9);
+    check((await G(page, () => window.__pw.G.towers.map(t => t.type).join())) === 'bolt,bolt,bolt,frost', 'tile, tower, tile builds at once: no guard when the tower is picked after the tile');
+
+    // Disarming.
+    await page.click('.tw[data-t="frost"]');
+    check((await G(page, () => window.__pw.G.pending)) === null && !(await cls(page, '.tw[data-t="frost"]', 'armed')), 'tap the armed button with no tile selected: G.pending === null');
+    await page.click('.tw[data-t="bolt"]'); await tapTile(page, 2, 5);
+    check((await G(page, () => window.__pw.G.pending === null && !!window.__pw.G.selTower && window.__pw.G.selTower.c === 2)), 'tapping a tower selects it and disarms');
+    await tapTile(page, 2, 5);
+    await page.click('.tw[data-t="bolt"]');
+    await G(page, () => document.querySelector('#stage').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    check((await G(page, () => window.__pw.G.pending)) === null && !(await cls(page, '.tw[data-t="bolt"]', 'armed')), 'tapping beside the board disarms');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'build-flow-onboarding: ready pulse and short gold';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    check(await page.$$eval('.tw', els => els.every(el => !el.classList.contains('ready'))), 'a new run starts with no pulse');
+    await setGold(page, 120);
+    check(!(await cls(page, '.tw[data-t="arc"]', 'ready')) && (await cls(page, '.tw[data-t="arc"]', 'poor')), 'gold 120: Arc (130) is poor and not ready');
+    await setGold(page, 135);
+    const pulse = await page.evaluate(() => { const b = document.querySelector('.tw[data-t=arc]'); return { ready: b.classList.contains('ready'), shadow: getComputedStyle(b).boxShadow, anim: getComputedStyle(b.querySelector('.cost')).animationName, all: [...document.querySelectorAll('.tw.ready')].map(x => x.dataset.t).join() }; });
+    check(pulse.ready && pulse.shadow.includes('rgb(227, 173, 69)') && pulse.shadow.includes('0px 0px 0px 2px'), "G.gold=120, then 135: Arc gains 'ready' with a 2px brass ring " + JSON.stringify(pulse));
+    check(pulse.anim === 'pop' && pulse.all === 'arc', 'its price pops, and only Arc pulses (the others were already affordable)');
+    await page.waitForTimeout(700);
+    check(!(await cls(page, '.tw[data-t="arc"]', 'ready')), "Arc loses 'ready' after 700ms");
+    await setGold(page, 10);
+    await G(page, () => window.__pw.newGame(1));
+    await page.waitForTimeout(100);
+    check(await page.$$eval('.tw', els => els.every(el => !el.classList.contains('ready') && !el.classList.contains('poor'))), 'newGame resets the memory without pulsing (10 gold, then a new run at 200)');
+
+    // #bUp pulses when the selected tower's upgrade becomes affordable.
+    await G(page, () => { window.__pw.G.running = true; window.__pw.build('bolt', 2, 2); });
+    await tapTile(page, 2, 2);
+    await setGold(page, 10);
+    check((await cls(page, '#bUp', 'poor')) && (await page.$eval('#bUp small', el => getComputedStyle(el).color)) === 'rgb(255, 154, 133)', 'an unaffordable upgrade price is #ff9a85');
+    await page.click('#bUp');
+    const sh = await page.evaluate(() => { const g = document.querySelector('#sGold'), cs = getComputedStyle(g); return { short: g.classList.contains('short'), color: cs.color, anim: cs.animationName, n: cs.animationIterationCount }; });
+    check((await text(page, '#toast')) === 'Need 30 more gold' && sh.short && sh.color === 'rgb(255, 138, 117)' && sh.anim === 'shake' && sh.n === '3', "a failed upgrade toasts 'Need 30 more gold' and #sGold gets 'short': #ff8a75, shaking 3 times " + JSON.stringify(sh));
+    await page.waitForTimeout(300);
+    check(!(await cls(page, '#sGold', 'short')), "'short' is gone after 240ms");
+    await setGold(page, 100);
+    check((await cls(page, '#bUp', 'ready')) && (await page.$eval('#bUp', el => getComputedStyle(el).boxShadow)).includes('rgb(227, 173, 69)') && (await page.$eval('#bUp small', el => getComputedStyle(el).animationName)) === 'pop', "#bUp gains 'ready' when its upgrade becomes affordable");
+    await page.waitForTimeout(700);
+    check(!(await cls(page, '#bUp', 'ready')), "#bUp loses 'ready' after 600ms");
+    await tapTile(page, 2, 2); // close the tower panel
+    await setGold(page, 10);
+    await tapTile(page, 4, 2); await page.click('.tw[data-t="long"]'); await page.click('.tw[data-t="long"]');
+    check((await G(page, () => window.__pw.G.towers.length)) === 1 && (await text(page, '#toast')) === 'Need 110 more gold' && (await cls(page, '#sGold', 'short')), "a failed build toasts 'Need 110 more gold' and flashes #sGold");
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.waitForTimeout(300);
+    await page.click('.tw[data-t="long"]');
+    const rmS = await page.evaluate(() => { const g = document.querySelector('#sGold'), cs = getComputedStyle(g); return { short: g.classList.contains('short'), color: cs.color, anim: cs.animationName }; });
+    check(rmS.short && rmS.color === 'rgb(255, 138, 117)' && rmS.anim === 'none', 'reduced motion: short gold is color only ' + JSON.stringify(rmS));
+    await tapTile(page, 1, 3);
+    await setGold(page, 10); await setGold(page, 135);
+    const rmP = await page.evaluate(() => { const b = document.querySelector('.tw[data-t=arc]'); return { ready: b.classList.contains('ready'), shadow: getComputedStyle(b).boxShadow, anim: getComputedStyle(b.querySelector('.cost')).animationName }; });
+    check(rmP.ready && rmP.shadow.includes('rgb(227, 173, 69)') && rmP.anim === 'none', 'reduced motion: the ready ring shows and the price does not scale ' + JSON.stringify(rmP));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'build-flow-onboarding: first-run coaching';
+  {
+    const { ctx, page } = await newPage(browser);
+    check((await G(page, () => window.__pw.G.hintTiles.length)) === 0, 'the demo board behind the menu has no hint tiles');
+    await startMap(page, 1);
+    const coach = await page.evaluate(() => { const i = document.querySelector('#info'); return { text: i.textContent, html: i.innerHTML, color: getComputedStyle(i).color }; });
+    check(coach.text === 'Build first: tap a grass tile beside the road.' && coach.html.startsWith('<b>Build first:</b>') && coach.color === 'rgb(240, 233, 210)', 'fresh storage: #info reads "Build first: tap a grass tile beside the road." in ink, not muted ' + JSON.stringify(coach));
+    const hint = await G(page, () => {
+      const W = window.__pw, g = W.G, m = g.map, pts = [];
+      for (let i = 0; i <= Math.round(m.path.len * 10); i++) { const p = m.path.at(i / 10); if (p.x >= 0 && p.x < W.COLS && p.y >= 0 && p.y < W.ROWS) pts.push(p); }
+      const all = [];
+      for (let r = 0; r < W.ROWS; r++) for (let c = 0; c < W.COLS; c++) if (m.grid[r * W.COLS + c] === 0) all.push({ c, r, n: pts.filter(p => Math.hypot(p.x - c - 0.5, p.y - r - 0.5) <= 2.4 + 1e-9).length });
+      all.sort((a, b) => b.n - a.n || a.r - b.r || a.c - b.c);
+      return { tiles: g.hintTiles, grass: g.hintTiles.every(h => m.grid[h.r * W.COLS + h.c] === 0), want: all.slice(0, 2).map(({ c, r }) => ({ c, r })), others: [0, 2].map(i => JSON.stringify(W.hintTiles(i))) };
+    });
+    check(hint.tiles.length === 2 && hint.grass, 'G.hintTiles.length === 2 and both are grass tiles ' + JSON.stringify(hint.tiles));
+    check(JSON.stringify(hint.tiles) === JSON.stringify(hint.want), 'they are the grass tiles with the most road within 2.4, ties to the lower row then col (' + JSON.stringify(hint.want) + ')');
+    check(hint.others[0] === '[{"c":5,"r":2},{"c":5,"r":3}]' && hint.others[1] === '[{"c":2,"r":2},{"c":3,"r":2}]', 'Switchback and Quarry hints break ties by row then col ' + hint.others.join(' '));
+    const h0 = hint.tiles[0];
+    const a = await tileHash(page, h0.c, h0.r, 0), b = await tileHash(page, h0.c, h0.r, 0.3);
+    await G(page, () => { const g = window.__pw.G; g._h = g.hintTiles; g.hintTiles = []; });
+    const none = await tileHash(page, h0.c, h0.r, 0.3);
+    await G(page, () => { const g = window.__pw.G; g.hintTiles = g._h; });
+    check(a !== b && b !== none, 'the hint tile is drawn and breathes over time');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    check((await tileHash(page, h0.c, h0.r, 0)) === (await tileHash(page, h0.c, h0.r, 0.3)), 'reduced motion: the hint holds still');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+    await page.click('.tw[data-t="bolt"]');
+    check(!(await text(page, '#info')).includes('Build first') && !(await cls(page, '#info', 'coach')), 'arming a tower replaces the coaching line');
+    await page.click('.tw[data-t="bolt"]');
+    check((await text(page, '#info')).includes('Build first'), 'disarming brings it back');
+    await tapTile(page, h0.c, h0.r);
+    check((await text(page, '#info')) === 'Pick a tower to place here.', 'a selected tile replaces it too');
+    await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    const after = await G(page, () => ({ hints: window.__pw.G.hintTiles.length, done: window.__pw.S.tutorialDone, tip: window.__pw.S.refundTip, towers: window.__pw.G.towers.length }));
+    check(after.towers === 1 && after.hints === 0 && after.done === true, 'after the first build G.hintTiles is empty and S.tutorialDone === true ' + JSON.stringify(after));
+    const ls = await stored(page);
+    check(ls.tutorialDone === true && ls.refundTip === true, 'tutorialDone and refundTip are saved');
+    check((await text(page, '#toast')) === 'Changed your mind? Full refund until the next wave.' && after.tip === true, 'the first build toasts "Changed your mind? Full refund until the next wave."');
+    check(!(await text(page, '#info')).includes('Build first') && !(await cls(page, '#info', 'coach')), 'the coaching line is gone once a tower stands');
+    await G(page, () => { document.querySelector('#toast').textContent = ''; });
+    await tapTile(page, 2, 2); await page.waitForTimeout(300); await tapTile(page, 2, 2);
+    check((await G(page, () => window.__pw.G.towers.length)) === 2 && (await text(page, '#toast')) === '', 'a second build shows no tip');
+    await page.click('#bPause'); await page.click('#bMenu');
+    await startMap(page, 2);
+    check((await G(page, () => window.__pw.G.hintTiles.length)) === 0 && (await text(page, '#info')).includes('Build first'), 'after the first build a new road has no hint tiles, but still the Build first line');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await newPage(browser);
+    await page.evaluate(() => localStorage.setItem('pathwarden.v1', JSON.stringify({ best: { switch: 3 } })));
+    await page.reload(); await page.waitForTimeout(250);
+    await startMap(page, 1);
+    check((await G(page, () => window.__pw.G.hintTiles.length)) === 0, 'a player with a best wave gets no hint tiles');
+    await ctx.close();
+  }
+
+  current = 'build-flow-onboarding: wave-1 guard';
+  {
+    const { ctx, page } = await newPage(browser, { init: audioSpy });
+    await startMap(page, 1);
+    await clearRec(page, 10);
+    await page.click('#bWave');
+    const t1 = await page.evaluate(() => { const t = document.querySelector('#toast'); return { wave: window.__pw.G.wave, toast: t.textContent, bad: t.classList.contains('bad'), show: t.classList.contains('show'), label: document.querySelector('#bWave').textContent }; });
+    check(t1.wave === 0 && t1.toast === 'No towers yet. Enemies will walk straight in.' && t1.bad && t1.show && t1.label === 'Send anyway?', "one #bWave tap at wave 0 with no towers: G.wave stays 0, the 'No towers' toast and the label 'Send anyway?' " + JSON.stringify(t1));
+    check(near(await vals(page, 'square'), 160), "the guard plays the 'no' cue");
+    await page.waitForTimeout(1500);
+    await page.click('#bWave');
+    check((await G(page, () => window.__pw.G.wave)) === 1, 'a second tap within 3s sets G.wave === 1');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 2);
+    await page.click('#bWave');
+    check((await text(page, '#bWave')) === 'Send anyway?', 'armed on Quarry');
+    await page.waitForTimeout(3150);
+    check((await text(page, '#bWave')) === 'Start wave 1' && !(await G(page, () => window.__pw.G.sendArmAt)), "after 3000ms the label is back to 'Start wave 1'");
+    await page.click('#bWave');
+    check((await G(page, () => window.__pw.G.wave)) === 0 && (await text(page, '#bWave')) === 'Send anyway?', 'a tap after the arm lapsed only warns again');
+    await tapTile(page, 0, 0); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    check((await G(page, () => window.__pw.G.towers.length === 1 && !window.__pw.G.sendArmAt)) && (await text(page, '#bWave')) === 'Start wave 1', "building a tower clears the arm and the label reads 'Start wave 1'");
+    await page.click('#bWave');
+    check((await G(page, () => window.__pw.G.wave)) === 1, 'with a tower, one tap starts wave 1');
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  current = 'build-flow-onboarding: full refund until the next wave';
+  {
+    const { ctx, page } = await newPage(browser);
+    await startMap(page, 1);
+    const sellBtn = () => page.$eval('#bSell', el => ({ label: el.firstChild.textContent, small: el.querySelector('small').textContent, color: getComputedStyle(el.querySelector('small')).color }));
+    const g0 = await G(page, () => window.__pw.G.gold);
+    await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    await tapTile(page, 2, 2);
+    let sb = await sellBtn();
+    check(sb.label === 'Undo' && sb.small === '+50' && sb.color === 'rgb(159, 211, 106)', "a bolt built at wave 0, selected: #bSell reads 'Undo' with '+50' in green " + JSON.stringify(sb));
+    await page.click('#bSell');
+    sb = await sellBtn();
+    check(sb.label === 'Confirm' && sb.small === '+50' && (await G(page, () => window.__pw.G.towers.length)) === 1, "the first tap only arms it ('Confirm')");
+    await page.click('#bSell');
+    check((await G(page, () => window.__pw.G.towers.length)) === 0 && (await G(page, () => window.__pw.G.gold)) === g0, 'selling twice returns gold to its prior value (' + g0 + ')');
+
+    await tapTile(page, 2, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    await G(page, () => { window.__pw.G.running = false; window.__pw.startWave(); });
+    await tapTile(page, 2, 2);
+    sb = await sellBtn();
+    check(sb.label === 'Sell' && sb.small === '+35' && sb.color === 'rgb(243, 184, 171)', "after startWave the same tower shows 'Sell' '+35' " + JSON.stringify(sb));
+    await tapTile(page, 2, 2);
+    await tapTile(page, 4, 2); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    await tapTile(page, 4, 2);
+    sb = await sellBtn();
+    check(sb.label === 'Sell' && sb.small === '+35' && (await G(page, () => window.__pw.G.selTower.refund)) === 0, "a bolt built mid-wave shows 'Sell' '+35'");
+    await page.click('#bUp');
+    check((await sellBtn()).small === '+' + Math.floor(90 * 0.7), 'an upgrade mid-wave earns no refund: Math.floor(90*0.7) (' + (await sellBtn()).small + ')');
+
+    const calm = await G(page, () => { const W = window.__pw, g = W.G; let t = 0; while ((g.spawnQ.length || g.enemies.length) && t < 400) { W.step(1 / 30); W.hurtAll(1e9); t += 1 / 30; } return !g.spawnQ.length && !Object.keys(g.W).length; });
+    check(calm, 'wave 1 cleared');
+    await G(page, () => { window.__pw.G.running = true; });
+    await setGold(page, 500);
+    await tapTile(page, 2, 2);
+    await page.click('#bUp');
+    sb = await sellBtn();
+    check(sb.label === 'Sell' && sb.small === '+75', "an upgrade between waves is refunded in full: 40 + 70% of 50 is '+75' " + JSON.stringify(sb));
+    await tapTile(page, 2, 2);
+    await tapTile(page, 4, 5); await page.click('.tw[data-t="bolt"]'); await page.click('.tw[data-t="bolt"]');
+    await tapTile(page, 4, 5); await page.click('#bUp');
+    sb = await sellBtn();
+    check(sb.label === 'Undo' && sb.small === '+90', "built and upgraded between waves: 'Undo' '+90' " + JSON.stringify(sb));
+    check((await G(page, () => { const W = window.__pw; W.build('bolt', 6, 1); return W.G.towers.find(t => t.c === 6 && t.r === 1).refund; })) === 0, '__pw.build towers have refund 0');
+
+    await page.reload(); await page.waitForTimeout(250);
+    await page.click('#bContinue');
+    const loaded = await G(page, () => window.__pw.G.towers.map(t => t.refund));
+    check(loaded.length >= 3 && loaded.every(r => r === 0), 'towers loaded from a save have refund 0 ' + JSON.stringify(loaded));
+    await tapTile(page, 4, 5);
+    sb = await sellBtn();
+    check(sb.label === 'Sell' && sb.small === '+' + Math.floor(90 * 0.7), 'after a reload the same tower sells at 70% (Sell) ' + JSON.stringify(sb));
+    check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
+    await ctx.close();
+  }
+
+  // ---------------------------------------------------------------
   current = 'long run soak (30 waves, all roads)';
   for (let mi = 0; mi < 3; mi++) {
     const { ctx, page } = await newPage(browser);
@@ -961,7 +1227,7 @@ let BASE;
     await ctx.setOffline(true);
     await page.reload(); await page.waitForTimeout(300);
     check(!(await hidden(page, '#menu')) && (await page.$$('.mapbtn')).length === 3, 'loads with no network');
-    await startMap(page, 1); await page.click('#bWave'); await page.waitForTimeout(300);
+    await startMap(page, 1); await sendWave(page); await page.waitForTimeout(300);
     check((await G(page, () => window.__pw.G.wave)) === 1, 'plays with no network');
     await ctx.setOffline(false);
     const mf = await page.evaluate(async () => (await fetch('manifest.webmanifest')).json());
@@ -974,7 +1240,7 @@ let BASE;
     const ctx = await browser.newContext({ viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage(); const errs = []; page.on('pageerror', e => errs.push(e.message));
     await page.goto('file://' + path.join(ROOT, 'index.html')); await page.waitForTimeout(250);
-    await page.click('.mapbtn >> nth=0'); await page.click('#bWave'); await page.waitForTimeout(300);
+    await page.click('.mapbtn >> nth=0'); await sendWave(page); await page.waitForTimeout(300);
     check(errs.length === 0 && (await page.evaluate(() => window.__pw.G.wave)) === 1, 'runs from file:// with no server ' + errs.join('|'));
     await ctx.close();
   }
