@@ -728,7 +728,9 @@ function spawnMigrant(){
   // after the win (won) they come uncapped, at your speed and with full Jaws: there are still real stakes
   const r=clamp(player.r*rand(1.18,1.38),12,won?64:44);
   const g={speed:clamp(player.g.speed-(!won&&Math.random()<.5?1:0),0,MAX.speed),jaws:won?3:r>25?2:1,spikes:Math.random()<.3?1:0,armor:clamp(Math.floor(r/14),0,3),photo:0,eye:1};
-  const c=makeCell(x,y,r,g,rand(285,315),{announce:5,stalk:30,migrant:true});
+  // it stalks you for 30 s before the win, 10 s after (then it hunts like any other): a Leviathan's upkeep empties a
+  // divide's 45 energy in about 14 s of flight, so a 30 s stalk every 45-70 s starved the lineage down
+  const c=makeCell(x,y,r,g,rand(285,315),{announce:5,stalk:won?10:30,migrant:true});
   c.en=c.maxEn*.4;cells.push(c);FX.hunter();
   if(hints&8)toast('A larger hunter has drifted into the dish.',{pri:2});
   else{coach(8);toast('A larger hunter has drifted in. The red arrow at the edge points to it.',{pri:2,ms:5000})} // drawEdgeArrows, while announce>0
@@ -826,7 +828,8 @@ function divide(){
   // the offspring stays joined to you by a thinning neck for .45 s (drawCells), and a brass ring spreads from you
   if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5;k.split=.45;k.parent=p}
   ring(p,COL.brass,p.r*1.05,p.r*2.6,.55,2);
-  floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);youT=0; // the floater takes the 'you' label's place
+  const fl=floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);
+  if(deathCam&&deathCam.t>0)youAbove(fl);else youT=0; // the floater takes the 'you' label's place (in the death beat the heir's 3 s are still to come: youAbove)
   FX.divide();askPersist();
   if(!(hints&2)){coach(2);toast(touchUI()?'You earned DNA. Tap a gold-edged trait below.':'You earned DNA. Spend it in the tray, or press 1–7.',{pri:2,ms:5000})}
 }
@@ -860,7 +863,7 @@ function onPlayerDeath(killer){
   if(!tipBtn)hideTip();disarm(); // a trait card or an armed trait was the dead cell's: clear the view for the beat
   let best=null,bd=Infinity;
   for(const k of cells) if(k.kin&&!k.dead){const d=Math.hypot(k.x-p.x,k.y-p.y);if(d<bd){bd=d;best=k}}
-  if(best){const shrank=p.lv.size>0;
+  if(best){const shrank=p.lv.size>0&&!won; // as takeover() sizes the heir
     // the heir is safe from the killer and from every stalking migrant for 10 s (they would come straight for it)
     for(const c of cells)if(c.stalk>0||c===killer){c.stalk=0;c.ignore=best;c.ignoreT=10;if(c.tgt===p||c.tgt===best)c.tgt=null}
     takeover(best);heirs++;FX.takeover((DEATH_T-DEATH_PAN)/(RM?1:.5)+.15); // its two notes as the camera reaches the heir
@@ -896,11 +899,18 @@ function statsHTML(name,dc){
   <div><dt>Kills</dt><dd>${kills}</dd></div><div><dt>Descendants played</dt><dd>${heirs}</dd></div>
   <div class="wide"><dt>Final form</dt><dd>${name}</dd></div>`;
 }
+// The heir takes your traits (lv). Before the win it is one Membrane level smaller; after it, it keeps the Leviathan's
+// size: drifters are sized from you, so a shrinking heir met smaller drifters, sank further with each death, and buying
+// Membrane IX again won nothing. Its energy is 70-90: never under the 70 an heir needs to get going, never enough to
+// divide at once (a big kin cell's own capacity is over the player's 100, so it could hold 110 and divide during the
+// death beat). Before the win a death also buys time: the next drifter is 110-140 s off at the soonest (a player who
+// never flees met one every 70-110 s, each one a death). After the win the 45-70 s interval is kept: real stakes
 function takeover(k){
   const old=player.lv;
   k.kin=false;k.isPlayer=true;k.life=Infinity;k.hue=338;
-  k.lv={...old,size:Math.max(0,old.size-1)};k.maxHp=0;applyLv(k);k.hp=k.maxHp;k.en=Math.max(k.en,70);k.shield=4;k.tgt=null;
+  k.lv={...old,size:won?old.size:Math.max(0,old.size-1)};k.maxHp=0;applyLv(k);k.hp=k.maxHp;k.en=clamp(k.en,70,k.maxEn*.9);k.shield=4;k.tgt=null;
   player=k;youT=3+(deathCam&&deathCam.t>0?deathCam.t:0); // 'you' shows for 3 s once the camera has reached the heir
+  if(!won)migrantT=Math.max(migrantT,rand(110,140));
 }
 
 /* ---------- AI ---------- */
@@ -934,7 +944,7 @@ const steer={x:0,y:0,m:0};
 function aiSteer(c,dt){
   c.think-=dt;if(c.ignoreT>0)c.ignoreT-=dt;
   if(c.think<=0){c.think=rand(.18,.34);think(c)}
-  // A drifted-in hunter stalks you (stalk: seconds left, 30 from spawnMigrant): it locks on, at full speed once it
+  // A drifted-in hunter stalks you (stalk: seconds left, 30 from spawnMigrant, 10 after the win): it locks on, at full speed once it
   // senses you (.7 beyond), and lunges (a .5 s burst, every 3.5 s at most) within 40 of you. It holds off while it flees
   // something bigger, while you are shielded, and against Spines it can't take (3 levels over its Plating, as think()
   // rates prey); each bite on your spines drains its stalk too (bite()). Your death ends every stalk, and the killer and
@@ -1222,7 +1232,20 @@ function stepParts(dt){
   for(const p of parts){if(p.follow&&!p.follow.dead){p.x=p.follow.x;p.y=p.follow.y}p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(!p.txt){p.vx*=.92;p.vy*=.92}}
   parts=parts.filter(p=>p.life>0);
 }
-function floater(x,y,txt,col,fs=12,fw=500){parts.push({x,y,vx:0,vy:-18,life:1.4,max:1.4,txt,col,fs,fw})}
+function floater(x,y,txt,col,fs=12,fw=500){const f={x,y,vx:0,vy:-18,life:1.4,max:1.4,txt,col,fs,fw};parts.push(f);return f}
+// the 'you' label (drawCells): its ring radius around the player (mr) and its baseline, in world units for px (world
+// units per screen px)
+const youMr=px=>{const pr=player.dr||player.r;return pr+px*9+(player.g.spikes?pr*.4:0)};
+const youY=px=>player.y-youMr(px)-px*4;
+// a buy or a divide in the death beat keeps the heir's 'you' (youT), so its floater (fl) starts a line above the label
+// instead of on it. The heir can swim up into the rising floater, so the label also hides while they overlap (youHid)
+let youFl=null;
+function youAbove(fl){const px=cam.v/FR;fl.y=youY(px)-px*16;youFl=fl}
+function youHid(px){
+  const f=youFl;if(!f)return false;
+  if(!(f.life>0)||!parts.includes(f)){youFl=null;return false} // faded, or the dish was reset under it
+  return Math.abs(f.y-youY(px))<px*14&&Math.abs(f.x-player.x)<px*(f.txt.length*f.fs*.3+14);
+}
 
 function update(dt){
   t+=dt;
@@ -1535,11 +1558,11 @@ function drawCells(px){
     else if(player.g.eye>0&&canEat(player,c)&&d<warn)drawPreyMark(c.x,c.y,c.r,px);
   }
   // player marker: a dashed ring, turning
-  const mr=pr+px*9+(player.g.spikes?pr*.4:0);
+  const mr=youMr(px);
   ctx.save();ctx.translate(player.x,player.y);ctx.rotate(t*.6);ctx.strokeStyle=COL.fink;ctx.globalAlpha=.55;
   ctx.setLineDash([px*6,px*5]);ctx.lineWidth=px*1.5;ctx.beginPath();ctx.arc(0,0,mr,0,TAU);ctx.stroke();ctx.restore();
   // 'you' over the player for 3 s after a lineage starts, resumes or passes to an heir (fading over the last half second)
-  if(youT>0){ctx.globalAlpha=Math.min(1,youT/.5);fieldText('you',player.x,player.y-mr-px*4,px,COL.brass);ctx.globalAlpha=1}
+  if(youT>0&&!youHid(px)){ctx.globalAlpha=Math.min(1,youT/.5);fieldText('you',player.x,youY(px),px,COL.brass);ctx.globalAlpha=1}
 }
 function drawParts(px){
   for(const p of parts){
@@ -1818,7 +1841,8 @@ function buy(i){
   if(player.r!==oldR&&!RM&&player.dr===undefined){player.dr=oldR;player.drv=0}
   if(!(hints&4)){coach(4);unnudge(el=>el!==$('burst'))} // the first evolve ends the traits' nudges
   const nm=plain(u.name),L=ROMAN[player.lv[u.k]];
-  floater(player.x,player.y-player.r-8,`${nm} ${L}`,COL.brass,13,600);youT=0; // the floater takes the 'you' label's place
+  const fl=floater(player.x,player.y-player.r-8,`${nm} ${L}`,COL.brass,13,600);
+  if(deathCam&&deathCam.t>0)youAbove(fl);else youT=0; // the floater takes the 'you' label's place (in the death beat: youAbove, as in divide())
   if(u.k==='jaws'&&player.lv.jaws===1&&!(hints&16)){coach(16);toast('Jaws: you can eat cells 12% smaller than you.',{pri:2,ms:5000})}
   const after=stageName(player),winning=player.lv.size>=9&&!won;
   // a brass ring and sparks from you, the button flashes brass. Not on the winning buy: the win has its own rings
