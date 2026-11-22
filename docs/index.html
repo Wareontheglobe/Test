@@ -957,29 +957,65 @@ function aiSteer(c,dt){
 const keys=new Set();
 const ptr={x:0,y:0,on:false};
 const joy={on:false,id:null,ox:0,oy:0,x:0,y:0};
-cv.addEventListener('pointermove',e=>{if(e.pointerType==='mouse'){ptr.x=e.clientX;ptr.y=e.clientY;ptr.on=true}else if(joy.on&&e.pointerId===joy.id){joy.x=e.clientX;joy.y=e.clientY}});
-cv.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'){ptr.x=e.clientX;ptr.y=e.clientY;ptr.on=true}else{joy.on=true;joy.id=e.pointerId;joy.ox=joy.x=e.clientX;joy.oy=joy.y=e.clientY}try{cv.setPointerCapture(e.pointerId)}catch(_){}});
-const pUp=e=>{if(e.pointerId===joy.id){joy.on=false;joy.id=null}
+// The dish's touch and pen pointers that are down: id -> {x,y,ox,oy,pt} (where it is, where it went down, its type).
+// The first one is the joystick, centred where it went down. A finger put down while another steers is only a
+// candidate: the joystick stays with the steering finger (same origin, no brake, no jump), so a stray touch (a Burst tap
+// that just misses, a gap in the tray, the gutter) never stops the cell. A candidate that drags more than 12 px takes the
+// joystick, centred where it went down: so a finger whose touchend the browser lost can't leave the stick dead. When the
+// joystick's finger lifts, the finger put down most recently that is still down takes it, centred where it is now: it
+// steers as soon as it moves, never with a jump, and a pointer whose up was lost can't bring back a deflected stick. A
+// finger that loses the joystick to a drag is a candidate from where it is then, so two held fingers never trade it.
+const live=new Map();
+const joyTo=(id,q,ox,oy)=>{joy.on=true;joy.id=id;joy.ox=ox;joy.oy=oy;joy.x=q.x;joy.y=q.y};
+// Burst's hit area reaches 8 px past its edges onto the dish (the tray's gaps, the strip under it and the gutters are the
+// dish's): a touch that just misses still bursts, and can still steer if it drags. Only Burst: a gap never buys a trait
+const nearBurst=(x,y)=>{try{const r=$('burst').getBoundingClientRect();return r.width>0&&x>=r.left-8&&x<=r.right+8&&y>=r.top-8&&y<=r.bottom+8}catch(e){return false}};
+cv.addEventListener('pointermove',e=>{
+  if(e.pointerType==='mouse'){ptr.x=e.clientX;ptr.y=e.clientY;ptr.on=true;return}
+  const q=live.get(e.pointerId);if(!q)return;q.x=e.clientX;q.y=e.clientY;
+  if(joy.on&&e.pointerId===joy.id){joy.x=q.x;joy.y=q.y;return}
+  if(Math.hypot(q.x-q.ox,q.y-q.oy)>12){const o=live.get(joy.id);if(o){o.ox=o.x;o.oy=o.y}joyTo(e.pointerId,q,q.ox,q.oy)}});
+cv.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='mouse'){ptr.x=e.clientX;ptr.y=e.clientY;ptr.on=true}
+  else{const x=e.clientX,y=e.clientY,q={x,y,ox:x,oy:y,pt:e.pointerType};live.set(e.pointerId,q);
+    if(nearBurst(x,y))burst(); // it refuses outside play, and shakes 'no' when not ready
+    if(!joy.on)joyTo(e.pointerId,q,x,y)}
+  try{cv.setPointerCapture(e.pointerId)}catch(_){}});
+// pointerup, pointercancel and lostpointercapture: one pointer can end twice (up, then lost capture): the second is a no-op
+const joyEnd=()=>{if(joy.id!==null&&joy.id===trayJoy){trayJoy=null;traySw=performance.now()+700}joy.on=false;joy.id=null};
+const pUp=e=>{
+  if(live.delete(e.pointerId)&&e.pointerId===joy.id){let n=null;for(const k of live.keys())n=k; // the latest still down
+    if(n===null){joy.on=false;joy.id=null}else{const o=live.get(n);joyTo(n,o,o.x,o.y)}}
+  else if(e.pointerId===joy.id){joy.on=false;joy.id=null}
   if(e.pointerId===trayJoy){trayJoy=null;traySw=performance.now()+700}};
 cv.addEventListener('pointerup',pUp);cv.addEventListener('pointercancel',pUp);
+// no finger left on the screen: a touch the dish still lists lost its pointerup (a system gesture, a dropped event).
+// Forget those, and a joystick a touch held
+const allUp=e=>{try{if(!e.touches||e.touches.length)return;const j=live.get(joy.id);
+  for(const[id,q]of live)if(q.pt==='touch')live.delete(id);
+  for(const[id,q]of tray0)if(q.pt==='touch')tray0.delete(id);
+  if(joy.on&&(!j||j.pt==='touch'))joyEnd()}catch(_){}};
+addEventListener('touchend',allUp,{capture:true,passive:true});addEventListener('touchcancel',allUp,{capture:true,passive:true});
 cv.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse')ptr.on=false});
 // A drag that starts on a tray button steers too, in the compact layouts, where the tray fills the bottom of the screen
 // that thumbs reach (wider trays scroll sideways under a finger instead). Once a touch on a button has moved 12 px it
 // becomes the joystick, centred where it went down, unless another finger already steers: a second finger never takes
 // the joystick over from here. The dish then captures the pointer, so its pointerup/cancel/lostpointercapture handlers
 // end the drag, and the button never acts on it (onTap below). A click on the tray during the drag or 700 ms after it is
-// swallowed as a safeguard (browsers make none for a moved touch).
-const tray0={id:null,x:0,y:0};
+// swallowed as a safeguard (browsers make none for a moved touch). Each finger on the tray is tracked on its own, so a
+// thumb tapping Burst or a trait never stops the other thumb's drag from steering. One that moves while another finger
+// steers stays listed: it can still steer once that joystick ends, but never takes a held one over.
+const tray0=new Map(); // id -> {x,y,pt}: where a touch on a tray button went down, until it moves 12 px or lifts
 let trayJoy=null,traySw=0; // the pointer a tray drag turned into the joystick; tray clicks are swallowed until traySw
 $('tray').addEventListener('pointerdown',e=>{
-  if(e.pointerType!=='mouse'&&COMPACT.matches&&e.target.closest&&e.target.closest('button')){tray0.id=e.pointerId;tray0.x=e.clientX;tray0.y=e.clientY}});
+  if(e.pointerType!=='mouse'&&COMPACT.matches&&e.target.closest&&e.target.closest('button'))tray0.set(e.pointerId,{x:e.clientX,y:e.clientY,pt:e.pointerType})});
 $('tray').addEventListener('pointermove',e=>{
-  if(e.pointerId!==tray0.id||Math.hypot(e.clientX-tray0.x,e.clientY-tray0.y)<=12)return;
-  tray0.id=null;if(joy.on)return;
-  joy.on=true;joy.id=e.pointerId;joy.ox=tray0.x;joy.oy=tray0.y;joy.x=e.clientX;joy.y=e.clientY;
+  const q=tray0.get(e.pointerId);if(!q||Math.hypot(e.clientX-q.x,e.clientY-q.y)<=12||joy.on)return;
+  tray0.delete(e.pointerId);
+  const l={x:e.clientX,y:e.clientY,ox:q.x,oy:q.y,pt:e.pointerType};live.set(e.pointerId,l);joyTo(e.pointerId,l,q.x,q.y);
   trayJoy=e.pointerId;traySw=Infinity;
   try{cv.setPointerCapture(e.pointerId)}catch(_){}});
-const tray0End=e=>{if(e.pointerId===tray0.id)tray0.id=null};
+const tray0End=e=>{tray0.delete(e.pointerId)};
 $('tray').addEventListener('pointerup',tray0End);$('tray').addEventListener('pointercancel',tray0End);
 $('tray').addEventListener('click',e=>{if(performance.now()<traySw){traySw=0;e.stopPropagation();e.preventDefault()}},true);
 // Tray buttons act on a touch themselves instead of waiting for its click: a browser makes no click for a tap while
@@ -1029,7 +1065,7 @@ addEventListener('keydown',e=>{
   if(mode==='play'&&!paused&&/^Digit[1-7]$/.test(e.code)){buy(+e.code.slice(5)-1)}
 });
 addEventListener('keyup',e=>{if(e.key==='Meta'){keys.clear();return}if(KEYMAP[e.code])keys.delete(KEYMAP[e.code]);if(e.code==='Space'&&mode==='play'&&!paused&&!onButton(e))e.preventDefault()});
-const resetInput=()=>{keys.clear();joy.on=false;joy.id=null;ptr.on=false;tray0.id=trayJoy=null;traySw=0};
+const resetInput=()=>{keys.clear();joy.on=false;joy.id=null;ptr.on=false;live.clear();tray0.clear();trayJoy=null;traySw=0};
 addEventListener('blur',resetInput);
 document.addEventListener('visibilitychange',()=>{if(document.hidden)resetInput()});
 cv.addEventListener('lostpointercapture',pUp);
@@ -1076,7 +1112,11 @@ function burst(){
 /* ---------- simulation ---------- */
 function updateCell(c,dt){
   c.age+=dt;c.wob+=dt*(2+c.g.speed);
-  if(c.isPlayer)playerInput();else aiSteer(c,dt);
+  if(c.isPlayer){playerInput();
+    // a burst always dashes, at full speed: the way you steer, or the way you face when nothing steers (a one-thumb
+    // player lifts the steering thumb to tap Burst). Not in the death beat: the heir waits for the camera
+    if(c.burst>0&&!(deathCam&&deathCam.t>0)){if(!(steer.m>0)){steer.x=Math.cos(c.a);steer.y=Math.sin(c.a)}steer.m=1}}
+  else aiSteer(c,dt);
   const spd=c.maxSpd*steer.m*(c.burst>0?BURST_X:1);
   const k=Math.min(1,dt*(c.isPlayer?5:3));
   c.vx+=(steer.x*spd-c.vx)*k;c.vy+=(steer.y*spd-c.vy)*k;
@@ -1256,7 +1296,7 @@ let bokeh=[];
 for(let i=0;i<26;i++)bokeh.push({x:rand(-1,1),y:rand(-1,1),r:rand(.04,.13),a:rand(.018,.045)});
 function resize(){
   const w=innerWidth,h=innerHeight;
-  if(w!==W||h!==H){joy.on=false;joy.id=null} // rotated or resized: the joystick origin is in stale screen coordinates
+  if(w!==W||h!==H){joy.on=false;joy.id=null;live.clear()} // rotated or resized: the joystick origin is in stale screen coordinates
   DPR=Math.min(maxDPR,window.devicePixelRatio||1);W=w;H=h;
   // only reallocate the canvas when its size changes (a HUD-height refit keeps it)
   const cw=Math.round(W*DPR),ch=Math.round(H*DPR);if(cv.width!==cw||cv.height!==ch){cv.width=cw;cv.height=ch}
@@ -1775,7 +1815,7 @@ function renderGuide(){
     return `<li data-k="${u.k}"><span class="gr-h">${plain(u.name)}<span class="gr-l">${lv}/${MAX[u.k]}</span></span><span class="gr-c${!mx&&dna>=c?' can':''}">${mx?'max':c+' DNA'}</span>`+
       `<span class="gr-fx">${fxFull(u)}</span><span class="gr-n">${mx?'Fully evolved':`Next ${ROMAN[lv+1]}: ${pvHtml(traitPreview(i))}`}</span></li>`});
   const touch=touchUI();
-  rows.push(`<li data-k="burst"><span class="gr-h">Burst</span><span class="gr-c">${BURST_EN} energy</span><span class="gr-fx">Short dash at ${BURST_X===2?'double':BURST_X+'×'} speed for ${BURST_T} s. `+
+  rows.push(`<li data-k="burst"><span class="gr-h">Burst</span><span class="gr-c">${BURST_EN} energy</span><span class="gr-fx">Short dash at ${BURST_X===2?'double':BURST_X+'×'} speed for ${BURST_T} s, the way you steer (or the way you face, if you aren't steering). `+
     `Costs ${BURST_EN} energy, recharges in ${BURST_CD} s. ${touch?'Works while you steer: tap it with a second finger.':'Press Space, or click it.'}</span></li>`);
   $('guideList').innerHTML=rows.join('');
 }
@@ -1864,13 +1904,17 @@ function toast(msg,o={}){
 // Installed to the home screen. Never in a frame: display-mode is the top window's (F11 fullscreen counts), so without
 // that test the claude.ai Artifact iframe could match, and Back there must be left alone.
 const STANDALONE=(()=>{try{return window.top===window.self&&(matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches||navigator.standalone===true)}catch(e){return false}})();
-// Back (Android gesture, iOS edge swipe) pauses instead of closing the app: closing an overlay in play pushes one
+// Back (Android's gesture or button) pauses instead of closing the app: closing an overlay in play pushes one
 // history entry; Back pops it and pauses, and a second Back (from the pause card) leaves as usual.
 // A card opened any other way (Pause button, a hidden page, the win or game-over card) steps back off that entry
 // itself (dropBack), so Back on any card leaves at once rather than first using up the entry with nothing to show.
 // While that step is under way (backSkip: when it began) no entry is pushed; its popstate re-arms if play went on.
+// Not in the iPhone home-screen app (navigator.standalone): Back there is the edge swipe, which with an empty back list
+// does nothing, and once an entry exists iOS takes every drag from the left edge as Back (the joystick drops, then it
+// pauses). Android and desktop installs (display-mode) keep the entry: their Back would close the app.
+const IOS_HOME=(()=>{try{return navigator.standalone===true}catch(e){return false}})();
 let backArmed=false,backSkip=0;
-function armBack(){if(!STANDALONE||backArmed)return;
+function armBack(){if(!STANDALONE||IOS_HOME||backArmed)return;
   if(backSkip){if(performance.now()-backSkip<1500)return;backSkip=0; // its popstate never came: still on the entry?
     try{if(history.state&&history.state.coverslip){backArmed=true;return}}catch(e){}}
   try{history.pushState({coverslip:1},'');backArmed=true}catch(e){}}
@@ -1926,7 +1970,8 @@ twoTap('newBtn',()=>mode==='play'&&player?'Tap again to start over':''); // the 
 $('againBtn').addEventListener('click',startLineage);
 $('contBtn').addEventListener('click',()=>{paused=false;showOnly(null)});
 $('resumeBtn').addEventListener('click',togglePause);
-$('pauseBtn').addEventListener('click',e=>{togglePause();if(e.detail>0)e.currentTarget.blur()});
+// a touch acts on lifting, also while another finger steers (a browser makes no click then); mouse and keys on the click
+onTap($('pauseBtn'),()=>togglePause());
 // Sound and Vibration: the speaker beside Pause, the M key and the pause card's two buttons (Vibration only where the
 // device can vibrate). The capture-phase gesture listeners make or wake the AudioContext before the tap's own handler
 // runs, so its sound plays (FX.unlock: only with sound on, only in a real gesture)
@@ -1934,7 +1979,7 @@ function syncSnd(){$('sndBtn').setAttribute('aria-pressed',String(FX.sound));$('
   $('vibBtn').textContent='Vibration: '+(FX.vibrate?'on':'off')}
 function toggleSound(say){FX.setSound(!FX.sound);syncSnd();if(say&&mode==='play'&&!paused)toast(FX.sound?'Sound on':'Sound off',{pri:0,ms:1500})}
 $('vibBtn').hidden=!FX.canVib;syncSnd();
-$('sndBtn').addEventListener('click',e=>{toggleSound(false);if(e.detail>0)e.currentTarget.blur()});
+onTap($('sndBtn'),()=>toggleSound(false)); // like Pause: a second finger's tap toggles it
 $('sndCardBtn').addEventListener('click',()=>toggleSound(false));
 $('vibBtn').addEventListener('click',()=>{FX.setVibrate(!FX.vibrate);syncSnd()});
 // (not for M or the Sound buttons: they toggle it themselves, and muting must not make a context first)
