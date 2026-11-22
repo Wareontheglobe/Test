@@ -56,7 +56,8 @@ button{touch-action:manipulation}
 .fill{height:100%;width:100%;border-radius:4px;transform:translateX(-50%);transition:transform .15s linear} /* set by setBar(): no layout */
 .fill.en{background:var(--algae)}
 .fill.hp{background:var(--hud-kin)}
-.fill.low{background:var(--danger)}
+.fill.low{background:var(--danger);background-image:repeating-linear-gradient(45deg,transparent 0 3px,rgba(0,0,0,.35) 3px 5px)} /* low: red and striped (a
+   second cue: under deuteranopia the red and the Energy green look alike). A background, so setBar's transform path is untouched */
 .panel-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
 #pauseBtn{pointer-events:auto;cursor:pointer;background:transparent;border:1px solid var(--line);border-radius:6px;font-size:11px;padding:2px 8px;color:var(--ink-dim)}
 #pauseBtn{position:relative}
@@ -154,6 +155,7 @@ button{font:inherit;color:inherit}
 .up.can{border-color:var(--brass)}
 .up:disabled{cursor:default;opacity:.55}
 .up:focus-visible,.btn:focus-visible,#burst:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+.ups .up:focus-visible{outline-offset:1px} /* the strip scrolls, so it clips: the ring (1 + 2 px) fits its 3 px padding */
 .up-top{display:flex;justify-content:space-between;align-items:center;gap:4px}
 .up-name{font-weight:600;font-size:13px;hyphens:manual}
 .nm-short{display:none}
@@ -167,14 +169,15 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 .pips i.on{background:var(--brass)}
 .cost{white-space:nowrap;flex:none;font-family:var(--f-mono);font-size:11px;color:var(--brass);font-variant-numeric:tabular-nums}
 .up:not(.can) .cost{color:var(--ink-dim)}
-#burst{pointer-events:auto;flex:none;width:76px;background:var(--panel);border:1px solid var(--line);border-radius:8px;cursor:pointer;display:grid;place-content:center;gap:2px;font-weight:600;font-size:13px;position:relative;overflow:hidden}
+#burst{pointer-events:auto;flex:none;width:76px;background:var(--panel);border:1px solid var(--line);border-radius:8px;cursor:pointer;display:grid;place-content:center;gap:2px;font-weight:600;font-size:13px;position:relative;overflow:hidden;padding-inline:3px} /* room for 'low energy' at 10.5 px on one line */
 #burst small{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);font-weight:400}
-/* not ready (recharging or under 8 energy): the label dims; the recharge bar and 'low energy' stay readable */
-#burst.cool>.bl,#burst.cool>small{opacity:.5}
+/* not ready (recharging or under 8 energy): the label dims to --ink-dim (6.47:1 on the panel; opacity .5 was 4.24:1), and
+   'Space' is already ink-dim; the recharge bar and 'low energy' stay readable */
+#burst.cool>.bl{color:var(--ink-dim)}
 /* the recharge bar along the bottom edge fills over the cooldown (scaleX, written by refreshHud), then hides */
 #burst .bcd{position:absolute;left:0;bottom:0;width:100%;height:3px;background:var(--brass);transform:scaleX(0);transform-origin:0 50%;opacity:0;transition:transform .1s linear;pointer-events:none}
 #burst.cd .bcd{opacity:1}
-#burst .blow{display:none;font-family:var(--f-mono);font-size:9.5px;font-weight:500;line-height:1.1;color:var(--danger-ink);white-space:nowrap} /* compact and touch screens; one line */
+#burst .blow{display:none;font-family:var(--f-mono);font-size:10.5px;font-weight:500;line-height:1.1;color:var(--danger-ink);white-space:nowrap} /* compact and touch screens; one line */
 #burst.nope{animation:shake .3s} /* tapped while not ready (item 02's 'no') */
 #burst.nope>.bl{animation:bad .6s}
 #burst.fired{animation:fired .45s ease-out} /* a burst fired: a brief brass flash */
@@ -330,7 +333,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .up-name{font-size:11.5px}
   .up{padding-inline:5px}
   .pips{gap:1px}
-  #burst{padding-inline:3px} /* 'low energy' stays one line in the 68 px button at 320 px */
+  #burst .blow{font-size:9.5px} /* 'low energy' stays one line in the 66 px button at 320 px (60 px of room) */
 }
 @media (max-width:319px){
   /* narrower than any phone held upright (the first Galaxy Fold's 280 px cover screen): the panels stack and the tray
@@ -347,7 +350,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .top>.panel:last-child>#dominant{grid-column:1;grid-row:1;align-self:center}
 }
 @media (hover:none) and (pointer:coarse){.up kbd,#burst small,.keys{display:none}#burst.low>.blow{display:block}}
-@media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}.up.nope{animation:none}#dominant{transition:none}
+@media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}.up.nope{animation:none}.dna.nope{animation:none}#dominant{transition:none}
   .up.nudge,#burst.nudge{animation:none;outline:2px solid var(--brass);outline-offset:1px}
   .tip{animation:none}.up.armed{animation:none;box-shadow:none;outline:2px solid var(--brass);outline-offset:-3px} /* a static outline */
   #burst.nope{animation:none}#burst .bcd{transition:none}#burst.fired{animation:firedRM .4s step-end} /* a static brief tint */
@@ -464,7 +467,9 @@ const tok=n=>rs.getPropertyValue(n).trim();
 const COL={stage:tok('--stage'),field:tok('--field'),edge:tok('--field-edge'),fink:tok('--field-ink'),algae:tok('--algae'),meat:tok('--meat'),danger:tok('--danger'),brass:tok('--brass'),dim:tok('--ink-dim'),eyespot:tok('--eyespot'),line:tok('--line'),g:tok('--hud-grazer'),h:tok('--hud-hunter'),k:tok('--hud-kin')};
 const INK_BRASS='#7a5714'; // brass text on the bright field: 5.58:1 on --field (raw --brass is 2.01:1)
 const DEATH_INK='#9b2a1a'; // the death beat's 'eaten by this' label: red text on the field
-const RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+// reduced motion, followed live (the installed app lives for days): every use reads RM at the time of the effect
+let RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+try{const q=matchMedia('(prefers-reduced-motion: reduce)'),f=()=>{RM=q.matches};q.addEventListener?q.addEventListener('change',f):q.addListener(f)}catch(e){}
 // the compact layouts (phones, upright or sideways), as in the CSS: read COMPACT.matches when needed, it changes on rotation
 const COMPACT=matchMedia('(max-width:560px),(max-height:520px)');
 const TAU=Math.PI*2;
@@ -507,12 +512,12 @@ const bumpEl=(el,c)=>{if(!el)return;el.classList.remove(c);void el.offsetWidth;e
 // says a gesture isn't one (a touch's pointerdown: its touchend is), it waits for the next. navigator.audioSession
 // 'ambient' (Safari) lets the player's own music keep playing. Routing: master gain -> compressor -> speakers, one
 // shared 0.5 s noise buffer; every volume <= .28 into the compressor, and at most 24 voices at once. Behind a card the
-// context sleeps 2.5 s after it opens (rest(): the win chord and the extinction's fall ring out first), and at once when
-// the page hides. Haptics: navigator.vibrate (Android; iOS has none), only on touch screens (desktop Chrome has a no-op
-// one) and only once the page has had a gesture (a cross-origin frame, like the claude.ai Artifact, logs an error
-// otherwise). Both toggles are remembered ('coverslip-sound', 'coverslip-vibrate': '1'/'0', on by default; in memory
-// where storage is blocked). With sound off no AudioContext is ever made. FX is a plain object: later code may extend it
-// (FX.st is the shared state). Eating never vibrates.
+// context sleeps 2.5 s after it opens or after a tap on it (rest(): the win chord and the extinction's fall ring out
+// first), and at once when the page hides. Haptics: navigator.vibrate (Android; iOS has none), only on touch screens
+// (desktop Chrome has a no-op one) and only once the page has had a gesture (a cross-origin frame, like the claude.ai
+// Artifact, logs an error otherwise). Both toggles are remembered ('coverslip-sound', 'coverslip-vibrate': '1'/'0', on
+// by default; in memory where storage is blocked). With sound off no AudioContext is ever made. FX is a plain object:
+// later code may extend it (FX.st is the shared state). Eating never vibrates.
 const FX=(()=>{
   const get=k=>{try{return localStorage.getItem(k)!=='0'}catch(e){return true}};
   const put=(k,v)=>{try{localStorage.setItem(k,v?'1':'0')}catch(e){}};
@@ -534,7 +539,8 @@ const FX=(()=>{
         const comp=ac.createDynamicsCompressor();comp.threshold.value=-20;comp.ratio.value=6;comp.connect(ac.destination);
         out=ac.createGain();out.gain.value=.8;out.connect(comp);
         nbuf=ac.createBuffer(1,ac.sampleRate*.5|0,ac.sampleRate);const d=nbuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1}
-      if(ac.state!=='running'){const r=ac.resume();quiet(r);return r||null}
+      // a resume still pending when sound is switched off (sleep() only suspends a running context) ends suspended
+      if(ac.state!=='running'){const r=ac.resume();quiet(r);if(r&&r.then)r.then(()=>{if(!snd)sleep()},()=>{});return r||null}
     }catch(e){}
     return null;
   }
@@ -827,7 +833,7 @@ function divide(){
   const gain=divGain(p.lv);dna+=gain;
   // the offspring stays joined to you by a thinning neck for .45 s (drawCells), and a brass ring spreads from you
   if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5;k.split=.45;k.parent=p}
-  ring(p,COL.brass,p.r*1.05,p.r*2.6,.55,2);
+  if(RM)ring(p,COL.brass,p.r*1.6,p.r*1.6,.55,2);else ring(p,COL.brass,p.r*1.05,p.r*2.6,.55,2); // reduced motion: a still halo, fading
   const fl=floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);
   if(deathCam&&deathCam.t>0)youAbove(fl);else youT=0; // the floater takes the 'you' label's place (in the death beat the heir's 3 s are still to come: youAbove)
   FX.divide();askPersist();
@@ -891,7 +897,7 @@ function causeText(dc,short,em=s=>s){
 const DEATH_TIP={
   eaten:'Tip: hunters can only eat cells 12% smaller than themselves. Grow your Membrane, and swim away or Burst when you see the red ring.',
   spines:'Tip: spiny cells hurt to bite. Pick prey without spines, or add Plating.',
-  starved:'Tip: when Energy turns red, head for green algae. Chloroplasts make energy even when food is scarce.'};
+  starved:'Tip: when the Energy bar runs low (red and striped), head for green algae. Chloroplasts make energy even when food is scarce.'};
 // the win and game-over cards' numbers; dc (game over): the cause and a tip first
 function statsHTML(name,dc){
   const cause=dc?`<div class="wide cause"><dt>Cause</dt><dd>${causeText(dc,false,s=>`<i>${s}</i>`)}<p class="dtip">${DEATH_TIP[dc.kind]}</p></dd></div>`:'';
@@ -1848,7 +1854,8 @@ function buy(i){
   const after=stageName(player),winning=player.lv.size>=9&&!won;
   // a brass ring and sparks from you, the button flashes brass. Not on the winning buy: the win has its own rings
   // (drawWin), and the game pauses for them
-  if(!winning){ring(player,COL.brass,player.r*1.05,player.r*2.4,.6,2);spray(player.x,player.y,COL.brass,10,60,1.5,.6,player.r)}
+  // (reduced motion: no sparks, a still halo that fades)
+  if(!winning){if(RM)ring(player,COL.brass,player.r*1.6,player.r*1.6,.6,2);else{ring(player,COL.brass,player.r*1.05,player.r*2.4,.6,2);spray(player.x,player.y,COL.brass,10,60,1.5,.6,player.r)}}
   upBtns[i].classList.remove('nope');bumpEl(upBtns[i],'got');
   if(after!==before){const nx=nextStage(player);toast(`Stage reached: ${after}.`+(nx?` Next: ${nx[1]} at Membrane ${ROMAN[nx[0]]}.`:''));if(!winning)FX.stage();bumpEl($('stage'),'bump')} // the win's chord stands for Leviathan
   if(winning){won=true;saveGame(); // the won lineage is kept now, not at the next autosave: the card says so
@@ -2058,7 +2065,9 @@ $('sndCardBtn').addEventListener('click',()=>toggleSound(false));
 $('vibBtn').addEventListener('click',()=>{FX.setVibrate(!FX.vibrate);syncSnd()});
 // (not for M or the Sound buttons: they toggle it themselves, and muting must not make a context first)
 const sndKey=e=>e.code==='KeyM'||!!(e.target&&e.target.closest&&e.target.closest('#sndBtn,#sndCardBtn'));
-for(const ev of['pointerdown','touchend','keydown','click'])addEventListener(ev,e=>{if(!sndKey(e))FX.unlock()},{capture:true,passive:true});
+// A gesture on a card (nothing sounds there) still makes or wakes the context, as iOS needs, then rests it: it sleeps 2.5 s
+// later unless the tap closed the card (Begin, Resume, Again, Keep evolving: mode and paused have changed by then)
+for(const ev of['pointerdown','touchend','keydown','click'])addEventListener(ev,e=>{if(!sndKey(e)){FX.unlock();if(mode!=='play'||paused)FX.rest()}},{capture:true,passive:true});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='play'){if(paused)saveGame();else togglePause()} // pausing saves
   if(document.hidden){wakeOff();FX.suspend()}else wakeOn(); // wakeOn() only takes the lock when playing and not paused
   if(!document.hidden)still=0}); // redraw a frozen (paused) frame on return, in case the canvas was dropped while hidden
