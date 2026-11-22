@@ -473,8 +473,8 @@ const ROMAN=['','I','II','III','IV','V','VI','VII','VIII','IX'];
 const UP=[
   {k:'size',name:'Membrane',fx:'Grow 15% bigger: fewer cells can eat you and divides pay more DNA. Reach IX to win.',dn:'Needs more food, and you swim slower.',fxShort:'Grow 15% bigger. Reach IX to win.',base:3,step:4},
   {k:'speed',name:'Flagella',fx:'Swim faster. Uses a little more energy.',dn:'',fxShort:'Swim faster. Uses more energy.',base:3,step:2},
-  {k:'jaws',name:'Jaws',fx:'Eat cells 12% smaller than you, and their remains. Algae give half.',dn:'',fxShort:'Eat smaller cells. Algae give half.',base:4,step:3},
-  {k:'spikes',name:'Spines',fx:'Hurt anything that bites you.',dn:'Costs a little energy to keep.',fxShort:'Hurt anything that bites you.',base:3,step:2},
+  {k:'jaws',name:'Jaws',fx:'Eat cells 12% smaller than you, and their remains. Algae give less.',dn:'',fxShort:'Eat smaller cells. Algae give less.',base:4,step:3},
+  {k:'spikes',name:'Spines',fx:'Hurt anything that bites you. Stalkers give up sooner.',dn:'Costs a little energy to keep.',fxShort:'Hurt anything that bites you.',base:3,step:2},
   {k:'armor',name:'Plating',fx:'Bites hurt 17% less per level, and you can take more.',dn:'Costs a little energy to keep.',fxShort:'Bites hurt you 17% less.',base:3,step:2},
   {k:'photo',name:'Chloro&shy;plasts',short:'Chloro',fx:'Make energy from the lamp, even standing still.',dn:'Costs a little energy to keep, less than it makes.',fxShort:'Make energy from the lamp.',base:4,step:3},
   {k:'eye',name:'Eyespot',fx:'See farther. I marks cells you can eat; II adds arrows to hunters off-screen.',dn:'Costs a little energy to keep.',fxShort:'See farther. Spot prey and hunters.',base:3,step:3},
@@ -608,7 +608,7 @@ const FX=(()=>{
 let W=0,H=0,DPR=1,FR=200,CX=0,CY=0;
 let algae=[],meat=[],cells=[],parts=[],blooms=[],player=null,mode='title',t=0,algaeAcc=0;
 const cam={x:0,y:0,v:430,ang:0};
-let dna=0,gen=1,kills=0,lineT=0,heirs=0,maxSeen={},won=false,paused=false,hints=0,migrantT=45,saveT=8,booted=false;
+let dna=0,gen=1,kills=0,lineT=0,heirs=0,maxSeen={},won=false,paused=false,hints=0,migrantT=75,saveT=8,booted=false;
 let youT=0; // seconds the 'you' label still shows over the player (a new lineage, a resume, an heir taking over)
 // The player's death (onPlayerDeath): deathCause says what ended it (causeText() words it); deathCam holds the camera on
 // the killer (on the death point if there is none, or it died) for DEATH_T s of sim time, which frame() runs at half speed
@@ -657,7 +657,7 @@ function recompute(c){
   const g=c.g;
   c.maxHp=20+c.r*2+g.armor*8;
   c.maxSpd=Math.max(30,70+g.speed*20-c.r*.6);
-  c.drain=.35+c.r*.045+g.speed*.25+g.spikes*.12+g.armor*.15+g.jaws*.1+g.eye*.08+g.photo*.18;
+  c.drain=.35+c.r*.045+g.speed*.25+g.spikes*.06+g.armor*.08+g.jaws*.1+g.eye*.04+g.photo*.18;
   c.maxEn=c.isPlayer?100:40+c.r*3;
   c.sense=70+c.r*2+g.eye*60;
 }
@@ -693,15 +693,19 @@ function startLineage(){
   if(mode==='play'&&player)recordBest(gen,lineT);
   else{const sv=loadSave();if(sv&&sv.v===1)recordBest(sv.gen||0,sv.lineT||0)}
   initWorld();
-  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=coachedNow();migrantT=45;lastRivalNews=0;newsT=-1e9;youT=3;clearSave();
+  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=coachedNow();migrantT=75;lastRivalNews=0;newsT=-1e9;youT=3;clearSave();
   deathCam=deathCause=null;clearTimeout(overT);$('ovOver').inert=false;clearTimeout(winT);$('ovWin').inert=false;
   unnudge();nudgeT=0;FX.calm();hudDna=-1;hudName='';
-  lastCensus=census();histT=1.5;
+  histT=1.5;
   let x=0,y=0;
   for(let i=0;i<80;i++){const b=blooms[i%blooms.length];x=b.x+rand(-60,60);y=b.y+rand(-60,60);if(i>40)[x,y]=randInDish(150);if(cells.every(c=>!c.g.jaws||Math.hypot(c.x-x,c.y-y)>380))break}
   player=makeCell(x,y,10,{speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0},338,{isPlayer:true,life:Infinity,lv:{size:0,speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0}});
   recompute(player);player.hp=player.maxHp;player.en=40;player.shield=4;
   cells.push(player);
+  // a sibling from the start: without one, a lineage that died before its first divide had no heir (1-4% of new ones).
+  // Level with you or below: the 'you' label sits above you for the first 3 s
+  const sib=makeCell(x+rand(-30,30),y+rand(0,30),9,{speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0},rand(330,346),{kin:true});sib.shield=4;cells.push(sib);
+  lastCensus=census(); // the census counts the sibling from the first frame
   cam.x=x;cam.y=y;cam.v=viewR();
   mode='play';paused=false;
   showOnly(null);hideTip();disarm();
@@ -715,8 +719,9 @@ function spawnMigrant(){
   const d=cam.v*1.35+40,lim=DISH-60;let x=0,y=0,ok=false;
   for(let i=0;i<24&&!ok;i++){const a=rand(TAU);x=player.x+Math.cos(a)*d;y=player.y+Math.sin(a)*d;ok=Math.hypot(x,y)<=lim}
   if(!ok){const a=Math.atan2(-player.y,-player.x)+rand(-.5,.5);x=player.x+Math.cos(a)*d;y=player.y+Math.sin(a)*d;const dd=Math.hypot(x,y);if(dd>lim){x*=lim/dd;y*=lim/dd}}
-  const r=clamp(player.r*rand(1.18,1.38),12,44);
-  const g={speed:clamp(player.g.speed-(Math.random()<.5?1:0),0,MAX.speed),jaws:r>25?2:1,spikes:Math.random()<.3?1:0,armor:clamp(Math.floor(r/14),0,3),photo:0,eye:1};
+  // after the win (won) they come uncapped, at your speed and with full Jaws: there are still real stakes
+  const r=clamp(player.r*rand(1.18,1.38),12,won?64:44);
+  const g={speed:clamp(player.g.speed-(!won&&Math.random()<.5?1:0),0,MAX.speed),jaws:won?3:r>25?2:1,spikes:Math.random()<.3?1:0,armor:clamp(Math.floor(r/14),0,3),photo:0,eye:1};
   const c=makeCell(x,y,r,g,rand(285,315),{announce:5,stalk:30,migrant:true});
   c.en=c.maxEn*.4;cells.push(c);FX.hunter();
   if(hints&8)toast('A larger hunter has drifted into the dish.',{pri:2});
@@ -766,7 +771,7 @@ function restore(sv){
     const ms={};
     for(const k of GENES){let m=0;for(const c of nc)if(!c.isPlayer&&!c.kin&&c.g[k]>m)m=c.g[k];ms[k]=clamp(Math.round(num(sv.maxSeen&&sv.maxSeen[k],m)),0,MAX[k])}
     cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;maxSeen=ms;lastRivalNews=0;newsT=-1e9;unnudge();nudgeT=0;
-    dna=num(sv.dna,0);gen=Math.max(1,num(sv.gen,1));kills=num(sv.kills,0);lineT=num(sv.lineT,0);heirs=num(sv.heirs,0);won=!!sv.won;hints=num(sv.hints,0)|0;migrantT=num(sv.migrantT,45);
+    dna=num(sv.dna,0);gen=Math.max(1,num(sv.gen,1));kills=num(sv.kills,0);lineT=num(sv.lineT,0);heirs=num(sv.heirs,0);won=!!sv.won;hints=num(sv.hints,0)|0;migrantT=num(sv.migrantT,75);
     player.shield=2;youT=3;deathCam=deathCause=null;cam.x=player.x;cam.y=player.y;cam.v=viewR();FX.calm();hudDna=-1;hudName='';
     mode='play';paused=false;lastCensus=census();
     return true;
@@ -817,7 +822,7 @@ function kill(c,killer){
   for(let i=0;i<n;i++){const a=rand(TAU),d=rand(c.r*.6);meat.push({x:c.x+Math.cos(a)*d,y:c.y+Math.sin(a)*d,r:clamp(2+total/n*.18,2.5,7),v:total/n,life:28,dead:false,rot:rand(6)})}
   for(let i=0;i<10;i++){const a=rand(TAU),s=rand(20,70);addPart({x:c.x,y:c.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.6,max:.6,col:hsl(dispHue(c),50,40,1),r:rand(1,2.2)})}
   if(killer&&killer.isPlayer){
-    const gain=1+Math.floor(c.r/10);dna+=gain;kills++;
+    const gain=1+Math.floor(c.r/15);dna+=gain;kills++;
     if(kills===1)toast(`First kill · +${gain} DNA`);
     floater(c.x,c.y,`+${gain} DNA`,COL.brass,13,600);FX.kill();
   }
@@ -878,7 +883,7 @@ function statsHTML(name,dc){
 function takeover(k){
   const old=player.lv;
   k.kin=false;k.isPlayer=true;k.life=Infinity;k.hue=338;
-  k.lv={...old,size:Math.max(0,old.size-1)};k.maxHp=0;applyLv(k);k.hp=k.maxHp;k.en=Math.max(k.en,50);k.shield=4;k.tgt=null;
+  k.lv={...old,size:Math.max(0,old.size-1)};k.maxHp=0;applyLv(k);k.hp=k.maxHp;k.en=Math.max(k.en,70);k.shield=4;k.tgt=null;
   player=k;youT=3+(deathCam&&deathCam.t>0?deathCam.t:0); // 'you' shows for 3 s once the camera has reached the heir
 }
 
@@ -911,15 +916,22 @@ function think(c){
 }
 const steer={x:0,y:0,m:0};
 function aiSteer(c,dt){
-  if(c.stalk>0){
-    c.stalk-=dt;
-    if(player&&!player.dead&&canEat(c,player)&&player.shield<=0&&c.mode!=='flee'){
-      const dx=player.x-c.x,dy=player.y-c.y,d=Math.hypot(dx,dy)||1;
-      if(d>c.sense*.8){steer.x=dx/d;steer.y=dy/d;steer.m=.6;return}
-    }
-  }
   c.think-=dt;if(c.ignoreT>0)c.ignoreT-=dt;
   if(c.think<=0){c.think=rand(.18,.34);think(c)}
+  // A drifted-in hunter stalks you (stalk: seconds left, 30 from spawnMigrant): it locks on, at full speed once it
+  // senses you (.7 beyond), and lunges (a .5 s burst, every 3.5 s at most) within 40 of you. It holds off while it flees
+  // something bigger, while you are shielded, and against Spines it can't take (3 levels over its Plating, as think()
+  // rates prey); each bite on your spines drains its stalk too (bite()). Your death ends every stalk, and the killer and
+  // the stalkers ignore the heir for 10 s (onPlayerDeath)
+  if(c.stalk>0){
+    c.stalk-=dt;
+    if(player&&!player.dead&&canEat(c,player)&&player.shield<=0&&c.mode!=='flee'&&player.g.spikes<c.g.armor+3){
+      const dx=player.x-c.x,dy=player.y-c.y,d=Math.hypot(dx,dy)||1;
+      steer.x=dx/d;steer.y=dy/d;steer.m=d>c.sense?.7:1;
+      if(d-c.r-player.r<40&&c.burstCd<=0){c.burst=.5;c.burstCd=3.5}
+      return;
+    }
+  }
   let tg=c.tgt;if(tg&&tg.dead){c.tgt=tg=null;c.mode='wander'}
   if(tg){
     const dx=tg.x-c.x,dy=tg.y-c.y,d=Math.hypot(dx,dy)||1;
@@ -1081,21 +1093,22 @@ function updateCell(c,dt){
   else if(c.en>c.maxEn*.3&&c.hp<c.maxHp&&t-c.lastHit>2)c.hp=Math.min(c.maxHp,c.hp+(1+c.r*.05)*dt);
   if(!c.isPlayer){
     if(c.age>c.life){kill(c,null);return}
-    if(c.en>=c.maxEn*.85&&c.age>8&&cells.length<CAP&&(c.kin?lastCensus.k<14:c.g.jaws?lastCensus.h<20:lastCensus.g<54)){c.en*=.45;const ch=offspring(c);ch.en=c.en}
+    // a lineage keeps a reserve: under 6 kin they divide sooner (60% full) and even when the dish is at CAP
+    if(c.en>=c.maxEn*(c.kin&&lastCensus.k<6?.6:.85)&&c.age>8&&(cells.length<CAP||c.kin&&lastCensus.k<6)&&(c.kin?lastCensus.k<14:c.g.jaws?lastCensus.h<20:lastCensus.g<54)){c.en*=.45;const ch=offspring(c);ch.en=c.en}
   }
 }
 // per second: a's bite on b (b's plating takes off armorMul), b's spines on a biting it, c's chloroplasts' energy. The
 // trait cards read their numbers through these (traitPreview)
 const armorMul=b=>1-b.g.armor*.17;
 const biteDps=(a,b)=>(3+a.r*.45+a.g.jaws*4)*armorMul(b);
-const spineDps=(a,b)=>b.g.spikes*5*(1-a.g.armor*.12);
-const photoGain=c=>c.g.photo*.5;
+const spineDps=(a,b)=>b.g.spikes*9*(1-a.g.armor*.12);
+const photoGain=c=>c.g.photo*.4;
 function bite(a,b,dt){
   if(b.shield>0)return;
   const dmg=biteDps(a,b)*dt;
   b.hp-=dmg;b.flash=.15;b.lastHit=t;a.en=Math.min(a.maxEn,a.en+dmg*.6);
   if(b.isPlayer){FX.hurt(a,b,dmg/b.maxHp);if(b.g.spikes)FX.spike()}else if(a.isPlayer)FX.chomp();
-  if(b.g.spikes){a.hp-=spineDps(a,b)*dt;a.flash=.15;a.lastHit=t}
+  if(b.g.spikes){a.hp-=spineDps(a,b)*dt;a.flash=.15;a.lastHit=t;if(a.stalk>0)a.stalk-=b.g.spikes*4*dt} // a stalker gives up sooner
   if(b.hp<=0)kill(b,a);
   if(a.hp<=0&&!a.dead)kill(a,b);
 }
@@ -1116,7 +1129,7 @@ function interact(dt){
 function feed(){
   for(const c of cells){
     if(c.dead)continue;
-    const av=c.g.jaws?3:6;
+    const av=c.g.jaws?4:6; // algae: less to a cell with jaws
     for(const f of algae){
       if(f.dead)continue;
       const dx=f.x-c.x,dy=f.y-c.y,rr=c.r+f.r*.5;
@@ -1181,7 +1194,7 @@ function update(dt){
     cam.x+=(tx-cam.x)*Math.min(1,dt*.5);cam.y+=(ty-cam.y)*Math.min(1,dt*.5);cam.v+=(430-cam.v)*Math.min(1,dt);
   }
   if(mode==='play'&&player){const lo=player.en<player.maxEn*.15;if(lo&&!player.warned){player.warned=true;toast(player.g.jaws?'Starving. Hunt something or eat algae.':'Starving. Find algae soon.',{pri:2})}else if(player.en>player.maxEn*.4)player.warned=false}
-  if(mode==='play'&&player){migrantT-=dt;if(migrantT<=0){migrantT=rand(70,110);spawnMigrant()}}
+  if(mode==='play'&&player){migrantT-=dt;if(migrantT<=0){migrantT=won?rand(45,70):rand(70,110);spawnMigrant()}}
   if(mode==='play'&&player)coaching(dt);
   histT-=dt;
   if(histT<=0){histT=1.5;sample()}
