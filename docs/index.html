@@ -1360,7 +1360,8 @@ function resize(){
   CX=W/2;layoutSide=side;placeTip();
   {const hz=$('hurt').style;hz.left=(CX-FR)+'px';hz.top=(CY-FR)+'px';hz.width=hz.height=(2*FR)+'px'} // the vignette: over the field
   $('toasts').style.top=(side?CY-FR+16:Math.max(topB+6,CY-FR+16))+'px';
-  $('toasts').style.width=side?Math.min(FR*1.6,420)+'px':'';
+  // side layouts: as wide as the field between the two HUD panels allows (never narrower than before), so long hints wrap less
+  {const tp=$('top');$('toasts').style.width=side?Math.max(Math.min(FR*1.6,420),Math.min(tp.lastElementChild.getBoundingClientRect().left-tp.firstElementChild.getBoundingClientRect().right-16,420))+'px':''}
   buildLayers();
   drawSpark();
   still=0;
@@ -1957,7 +1958,11 @@ function news(msg,sm=msg){newsTxt=msg;newsSm=sm;newsT=lineT;refreshHud()}
 function toast(msg,o={}){
   const box=$('toasts'),el=document.createElement('div'),pri=o.pri??1;
   el.className='toast';el.textContent=msg;el.dataset.pri=pri;box.appendChild(el);
-  for(const cap=COMPACT.matches?2:3;box.children.length>cap;){let v=null;for(const e of box.children)if(!v||+e.dataset.pri<+v.dataset.pri)v=e;v.remove()}
+  const drop=()=>{let v=null;for(const e of box.children)if(!v||+e.dataset.pri<+v.dataset.pri)v=e;v.remove()};
+  for(const cap=COMPACT.matches?2:3;box.children.length>cap;)drop();
+  // side layouts (phone landscape): the camera keeps your cell at the field's centre, just below the toasts. While two or
+  // more toasts would reach down to it, the same rule drops one; a single toast always stays
+  if(layoutSide){const pr=player?player.r*FR/cam.v:0;while(box.children.length>1&&box.getBoundingClientRect().bottom>CY-pr-10)drop()}
   setTimeout(()=>el.remove(),o.ms||3400);
 }
 /* ---------- installed app: Back pauses, the screen stays awake, the save is kept ---------- */
