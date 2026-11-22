@@ -112,11 +112,12 @@ button{touch-action:manipulation}
 .guide ul{list-style:none;margin:0;padding:0;display:grid}
 .guide li{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:10px;row-gap:1px;padding:5px 0 6px;border-top:1px solid var(--line);font-size:12.5px;line-height:1.35}
 .gr-h{font-weight:600}
-.gr-l{font-family:var(--f-mono);font-weight:400;font-size:11px;color:var(--ink-dim);margin-left:4px}
-.gr-c{font-family:var(--f-mono);font-size:11px;color:var(--ink-dim);white-space:nowrap;align-self:center}
+/* the level, the cost and the 'Next ...' numbers: 12 px (the 'Next' line answers 'what am I buying') */
+.gr-l{font-family:var(--f-mono);font-weight:400;font-size:12px;color:var(--ink-dim);margin-left:4px}
+.gr-c{font-family:var(--f-mono);font-size:12px;color:var(--ink-dim);white-space:nowrap;align-self:center}
 .gr-c.can{color:var(--brass)}
 .gr-fx{grid-column:1/-1;color:var(--ink-dim)}
-.gr-n{grid-column:1/-1;font-family:var(--f-mono);font-size:11px;font-variant-numeric:tabular-nums}
+.gr-n{grid-column:1/-1;font-family:var(--f-mono);font-size:12px;font-variant-numeric:tabular-nums}
 .tray{display:flex;align-items:stretch;gap:8px;justify-content:center;min-width:0}
 .dna{pointer-events:none;display:grid;align-content:center;justify-items:center;padding:6px 12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;min-width:64px}
 .dna span:last-child{font-family:var(--f-display);font-size:24px;font-weight:700;color:var(--brass);font-variant-numeric:tabular-nums}
@@ -159,8 +160,10 @@ button{font:inherit;color:inherit}
 kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px solid var(--line);border-radius:3px;padding:0 4px}
 .up-fx{font-size:11px;color:var(--ink-dim);line-height:1.25;min-height:2.5em}
 .up-foot{display:flex;justify-content:space-between;align-items:center;gap:4px}
-.pips{display:flex;gap:2px;flex-wrap:wrap;min-width:0}
-.pips i{width:5px;height:6px;border-radius:1px;background:#2c3b42}
+/* the levels on one row in the 120 px buttons too: Membrane's 9 pips beside '15 DNA' used to wrap the 9th under the first
+   (8 + 1). The pips give way (5 px down to 3) and the cost stays whole; the compact block below has its own rules */
+.pips{display:flex;gap:2px;flex-wrap:nowrap;flex:1 1 auto;min-width:0}
+.pips i{flex:0 1 5px;min-width:3px;height:6px;border-radius:1px;background:#2c3b42} /* no width: a 5 px one would hold the row's min-content at 9 x 5 px and push the cost past the button's padding */
 .pips i.on{background:var(--brass)}
 .cost{white-space:nowrap;flex:none;font-family:var(--f-mono);font-size:11px;color:var(--brass);font-variant-numeric:tabular-nums}
 .up:not(.can) .cost{color:var(--ink-dim)}
@@ -475,11 +478,11 @@ const ROMAN=['','I','II','III','IV','V','VI','VII','VIII','IX'];
 // after fx where the fx doesn't already say it; fxShort: the desktop tray's two lines at 120 px
 const UP=[
   {k:'size',name:'Membrane',fx:'Grow 15% bigger: fewer cells can eat you and divides pay more DNA. Reach IX to win.',dn:'Needs more food, and you swim slower.',fxShort:'Grow 15% bigger. Reach IX to win.',base:3,step:4},
-  {k:'speed',name:'Flagella',fx:'Swim faster. Uses a little more energy.',dn:'',fxShort:'Swim faster. Uses more energy.',base:3,step:2},
-  {k:'jaws',name:'Jaws',fx:'Eat cells 12% smaller than you, and their remains. Algae give less.',dn:'',fxShort:'Eat smaller cells. Algae give less.',base:4,step:3},
-  {k:'spikes',name:'Spines',fx:'Hurt anything that bites you. Stalkers give up sooner.',dn:'Costs a little energy to keep.',fxShort:'Hurt anything that bites you.',base:3,step:2},
+  {k:'speed',name:'Flagella',fx:'Swim faster. Burns more energy with every level.',dn:'',fxShort:'Swim faster. Uses more energy.',base:3,step:2},
+  {k:'jaws',name:'Jaws',fx:'Eat cells 12% smaller than you, and their remains. Algae give less.',dn:'Prey often outswim you without Flagella.',fxShort:'Eat smaller cells. Algae give less.',base:4,step:3},
+  {k:'spikes',name:'Spines',fx:'Hurt anything that bites you. Hunters chasing you give up sooner.',dn:'Costs a little energy to keep.',fxShort:'Hurt anything that bites you.',base:3,step:2},
   {k:'armor',name:'Plating',fx:'Bites hurt 17% less per level, and you can take more.',dn:'Costs a little energy to keep.',fxShort:'Bites hurt you 17% less.',base:3,step:2},
-  {k:'photo',name:'Chloro&shy;plasts',short:'Chloro',fx:'Make energy from the lamp, even standing still.',dn:'Costs a little energy to keep, less than it makes.',fxShort:'Make energy from the lamp.',base:4,step:3},
+  {k:'photo',name:'Chloro&shy;plasts',short:'Chloro',fx:'Make energy from light, anywhere in the dish, even standing still.',dn:'Costs a little energy to keep, less than it makes.',fxShort:'Make energy from light.',base:4,step:3},
   {k:'eye',name:'Eyespot',fx:'See farther. I marks cells you can eat; II adds arrows to hunters off-screen.',dn:'Costs a little energy to keep.',fxShort:'See farther. Spot prey and hunters.',base:3,step:3},
 ];
 const plain=s=>s.replace(/<[^>]*>/g,'').replace(/&shy;|\u00ad/g,''); // for aria-labels and card titles
@@ -1044,8 +1047,12 @@ $('tray').addEventListener('click',e=>{if(performance.now()<traySw){traySw=0;e.s
 // is dropped on whatever it hits (tapGhost). Its own button still gets it, and ignores it as above.
 // With onLong, a touch held still for LONG_MS on the button calls onLong instead (the trait cards: read, never buy): its
 // pointerup then does nothing, and its touchend is cancelled like a tap's. Moving 12 px first cancels it (it steers).
+// A card that just closed (cardClosedT, showOnly) doesn't pass on its double tap: a touch going down on one of these
+// buttons under 350 ms after it is the second half of a double tap on Resume, Keep evolving or Continue lineage, which
+// on phones sit over the tray. It does nothing (no onDown, no tap armed, no long press), and the click that may follow is
+// ignored as after any touch. Mouse and keyboard are unaffected.
 const LONG_MS=450;
-let tapGhost=null;
+let tapGhost=null,cardClosedT=-1e9;
 document.addEventListener('click',e=>{const g=tapGhost;if(!g||!e.detail)return; // detail 0: keyboard or script
   if(performance.now()-g.t>700){tapGhost=null;return}
   if(g.b.contains(e.target)||Math.hypot(e.clientX-g.x,e.clientY-g.y)>32)return;
@@ -1055,6 +1062,7 @@ function onTap(b,fn,o={}){
   let id=null,x=0,y=0,tT=-1e9,act=false,lp=0;
   const run=e=>{tapGhost={t:performance.now(),x:e.clientX,y:e.clientY,b};if(e.pointerType==='touch')act=true;fn(e)};
   b.addEventListener('pointerdown',e=>{if(!isT(e))return;tT=performance.now();
+    if(performance.now()-cardClosedT<350)return;
     if(o.onDown)run(e);else{id=e.pointerId;x=e.clientX;y=e.clientY;
       if(o.onLong){const pid=id,pt=e.pointerType;clearTimeout(lp);
         lp=setTimeout(()=>{if(id!==pid||joy.id===pid)return;id=null;if(pt==='touch')act=true;o.onLong(e)},LONG_MS)}}});
@@ -1156,6 +1164,7 @@ const armorMul=b=>1-b.g.armor*.17;
 const biteDps=(a,b)=>(3+a.r*.45+a.g.jaws*4)*armorMul(b);
 const spineDps=(a,b)=>b.g.spikes*9*(1-a.g.armor*.12);
 const photoGain=c=>c.g.photo*.4;
+const algaeEnergy=c=>c.g.jaws?4:6; // energy per alga: less to a cell with jaws (feed(); the Jaws card's 'Algae energy 6 → 4')
 function bite(a,b,dt){
   if(b.shield>0)return;
   const dmg=biteDps(a,b)*dt;
@@ -1182,7 +1191,7 @@ function interact(dt){
 function feed(){
   for(const c of cells){
     if(c.dead)continue;
-    const av=c.g.jaws?4:6; // algae: less to a cell with jaws
+    const av=algaeEnergy(c); // algae: less to a cell with jaws
     for(const f of algae){
       if(f.dead)continue;
       const dx=f.x-c.x,dy=f.y-c.y,rr=c.r+f.r*.5;
@@ -1677,7 +1686,7 @@ const upBtns=UP.map((u,i)=>{
   const nm=u.short?`<span class="nm-full">${u.name}</span><span class="nm-short">${u.short}</span>`:u.name; // short: compact tray
   b.innerHTML=`<span class="up-top"><span class="up-name">${nm}</span><kbd>${i+1}</kbd></span><span class="up-fx">${u.fxShort||u.fx}</span><span class="up-foot"><span class="pips">${'<i></i>'.repeat(MAX[u.k])}</span><span class="cost"></span></span>`;
   // a touch acts on lifting (also while another finger steers), mouse and keys on the click; a held touch reads the card
-  onTap(b,()=>tapTrait(i),{onLong:()=>holdTrait(i)});
+  onTap(b,e=>tapTrait(i,e),{onLong:()=>holdTrait(i)});
   b.addEventListener('contextmenu',e=>e.preventDefault()); // a long press is ours (Android would open a menu)
   // desktop: hovering or keyboard focus shows the card above the button; a click still buys at once
   const hov=()=>!COMPACT.matches&&mode==='play'&&player&&!paused;
@@ -1697,8 +1706,9 @@ try{const a=JSON.parse(localStorage.getItem(LEARN_KEY)||'[]');if(Array.isArray(a
 function learn(k){if(learned.has(k))return;learned.add(k);try{localStorage.setItem(LEARN_KEY,JSON.stringify([...learned]))}catch(e){}}
 // The stats one more level of trait i changes, as short phrases ('Top speed 64 → 84'), read from the real formulas: two
 // throwaway player cells (makeCell, never put in cells) at lv and at lv plus that level, through applyLv/recompute and
-// the bite/spine/lamp/divide functions. Only stats whose shown value changes are listed, so the cards stay honest
-// whenever the numbers are retuned. f: the value, d: decimals shown, u: unit, how: 'pct' (a cut), 'gain', 'delta'.
+// the bite/spine/light/algae/divide functions. Only stats whose shown value changes are listed, so the cards stay honest
+// whenever the numbers are retuned. f: the value, d: decimals shown, u: unit, how: 'pct' (a cut), 'gain', 'delta' (the
+// change, then its share of what you use now: 'Energy use +0.25/s (+31%)', the share of the change as shown).
 const BARE={r:10,g:{speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0}}; // the other side of a bite: no plating, no spines, no jaws
 const STATS=[
   {n:'Size',f:c=>c.r,d:1},
@@ -1707,6 +1717,7 @@ const STATS=[
   {n:'Sight',f:c=>viewR(c)},
   {n:'Energy capacity',f:c=>c.maxEn},
   {n:'Bites you deal',f:c=>c.g.jaws?biteDps(c,BARE):0,d:1,u:'/s'},
+  {n:'Algae energy',f:algaeEnergy}, // only Jaws I changes it: 6 → 4
   {n:'Bites you take',f:c=>1-armorMul(c),how:'pct'},
   {n:'Hurts biters',f:c=>spineDps(BARE,c),d:1,u:'/s'},
   {n:'Makes',f:photoGain,d:2,u:' energy/s',how:'gain'},
@@ -1721,20 +1732,25 @@ function traitPreview(i,lv=player&&player.lv){
   const out=[];
   for(const s of STATS){const va=s.f(a),vb=s.f(b),d=s.d||0,unit=s.u||'';
     if(s.how==='pct'){const pa=Math.round(va*100),pb=Math.round(vb*100);if(pa!==pb)out.push(`${s.n} ${pa?`−${pa}% → `:''}−${pb}%`);continue}
-    if(s.how==='delta'){const dd=nf(vb-va,d);if(+dd)out.push(`${s.n} ${+dd>0?'+':''}${dd}${unit}`);continue}
+    // the share is of the change as shown, so the two numbers agree (0.07 of 0.80 is 9%); toFixed(6) first, so a float
+    // a hair under .5 (0.1/0.8) rounds as the real value does. No bracket when it rounds to 0%
+    if(s.how==='delta'){const dd=nf(vb-va,d);if(+dd){const pc=va>0?Math.round(+(+dd/va*100).toFixed(6)):0;
+      out.push(`${s.n} ${+dd>0?'+':''}${dd}${unit}${pc?` (${pc>0?'+':''}${pc}%)`:''}`)}continue}
     const sa=nf(va,d),sb=nf(vb,d);if(sa===sb)continue;
     out.push(+sa===0?`${s.n} ${s.how==='gain'?'+':''}${sb}${unit}`:`${s.n} ${sa} → ${sb}${unit}`)}
   return out;
 }
 const pvHtml=pv=>pv.map(x=>`<span class="ph">${x}</span>`).join(' · '); // a phrase never breaks inside
-const needLine=c=>`Needs ${c} DNA · you have ${dna}. Fill your energy to divide.`;
+// touch: a phone's or tablet's touch card (a first tap, an unaffordable tap, a long press) also says what the next tap
+// does once the DNA is there; the desktop hover card doesn't
+const needLine=(c,touch)=>`Needs ${c} DNA · you have ${dna}. Fill your energy to divide${touch?', then tap to evolve':''}.`;
 // a trait's full card: its next level, what it does and its downside, the numbers that level changes, and the cost
 // line. how: 'first' (the first tap: tap again), 'hold' (a long press: tap), 'hover' (desktop: click or the key)
 function traitCard(i,how){
   const u=UP[i],lv=player.lv[u.k],nm=plain(u.name);
   if(lv>=MAX[u.k])return `<b>${nm} ${ROMAN[lv]}</b> · ${fxFull(u)}<br><span class="tc">Fully evolved</span>`;
   const c=cost(u),pv=traitPreview(i);
-  const line=dna<c?needLine(c):how==='hover'?`${c} DNA · click or press ${i+1} to evolve`:`${c} DNA · tap ${how==='first'?'again ':''}to evolve`;
+  const line=dna<c?needLine(c,how!=='hover'):how==='hover'?`${c} DNA · click or press ${i+1} to evolve`:`${c} DNA · tap ${how==='first'?'again ':''}to evolve`;
   return `<b>${nm} ${ROMAN[lv+1]}</b> · ${fxFull(u)}${pv.length?`<br><span class="tn">${pvHtml(pv)}</span>`:''}<br><span class="tc">${line}</span>`;
 }
 // #tip: one card at a time. ms 0 = until hideTip() (a desktop hover); btn: placed above that button
@@ -1767,15 +1783,20 @@ function arm(i){disarm();armedI=i;upBtns[i].classList.remove('got');upBtns[i].cl
 const nope=i=>{bumpEl($('dnaBox'),'nope');upBtns[i].classList.remove('got');bumpEl(upBtns[i],'nope');$('dna2').classList.remove('bump');bumpEl($('dna2'),'bad');FX.nope()};
 // A trait button's tap or click. Desktops and tablets buy at once. Phones (COMPACT): the first tap on a trait the player
 // hasn't read shows its card and arms it (or says what it needs, with the 'no' shake), later taps buy; a maxed trait
-// says so; an unaffordable one shakes and says what it needs
-function tapTrait(i){
+// says so; an unaffordable one shakes and says what it needs.
+// e: the tap's event (onTap). A touch or pen tap on the same trait under 400 ms after the last one that acted is the
+// second half of a double tap (a bounce, a finger that tapped twice): it does nothing at all, so a quick double tap can't
+// buy two levels, or read a trait and buy it before its card can be read. Mouse clicks, Enter/Space and keys 1-7 have no gap
+const lastTap=UP.map(()=>-1e9); // per trait: when a touch or pen tap on it last acted
+function tapTrait(i,e){
   if(mode!=='play'||!player||paused)return;
+  if(e&&e.pointerType&&e.pointerType!=='mouse'){const n=performance.now();if(n-lastTap[i]<400)return;lastTap[i]=n}
   if(!COMPACT.matches){buy(i);return}
   const u=UP[i],lv=player.lv[u.k];
   if(lv>=MAX[u.k]){showTip(`<b>${plain(u.name)}</b> · fully evolved`,1600);return}
   const c=cost(u);
   if(!learned.has(u.k)){learn(u.k);if(dna<c){disarm();nope(i)}else arm(i);showTip(traitCard(i,'first'),4000);return}
-  if(!buy(i)&&dna<c)showTip(`<b>${plain(u.name)} ${ROMAN[lv+1]}</b> · ${needLine(c)}`,2200);
+  if(!buy(i)&&dna<c)showTip(`<b>${plain(u.name)} ${ROMAN[lv+1]}</b> · ${needLine(c,true)}`,2200);
 }
 // a long press on a trait (any touch screen): its full card, learned or not, and never a buy
 function holdTrait(i){
@@ -1957,7 +1978,11 @@ let askedPersist=false; // installed app: ask once a session (after the first di
 function askPersist(){if(!STANDALONE||askedPersist)return;askedPersist=true;try{const s=navigator.storage;if(s&&s.persist)s.persist().catch(()=>{})}catch(e){}}
 const UPD_MSG='Update downloaded. It loads next time you open the game.';
 let updShown=false,updToast=false;
-function showOnly(id){for(const o of['ovTitle','ovOver','ovWin','ovPause'])$(o).hidden=o!==id;$('hud').inert=!!id;still=0;
+const CARDS=['ovTitle','ovOver','ovWin','ovPause'];
+function showOnly(id){
+  // a card closes: the second half of a double tap on it must not reach the tray under it (onTap)
+  if(!id&&CARDS.some(o=>!$(o).hidden))cardClosedT=performance.now();
+  for(const o of CARDS)$(o).hidden=o!==id;$('hud').inert=!!id;still=0;
   if(id){wakeOff();dropBack();hideTip();disarm();drawPortraits($(id));FX.rest()}
   else{if(!paused)flushOneShots();if(mode==='play'){wakeOn();armBack();if(updToast){updToast=false;toast(UPD_MSG)}}}
 }
