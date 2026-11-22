@@ -77,6 +77,31 @@ button{touch-action:manipulation}
 .toasts{position:fixed;left:50%;transform:translateX(-50%);top:80px;display:grid;justify-items:center;gap:6px;pointer-events:none;width:min(92vw,420px);z-index:3}
 .toast{font-size:13px;background:var(--panel-solid);color:var(--ink);border:1px solid var(--line);padding:6px 12px;border-radius:99px;animation:tin .25s ease-out;text-align:center}
 @keyframes tin{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+/* a trait's card (showTip): what it does, the numbers its next level changes, what it costs. Above the tray, centred
+   (portrait and stacked layouts); in the right gutter under the Census panel beside the dish (side layouts); above the
+   button on a desktop hover or keyboard focus. Placed from live rects by placeTip() */
+.tip{position:fixed;z-index:3;pointer-events:none;box-sizing:border-box;width:max-content;max-width:min(92vw,360px);background:var(--panel-solid);
+  border:1px solid var(--brass);border-radius:8px;padding:7px 11px 8px;font-size:12.5px;line-height:1.4;color:var(--ink);animation:tipin .15s ease-out}
+.tip b{font-weight:600;color:var(--brass)}
+.tip .tn{font-family:var(--f-mono);font-size:11.5px;font-variant-numeric:tabular-nums}
+.tip .tc{color:var(--ink-dim)}
+.ph{white-space:nowrap}
+@keyframes tipin{from{opacity:0}}
+/* the first tap on a trait (phones): it explains and arms; the next tap evolves */
+.up.armed{animation:armed 1.1s ease-in-out infinite alternate;box-shadow:inset 0 0 0 1px var(--brass),inset 0 0 12px rgba(201,163,90,.45)}
+@keyframes armed{to{box-shadow:inset 0 0 0 1px var(--brass),inset 0 0 4px rgba(201,163,90,.12)}}
+/* the pause card's guide: the loop, then every trait (level, what it does, what its next level changes, cost) and Burst */
+.guide{display:grid;gap:6px}
+.guide-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.card .guide-loop{font-size:13px;line-height:1.45}
+.guide ul{list-style:none;margin:0;padding:0;display:grid}
+.guide li{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:10px;row-gap:1px;padding:5px 0 6px;border-top:1px solid var(--line);font-size:12.5px;line-height:1.35}
+.gr-h{font-weight:600}
+.gr-l{font-family:var(--f-mono);font-weight:400;font-size:11px;color:var(--ink-dim);margin-left:4px}
+.gr-c{font-family:var(--f-mono);font-size:11px;color:var(--ink-dim);white-space:nowrap;align-self:center}
+.gr-c.can{color:var(--brass)}
+.gr-fx{grid-column:1/-1;color:var(--ink-dim)}
+.gr-n{grid-column:1/-1;font-family:var(--f-mono);font-size:11px;font-variant-numeric:tabular-nums}
 .tray{display:flex;align-items:stretch;gap:8px;justify-content:center;min-width:0}
 .dna{pointer-events:none;display:grid;align-content:center;justify-items:center;padding:6px 12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;min-width:64px}
 .dna span:last-child{font-family:var(--f-display);font-size:24px;font-weight:700;color:var(--brass);font-variant-numeric:tabular-nums}
@@ -122,7 +147,10 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 .overlay{position:fixed;inset:0;z-index:5;display:grid;place-items:center;background:rgba(6,10,12,.45);
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
   padding-block:calc(env(safe-area-inset-top,0px) + 16px) calc(env(safe-area-inset-bottom,0px) + 16px)}
-.card{width:100%;max-width:470px;max-height:100%;overflow:auto;touch-action:pan-y;background:var(--panel-solid);border:1px solid var(--line);border-radius:12px;padding:26px 26px 22px;display:grid;gap:14px}
+/* max-height: the card's padding and border (26+22+2, 20+18+2 on phones) come on top of the content-box height, so
+   'max-height:100%' let a tall card (the pause guide; the title card in landscape) run 4-9 px past the top and bottom of
+   the screen. Now it fits and scrolls inside itself, its sticky .actions in view */
+.card{width:100%;max-width:470px;max-height:calc(100% - 50px);overflow:auto;touch-action:pan-y;background:var(--panel-solid);border:1px solid var(--line);border-radius:12px;padding:26px 26px 22px;display:grid;gap:14px}
 .card h1,.card h2{font-family:var(--f-display);font-weight:700;line-height:1.05;letter-spacing:-.01em;text-wrap:balance;margin:0}
 .card h1{font-size:clamp(28px,7vw,38px)}
 .card h2{font-size:clamp(24px,6vw,30px)}
@@ -188,7 +216,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .tray{grid-auto-rows:1fr}
   .up{min-height:44px}
   .bar{grid-template-columns:1fr;gap:3px}
-  .card{padding:20px 18px 18px;gap:12px}
+  .card{padding:20px 18px 18px;gap:12px;max-height:calc(100% - 40px)}
   .actions{bottom:-18px;margin-bottom:-18px;padding-bottom:18px}
   .card p{font-size:14px}
   .how{font-size:13px}
@@ -251,6 +279,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 }
 @media (hover:none) and (pointer:coarse){.up kbd,#burst small{display:none}#burst.low>.blow{display:block}}
 @media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}.up.nope{animation:none}#dominant{transition:none}
+  .tip{animation:none}.up.armed{animation:none;box-shadow:none;outline:2px solid var(--brass);outline-offset:-3px} /* a static outline */
   #burst.nope{animation:none}#burst .bcd{transition:none}#burst.fired{animation:firedRM .4s step-end} /* a static brief tint */}
 </style>
 <style>body{margin:0}</style>
@@ -287,6 +316,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   </div>
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="tip" id="tip" role="status" hidden></div>
 
 <div class="overlay" id="ovTitle">
   <div class="card" role="dialog" aria-modal="true" aria-labelledby="titleHead">
@@ -329,6 +359,11 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
     <div class="eyebrow">Stage locked</div>
     <h2 id="pauseHead">Paused</h2>
     <p class="small" id="pauseStats"></p>
+    <section class="guide" id="traitGuide" aria-label="How it works">
+      <div class="guide-head"><span class="eyebrow">How it works</span><span class="mono small" id="guideDna"></span></div>
+      <p class="guide-loop" id="guideLoop"></p>
+      <ul id="guideList"></ul>
+    </section>
     <div class="actions"><button class="btn primary" id="resumeBtn" type="button">Resume</button></div>
   </div>
 </div>
@@ -351,15 +386,19 @@ const MAX={size:9,speed:5,jaws:3,spikes:4,armor:4,photo:3,eye:3};
 const GENES=['speed','jaws','spikes','armor','photo','eye'];
 const GNAME={speed:'Flagella',jaws:'Jaws',spikes:'Spines',armor:'Plating',photo:'Chloroplasts',eye:'Eyespot'};
 const ROMAN=['','I','II','III','IV','V','VI','VII','VIII','IX'];
+// fx: what a level does, in words that match the code (trait cards, the pause guide, aria-labels); dn: its downside, read
+// after fx where the fx doesn't already say it; fxShort: the desktop tray's two lines at 120 px
 const UP=[
-  {k:'size',name:'Membrane',fx:'Grow 15% larger. More hungry.',base:3,step:4},
-  {k:'speed',name:'Flagella',fx:'Swim faster.',base:3,step:2},
-  {k:'jaws',name:'Jaws',fx:'Eat smaller cells. Algae worth half.',base:4,step:3},
-  {k:'spikes',name:'Spines',fx:'Hurt anything that bites you.',base:3,step:2},
-  {k:'armor',name:'Plating',fx:'Take less damage from bites.',base:3,step:2},
-  {k:'photo',name:'Chloro&shy;plasts',short:'Chloro',fx:'Make energy from the lamp.',base:4,step:3},
-  {k:'eye',name:'Eyespot',fx:'See farther. Sense hunters.',base:3,step:3},
+  {k:'size',name:'Membrane',fx:'Grow 15% bigger: fewer cells can eat you and divides pay more DNA. Reach IX to win.',dn:'Needs more food, and you swim slower.',fxShort:'Grow 15% bigger. Reach IX to win.',base:3,step:4},
+  {k:'speed',name:'Flagella',fx:'Swim faster. Uses a little more energy.',dn:'',fxShort:'Swim faster. Uses more energy.',base:3,step:2},
+  {k:'jaws',name:'Jaws',fx:'Eat cells 12% smaller than you, and their remains. Algae give half.',dn:'',fxShort:'Eat smaller cells. Algae give half.',base:4,step:3},
+  {k:'spikes',name:'Spines',fx:'Hurt anything that bites you.',dn:'Costs a little energy to keep.',fxShort:'Hurt anything that bites you.',base:3,step:2},
+  {k:'armor',name:'Plating',fx:'Bites hurt 17% less per level, and you can take more.',dn:'Costs a little energy to keep.',fxShort:'Bites hurt you 17% less.',base:3,step:2},
+  {k:'photo',name:'Chloro&shy;plasts',short:'Chloro',fx:'Make energy from the lamp, even standing still.',dn:'Costs a little energy to keep, less than it makes.',fxShort:'Make energy from the lamp.',base:4,step:3},
+  {k:'eye',name:'Eyespot',fx:'See farther. I marks cells you can eat; II adds arrows to hunters off-screen.',dn:'Costs a little energy to keep.',fxShort:'See farther. Spot prey and hunters.',base:3,step:3},
 ];
+const plain=s=>s.replace(/<[^>]*>/g,'').replace(/&shy;|\u00ad/g,''); // for aria-labels and card titles
+const fxFull=u=>u.dn?u.fx+' '+u.dn:u.fx;
 const GEN_H=['Micromonas','Planktella','Dorsocyta','Megacella','Gigantocyta'];
 const GEN_C=['Lycomonas','Voracella','Raptocyta','Tyrannocyta','Leviathella'];
 const EPI={speed:'velox',spikes:'spinosa',armor:'loricata',photo:'viridis',eye:'oculata'};
@@ -455,11 +494,11 @@ function startLineage(){
   cells.push(player);
   cam.x=x;cam.y=y;cam.v=viewR();
   mode='play';paused=false;
-  showOnly(null);
+  showOnly(null);hideTip();disarm();
   toast('Eat the green algae to fill your energy.',{pri:2,ms:5000});
   refreshHud(true);
 }
-function viewR(){return player?150+player.r*6+player.g.eye*45:430}
+function viewR(c=player){return c?150+c.r*6+c.g.eye*45:430} // the camera's view radius around c (the trait cards' 'Sight')
 function spawnMigrant(){
   // Always just outside the view: pick a random direction whose spawn point lies in the dish. Clamping a point past
   // the wall back inside pulled it toward a player near the wall, into view. If no direction fits, aim inward.
@@ -528,6 +567,7 @@ function loadSave(){try{return JSON.parse(localStorage.getItem(SAVE_KEY)||'null'
 const saveGen=sv=>Math.max(1,Number.isFinite(sv.gen)?sv.gen:1); // the generation restore() will resume at
 
 /* ---------- offspring & death ---------- */
+const divGain=lv=>3+Math.floor(lv.size/3); // DNA per divide
 function offspring(p){
   const g={...p.g};
   for(const k of ['speed','spikes','armor','photo','eye']) if(Math.random()<.16) g[k]=clamp(g[k]+(Math.random()<.5?-1:1),0,MAX[k]);
@@ -552,7 +592,7 @@ function offspring(p){
 function divide(){
   const p=player;
   p.en=p.maxEn*.45;gen++;
-  const gain=3+Math.floor(p.lv.size/3);dna+=gain;
+  const gain=divGain(p.lv);dna+=gain;
   if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5}
   floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);youT=0; // the floater takes the 'you' label's place
   askPersist();
@@ -699,6 +739,9 @@ $('tray').addEventListener('click',e=>{if(performance.now()<traySw){traySw=0;e.s
 // that acted cancels its touchend (Chrome and Safari then make no click), and as a fallback (a pen, a browser that
 // clicks anyway, a touchend the browser doesn't deliver) a pointer click within 700 ms and 32 px of where a touch acted
 // is dropped on whatever it hits (tapGhost). Its own button still gets it, and ignores it as above.
+// With onLong, a touch held still for LONG_MS on the button calls onLong instead (the trait cards: read, never buy): its
+// pointerup then does nothing, and its touchend is cancelled like a tap's. Moving 12 px first cancels it (it steers).
+const LONG_MS=450;
 let tapGhost=null;
 document.addEventListener('click',e=>{const g=tapGhost;if(!g||!e.detail)return; // detail 0: keyboard or script
   if(performance.now()-g.t>700){tapGhost=null;return}
@@ -706,14 +749,16 @@ document.addEventListener('click',e=>{const g=tapGhost;if(!g||!e.detail)return; 
   e.stopPropagation();e.preventDefault()},true);
 function onTap(b,fn,o={}){
   const isT=e=>!!e.pointerType&&e.pointerType!=='mouse';
-  let id=null,x=0,y=0,tT=-1e9,act=false;
+  let id=null,x=0,y=0,tT=-1e9,act=false,lp=0;
   const run=e=>{tapGhost={t:performance.now(),x:e.clientX,y:e.clientY,b};if(e.pointerType==='touch')act=true;fn(e)};
   b.addEventListener('pointerdown',e=>{if(!isT(e))return;tT=performance.now();
-    if(o.onDown)run(e);else{id=e.pointerId;x=e.clientX;y=e.clientY}});
-  b.addEventListener('pointermove',e=>{if(e.pointerId===id&&Math.hypot(e.clientX-x,e.clientY-y)>12)id=null});
-  b.addEventListener('pointerup',e=>{if(!isT(e))return;tT=performance.now();if(e.pointerId!==id)return;id=null;
+    if(o.onDown)run(e);else{id=e.pointerId;x=e.clientX;y=e.clientY;
+      if(o.onLong){const pid=id,pt=e.pointerType;clearTimeout(lp);
+        lp=setTimeout(()=>{if(id!==pid||joy.id===pid)return;id=null;if(pt==='touch')act=true;o.onLong(e)},LONG_MS)}}});
+  b.addEventListener('pointermove',e=>{if(e.pointerId===id&&Math.hypot(e.clientX-x,e.clientY-y)>12){id=null;clearTimeout(lp)}});
+  b.addEventListener('pointerup',e=>{if(!isT(e))return;tT=performance.now();if(e.pointerId!==id)return;id=null;clearTimeout(lp);
     if(joy.id!==e.pointerId&&Math.hypot(e.clientX-x,e.clientY-y)<=12)run(e)});
-  b.addEventListener('pointercancel',e=>{if(e.pointerId===id)id=null;if(isT(e))tT=performance.now()});
+  b.addEventListener('pointercancel',e=>{if(e.pointerId===id){id=null;clearTimeout(lp)}if(isT(e))tT=performance.now()});
   b.addEventListener('touchend',e=>{if(act){act=false;if(e.cancelable)e.preventDefault()}},{passive:false});
   b.addEventListener('touchcancel',()=>{act=false});
   b.addEventListener('click',e=>{if(!isT(e)&&performance.now()-tT>=700)fn(e);if(e.detail>0)b.blur()});
@@ -760,13 +805,15 @@ function drawJoy(){
   ctx.save();ctx.strokeStyle=COL.brass;ctx.fillStyle=COL.brass;ctx.globalAlpha=.5;ctx.lineWidth=2;
   ctx.beginPath();ctx.arc(joy.ox,joy.oy,JOY,0,TAU);ctx.stroke();ctx.globalAlpha=.35;ctx.beginPath();ctx.arc(joy.ox+dx,joy.oy+dy,20,0,TAU);ctx.fill();ctx.restore();
 }
-const BURST_CD=2.5;
+// a burst: BURST_X times top speed for BURST_T s, for BURST_EN energy; it recharges for BURST_CD s and needs BURST_MIN
+// energy to fire (the pause card's guide quotes these)
+const BURST_CD=2.5,BURST_T=.6,BURST_X=2,BURST_EN=6,BURST_MIN=8;
 // Space, a click, or a touch going down on the button. Not ready: the button shakes ('no'); fired: it flashes brass.
 function burst(){
   if(!player||mode!=='play'||paused)return;
   const b=$('burst');
-  if(player.burstCd>0||player.en<8){b.classList.remove('fired');bumpEl(b,'nope');return}
-  player.burst=.6;player.burstCd=BURST_CD;player.en-=6;
+  if(player.burstCd>0||player.en<BURST_MIN){b.classList.remove('fired');bumpEl(b,'nope');return}
+  player.burst=BURST_T;player.burstCd=BURST_CD;player.en-=BURST_EN;
   b.classList.remove('nope');bumpEl(b,'fired');refreshHud(); // dim it and start the recharge bar now, not on the next HUD tick
 }
 
@@ -774,7 +821,7 @@ function burst(){
 function updateCell(c,dt){
   c.age+=dt;c.wob+=dt*(2+c.g.speed);
   if(c.isPlayer)playerInput();else aiSteer(c,dt);
-  const spd=c.maxSpd*steer.m*(c.burst>0?2:1);
+  const spd=c.maxSpd*steer.m*(c.burst>0?BURST_X:1);
   const k=Math.min(1,dt*(c.isPlayer?5:3));
   c.vx+=(steer.x*spd-c.vx)*k;c.vy+=(steer.y*spd-c.vy)*k;
   c.x+=c.vx*dt;c.y+=c.vy*dt;
@@ -783,7 +830,7 @@ function updateCell(c,dt){
   const d=Math.hypot(c.x,c.y),lim=DISH-c.r;
   if(d>lim){const nx=c.x/d,ny=c.y/d;c.x=nx*lim;c.y=ny*lim;const vn=c.vx*nx+c.vy*ny;if(vn>0){c.vx-=1.6*vn*nx;c.vy-=1.6*vn*ny}}
   const move=Math.min(1,v/c.maxSpd);
-  c.en+=(c.g.photo*.5-c.drain*(.45+.55*move))*dt;
+  c.en+=(photoGain(c)-c.drain*(.45+.55*move))*dt;
   if(c.announce>0)c.announce-=dt;
   if(c.burst>0)c.burst-=dt;if(c.burstCd>0)c.burstCd-=dt;if(c.shield>0)c.shield-=dt;if(c.flash>0)c.flash-=dt;
   if(c.en<=0){c.en=0;c.hp-=4*dt;c.lastHit=t;if(c.hp<=0){kill(c,null);return}}
@@ -793,11 +840,17 @@ function updateCell(c,dt){
     if(c.en>=c.maxEn*.85&&c.age>8&&cells.length<CAP&&(c.kin?lastCensus.k<14:c.g.jaws?lastCensus.h<20:lastCensus.g<54)){c.en*=.45;const ch=offspring(c);ch.en=c.en}
   }
 }
+// per second: a's bite on b (b's plating takes off armorMul), b's spines on a biting it, c's chloroplasts' energy. The
+// trait cards read their numbers through these (traitPreview)
+const armorMul=b=>1-b.g.armor*.17;
+const biteDps=(a,b)=>(3+a.r*.45+a.g.jaws*4)*armorMul(b);
+const spineDps=(a,b)=>b.g.spikes*5*(1-a.g.armor*.12);
+const photoGain=c=>c.g.photo*.5;
 function bite(a,b,dt){
   if(b.shield>0)return;
-  const dmg=(3+a.r*.45+a.g.jaws*4)*(1-b.g.armor*.17)*dt;
+  const dmg=biteDps(a,b)*dt;
   b.hp-=dmg;b.flash=.15;b.lastHit=t;a.en=Math.min(a.maxEn,a.en+dmg*.6);
-  if(b.g.spikes){a.hp-=b.g.spikes*5*(1-a.g.armor*.12)*dt;a.flash=.15;a.lastHit=t}
+  if(b.g.spikes){a.hp-=spineDps(a,b)*dt;a.flash=.15;a.lastHit=t}
   if(b.hp<=0)kill(b,a);
   if(a.hp<=0&&!a.dead)kill(a,b);
 }
@@ -920,7 +973,7 @@ function resize(){
   if(rB>rA){FR=rB;CY=insetT+(trayT-insetT)/2;side=true}
   else{FR=rA;CY=(topB+trayT)/2}
   if(FR<90){FR=90;CY=Math.max(CY,insetT+FR)}
-  CX=W/2;
+  CX=W/2;layoutSide=side;placeTip();
   $('toasts').style.top=(side?CY-FR+16:Math.max(topB+6,CY-FR+16))+'px';
   $('toasts').style.width=side?Math.min(FR*1.6,420)+'px':'';
   buildLayers();
@@ -1065,7 +1118,7 @@ function drawWake(){
   const p=player;if(!p||!(p.burst>0))return;
   if(RM){ctx.fillStyle=COL.brass;ctx.globalAlpha=.2;ctx.beginPath();ctx.arc(p.x,p.y,p.r*1.3,0,TAU);ctx.fill();ctx.globalAlpha=1;return}
   const v=Math.hypot(p.vx,p.vy);if(v<15)return;
-  const ux=p.vx/v,uy=p.vy/v,gap=Math.min(p.r*.8,v*.045),k=Math.min(1,p.burst/.6);
+  const ux=p.vx/v,uy=p.vy/v,gap=Math.min(p.r*.8,v*.045),k=Math.min(1,p.burst/BURST_T);
   ctx.fillStyle=hsl(dispHue(p),50,46,1);
   for(let i=4;i>=1;i--){ctx.globalAlpha=.24*k*(1-i/5);ctx.beginPath();ctx.arc(p.x-ux*gap*i,p.y-uy*gap*i,p.r*(1-.1*i),0,TAU);ctx.fill()}
   ctx.globalAlpha=1;
@@ -1187,26 +1240,150 @@ function drawSpark(){
 const upBtns=UP.map((u,i)=>{
   const b=document.createElement('button');b.type='button';b.className='up';b.id='up-'+u.k;
   const nm=u.short?`<span class="nm-full">${u.name}</span><span class="nm-short">${u.short}</span>`:u.name; // short: compact tray
-  b.innerHTML=`<span class="up-top"><span class="up-name">${nm}</span><kbd>${i+1}</kbd></span><span class="up-fx">${u.fx}</span><span class="up-foot"><span class="pips">${'<i></i>'.repeat(MAX[u.k])}</span><span class="cost"></span></span>`;
-  onTap(b,()=>buy(i)); // a touch buys on lifting (also while another finger steers); mouse and keys on the click
+  b.innerHTML=`<span class="up-top"><span class="up-name">${nm}</span><kbd>${i+1}</kbd></span><span class="up-fx">${u.fxShort||u.fx}</span><span class="up-foot"><span class="pips">${'<i></i>'.repeat(MAX[u.k])}</span><span class="cost"></span></span>`;
+  // a touch acts on lifting (also while another finger steers), mouse and keys on the click; a held touch reads the card
+  onTap(b,()=>tapTrait(i),{onLong:()=>holdTrait(i)});
+  b.addEventListener('contextmenu',e=>e.preventDefault()); // a long press is ours (Android would open a menu)
+  // desktop: hovering or keyboard focus shows the card above the button; a click still buys at once
+  const hov=()=>!COMPACT.matches&&mode==='play'&&player&&!paused;
+  b.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse'&&hov())showTip(traitCard(i,'hover'),0,b)});
+  b.addEventListener('pointerleave',e=>{if(e.pointerType==='mouse'&&tipBtn===b&&!(document.activeElement===b&&b.matches(':focus-visible')))hideTip()});
+  b.addEventListener('focus',()=>{if(hov()&&b.matches(':focus-visible'))showTip(traitCard(i,'hover'),0,b)});
+  b.addEventListener('blur',()=>{if(tipBtn===b&&!b.matches(':hover'))hideTip()});
   $('ups').appendChild(b);return b;
 });
 onTap($('burst'),burst,{onDown:true}); // a touch bursts as it goes down, also while another finger steers
 function cost(u){return u.base+u.step*player.lv[u.k]}
-function buy(i){
+/* ---------- trait cards: on phones the first tap on a trait explains it, later taps evolve, every tap answers ---------- */
+// The traits the player has read (a first tap, a long press) or bought: a JSON array in localStorage. Storage can be
+// blocked (the claude.ai Artifact frame): then the set lives in memory for this visit.
+const LEARN_KEY='coverslip-learned',learned=new Set();
+try{const a=JSON.parse(localStorage.getItem(LEARN_KEY)||'[]');if(Array.isArray(a))for(const k of a)if(UP.some(u=>u.k===k))learned.add(k)}catch(e){}
+function learn(k){if(learned.has(k))return;learned.add(k);try{localStorage.setItem(LEARN_KEY,JSON.stringify([...learned]))}catch(e){}}
+// The stats one more level of trait i changes, as short phrases ('Top speed 64 → 84'), read from the real formulas: two
+// throwaway player cells (makeCell, never put in cells) at lv and at lv plus that level, through applyLv/recompute and
+// the bite/spine/lamp/divide functions. Only stats whose shown value changes are listed, so the cards stay honest
+// whenever the numbers are retuned. f: the value, d: decimals shown, u: unit, how: 'pct' (a cut), 'gain', 'delta'.
+const BARE={r:10,g:{speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0}}; // the other side of a bite: no plating, no spines, no jaws
+const STATS=[
+  {n:'Size',f:c=>c.r,d:1},
+  {n:'Top speed',f:c=>c.maxSpd},
+  {n:'Health',f:c=>c.maxHp},
+  {n:'Sight',f:c=>viewR(c)},
+  {n:'Energy capacity',f:c=>c.maxEn},
+  {n:'Bites you deal',f:c=>c.g.jaws?biteDps(c,BARE):0,d:1,u:'/s'},
+  {n:'Bites you take',f:c=>1-armorMul(c),how:'pct'},
+  {n:'Hurts biters',f:c=>spineDps(BARE,c),d:1,u:'/s'},
+  {n:'Makes',f:photoGain,d:2,u:' energy/s',how:'gain'},
+  {n:'Energy use',f:c=>c.drain,d:2,u:'/s',how:'delta'},
+  {n:'DNA per divide',f:c=>divGain(c.lv)},
+];
+const nf=(v,d=0)=>String(+v.toFixed(d));
+function traitPreview(i,lv=player&&player.lv){
+  const u=UP[i];if(!lv||lv[u.k]>=MAX[u.k])return[];
+  const id0=nextId,mk=l=>{const c=makeCell(0,0,10,{...BARE.g},338,{isPlayer:true,life:Infinity,lv:{...l}});applyLv(c);return c};
+  const a=mk(lv),b=mk({...lv,[u.k]:lv[u.k]+1});nextId=id0;
+  const out=[];
+  for(const s of STATS){const va=s.f(a),vb=s.f(b),d=s.d||0,unit=s.u||'';
+    if(s.how==='pct'){const pa=Math.round(va*100),pb=Math.round(vb*100);if(pa!==pb)out.push(`${s.n} ${pa?`−${pa}% → `:''}−${pb}%`);continue}
+    if(s.how==='delta'){const dd=nf(vb-va,d);if(+dd)out.push(`${s.n} ${+dd>0?'+':''}${dd}${unit}`);continue}
+    const sa=nf(va,d),sb=nf(vb,d);if(sa===sb)continue;
+    out.push(+sa===0?`${s.n} ${s.how==='gain'?'+':''}${sb}${unit}`:`${s.n} ${sa} → ${sb}${unit}`)}
+  return out;
+}
+const pvHtml=pv=>pv.map(x=>`<span class="ph">${x}</span>`).join(' · '); // a phrase never breaks inside
+const needLine=c=>`Needs ${c} DNA · you have ${dna}. Fill your energy to divide.`;
+// a trait's full card: its next level, what it does and its downside, the numbers that level changes, and the cost
+// line. how: 'first' (the first tap: tap again), 'hold' (a long press: tap), 'hover' (desktop: click or the key)
+function traitCard(i,how){
+  const u=UP[i],lv=player.lv[u.k],nm=plain(u.name);
+  if(lv>=MAX[u.k])return `<b>${nm} ${ROMAN[lv]}</b> · ${fxFull(u)}<br><span class="tc">Fully evolved</span>`;
+  const c=cost(u),pv=traitPreview(i);
+  const line=dna<c?needLine(c):how==='hover'?`${c} DNA · click or press ${i+1} to evolve`:`${c} DNA · tap ${how==='first'?'again ':''}to evolve`;
+  return `<b>${nm} ${ROMAN[lv+1]}</b> · ${fxFull(u)}${pv.length?`<br><span class="tn">${pvHtml(pv)}</span>`:''}<br><span class="tc">${line}</span>`;
+}
+// #tip: one card at a time. ms 0 = until hideTip() (a desktop hover); btn: placed above that button
+let tipT=0,tipBtn=null,tipKey='',layoutSide=false; // layoutSide: resize()'s side layout (the field between the panels)
+function showTip(html,ms,btn=null){
+  const el=$('tip');if(el.innerHTML!==html)el.innerHTML=html;el.hidden=false;tipBtn=btn;tipKey='';placeTip();
+  clearTimeout(tipT);tipT=ms?setTimeout(hideTip,ms):0;
+}
+function hideTip(){clearTimeout(tipT);tipT=0;tipBtn=null;$('tip').hidden=true}
+function placeTip(){
+  const el=$('tip');if(el.hidden)return;const st=el.style;
+  st.left=st.top=st.bottom=st.width=st.transform='';
+  if(tipBtn){ // above the hovered or focused button, inside the window
+    const r=tipBtn.getBoundingClientRect(),w=el.offsetWidth;
+    st.bottom=(innerHeight-r.top+8)+'px';st.left=clamp(r.left+r.width/2-w/2,8,Math.max(8,innerWidth-8-w))+'px';
+  }else if(layoutSide){ // the right gutter under the Census panel, clear of the dish and its reticle ticks (FR+17)
+    const cen=$('top').lastElementChild.getBoundingClientRect(),tr=$('tray').getBoundingClientRect();
+    const w=Math.min(360,Math.max(cen.width,cen.right-(CX+FR+18)));
+    st.width=w+'px';st.left=(cen.right-w)+'px';
+    // under the panel; a card too tall for the gap rises over the panel's foot rather than over the tray
+    st.top=Math.max(8,Math.min(cen.bottom+8,tr.top-8-el.offsetHeight))+'px';
+  }else{st.left='50%';st.transform='translateX(-50%)';st.bottom=(innerHeight-$('tray').getBoundingClientRect().top+8)+'px'}
+}
+// the first tap's mark on a phone: an inset brass glow for 4 s ('tap again to evolve')
+let armedI=-1,armT=0;
+function disarm(){clearTimeout(armT);if(armedI>=0)upBtns[armedI].classList.remove('armed');armedI=-1}
+function arm(i){disarm();armedI=i;upBtns[i].classList.add('armed');armT=setTimeout(disarm,4000)}
+// can't afford it: shake the DNA box (wide tray) and the tapped trait, and flash its cost and the small DNA readout
+// red (#dnaBox is hidden on phones, so the trait button and #dna2 carry the "no" there)
+const nope=i=>{bumpEl($('dnaBox'),'nope');bumpEl(upBtns[i],'nope');bumpEl($('dna2'),'bad')};
+// A trait button's tap or click. Desktops and tablets buy at once. Phones (COMPACT): the first tap on a trait the player
+// hasn't read shows its card and arms it (or says what it needs, with the 'no' shake), later taps buy; a maxed trait
+// says so; an unaffordable one shakes and says what it needs
+function tapTrait(i){
   if(mode!=='play'||!player||paused)return;
-  const u=UP[i],lv=player.lv[u.k];if(lv>=MAX[u.k])return;
+  if(!COMPACT.matches){buy(i);return}
+  const u=UP[i],lv=player.lv[u.k];
+  if(lv>=MAX[u.k]){showTip(`<b>${plain(u.name)}</b> · fully evolved`,1600);return}
   const c=cost(u);
-  // can't afford it: shake the DNA box (wide tray) and the tapped trait, and flash its cost and the small DNA readout
-  // red (#dnaBox is hidden on phones, so the trait button and #dna2 carry the "no" there)
-  if(dna<c){bumpEl($('dnaBox'),'nope');bumpEl(upBtns[i],'nope');bumpEl($('dna2'),'bad');return}
-  const before=stageName(player);
-  dna-=c;player.lv[u.k]++;applyLv(player);
+  if(!learned.has(u.k)){learn(u.k);if(dna<c){disarm();nope(i)}else arm(i);showTip(traitCard(i,'first'),4000);return}
+  if(!buy(i)&&dna<c)showTip(`<b>${plain(u.name)} ${ROMAN[lv+1]}</b> · ${needLine(c)}`,2200);
+}
+// a long press on a trait (any touch screen): its full card, learned or not, and never a buy
+function holdTrait(i){
+  if(mode!=='play'||!player||paused)return;
+  const u=UP[i];learn(u.k);
+  if(player.lv[u.k]<MAX[u.k]&&dna>=cost(u)&&COMPACT.matches)arm(i);
+  showTip(traitCard(i,'hold'),4000);
+}
+// returns true when it bought
+function buy(i){
+  if(mode!=='play'||!player||paused)return false;
+  const u=UP[i],lv=player.lv[u.k];if(lv>=MAX[u.k])return false;
+  learn(u.k); // keys 1-7 and a desktop click count as knowing the trait: a phone never previews it afterwards
+  const c=cost(u);
+  if(dna<c){nope(i);return false}
+  const pv=traitPreview(i),before=stageName(player);
+  dna-=c;player.lv[u.k]++;applyLv(player);disarm();
+  const nm=plain(u.name),L=ROMAN[player.lv[u.k]];
+  floater(player.x,player.y-player.r-8,`${nm} ${L}`,COL.brass,13,600);youT=0; // the floater takes the 'you' label's place
   if(u.k==='jaws'&&player.lv.jaws===1)toast('Jaws: you can eat cells 12% smaller than you.',{pri:2,ms:5000});
   const after=stageName(player);
   if(after!==before)toast('Stage reached: '+after);
   if(player.lv.size>=9&&!won){won=true;paused=true;$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));showOnly('ovWin');$('contBtn').focus()}
   refreshHud(true);
+  if(!paused){
+    if(COMPACT.matches)showTip(`<b>Evolved ${nm} ${L}</b>: ${fxFull(u)}${pv.length?`<br><span class="tn">${pvHtml(pv)}</span>`:''}`,2200);
+    else if(tipBtn===upBtns[i])showTip(traitCard(i,'hover'),0,tipBtn); // the hovered card moves on to the next level
+  }
+  return true;
+}
+// the pause card's guide: the loop, every trait with its level, what it does, what its next level changes and its
+// cost, and Burst from its constants. Written when the card opens, never per frame
+function renderGuide(){
+  if(!player)return;
+  $('guideLoop').textContent=`Eat to fill Energy → you divide → earn DNA → spend DNA on traits. Goal: Membrane ${ROMAN[MAX.size]} (Leviathan).`;
+  $('guideDna').textContent=`You have ${dna} DNA`;
+  const rows=UP.map((u,i)=>{const lv=player.lv[u.k],mx=lv>=MAX[u.k],c=mx?0:cost(u);
+    return `<li data-k="${u.k}"><span class="gr-h">${plain(u.name)}<span class="gr-l">${lv}/${MAX[u.k]}</span></span><span class="gr-c${!mx&&dna>=c?' can':''}">${mx?'max':c+' DNA'}</span>`+
+      `<span class="gr-fx">${fxFull(u)}</span><span class="gr-n">${mx?'Fully evolved':`Next ${ROMAN[lv+1]}: ${pvHtml(traitPreview(i))}`}</span></li>`});
+  const touch=COMPACT.matches||matchMedia('(hover:none) and (pointer:coarse)').matches;
+  rows.push(`<li data-k="burst"><span class="gr-h">Burst</span><span class="gr-c">${BURST_EN} energy</span><span class="gr-fx">Short dash at ${BURST_X===2?'double':BURST_X+'×'} speed for ${BURST_T} s. `+
+    `Costs ${BURST_EN} energy, recharges in ${BURST_CD} s. ${touch?'Works while you steer: tap it with a second finger.':'Press Space, or click it.'}</span></li>`);
+  $('guideList').innerHTML=rows.join('');
 }
 // HUD writes go through a cache: an unchanged value touches no DOM (no style or layout work), so refreshing 10 times
 // a second costs nothing between real changes. Write HUD text only through setT(). refreshHud(true) clears the cache.
@@ -1234,11 +1411,13 @@ function refreshHud(force){
       b.disabled=mx;b.classList.toggle('can',can);
       b.querySelectorAll('.pips i').forEach((p,j)=>p.classList.toggle('on',j<lv));
       b.querySelector('.cost').innerHTML=mx?'max':c+DNA_U;
-      b.setAttribute('aria-label',`${u.name.replace('&shy;','')}, level ${lv} of ${MAX[u.k]}, ${mx?'maxed':'costs '+c+' DNA'}. ${u.fx}`)});
+      b.setAttribute('aria-label',`${plain(u.name)}, level ${lv} of ${MAX[u.k]}, ${mx?'maxed':'costs '+c+' DNA'}. ${plain(fxFull(u))}`)});
+    // a desktop hover card follows the DNA and the levels (only rebuilt when they change)
+    if(tipBtn){const i=upBtns.indexOf(tipBtn),k=i+'|'+JSON.stringify(player.lv)+'|'+dna;if(i>=0&&k!==tipKey){showTip(traitCard(i,'hover'),0,tipBtn);tipKey=k}}
     // Burst's readiness: dim while not ready, 'low energy' under 8 energy (compact and touch screens), and while it
     // recharges a bar along the bottom fills (scaleX 0 -> 1 over BURST_CD, 2% steps, eased by a .1 s transition; reset
     // to 0 while hidden, so it never visibly runs backwards)
-    const cd=player.burstCd>0,low=player.en<8,cool=cd||low,bt=hEl('burst');
+    const cd=player.burstCd>0,low=player.en<BURST_MIN,cool=cd||low,bt=hEl('burst');
     if(hudC.cool!==cool){hudC.cool=cool;bt.classList.toggle('cool',cool)}
     if(hudC.low!==low){hudC.low=low;bt.classList.toggle('low',low)}
     if(hudC.cd!==cd){hudC.cd=cd;bt.classList.toggle('cd',cd)}
@@ -1307,7 +1486,7 @@ function askPersist(){if(!STANDALONE||askedPersist)return;askedPersist=true;try{
 const UPD_MSG='Update downloaded. It loads next time you open the game.';
 let updShown=false,updToast=false;
 function showOnly(id){for(const o of['ovTitle','ovOver','ovWin','ovPause'])$(o).hidden=o!==id;$('hud').inert=!!id;still=0;
-  if(id){wakeOff();dropBack()}
+  if(id){wakeOff();dropBack();hideTip();disarm()}
   else if(mode==='play'){wakeOn();armBack();if(updToast){updToast=false;toast(UPD_MSG)}}
 }
 function togglePause(){
@@ -1315,7 +1494,7 @@ function togglePause(){
   if(!$('ovWin').hidden)return;
   paused=!paused;still=0;
   // the compact phone HUD hides kills and time, so the pause card shows them
-  if(paused&&player)$('pauseStats').textContent=`Generation ${gen} · Kills ${kills} · ${fmt(lineT)} · ${goalTxt()}`;
+  if(paused&&player){$('pauseStats').textContent=`Generation ${gen} · Kills ${kills} · ${fmt(lineT)} · ${goalTxt()}`;renderGuide()}
   showOnly(paused?'ovPause':null);if(paused)$('resumeBtn').focus();
 }
 // Starting over when that would discard a lineage takes two taps: the first only arms the button for 4 s and says
