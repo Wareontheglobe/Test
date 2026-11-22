@@ -377,6 +377,7 @@ let W=0,H=0,DPR=1,FR=200,CX=0,CY=0;
 let algae=[],meat=[],cells=[],parts=[],blooms=[],player=null,mode='title',t=0,algaeAcc=0;
 const cam={x:0,y:0,v:430,ang:0};
 let dna=0,gen=1,kills=0,lineT=0,heirs=0,maxSeen={},won=false,paused=false,hints=0,migrantT=45,saveT=8,booted=false;
+let youT=0; // seconds the 'you' label still shows over the player (a new lineage, a resume, an heir taking over)
 let hist=[],histT=0,hudT=0,nextId=1;
 let errN=0,updErr=false; // frame errors so far; true while the last update() threw (saves are skipped then)
 // the census news line (news()): its two texts (wide HUD, compact HUD) and the lineT it came at; lastRivalNews: the lineT
@@ -445,7 +446,7 @@ function startLineage(){
   if(mode==='play'&&player)recordBest(gen,lineT);
   else{const sv=loadSave();if(sv&&sv.v===1)recordBest(sv.gen||0,sv.lineT||0)}
   initWorld();
-  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=0;migrantT=45;lastRivalNews=0;newsT=-1e9;clearSave();
+  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=0;migrantT=45;lastRivalNews=0;newsT=-1e9;youT=3;clearSave();
   lastCensus=census();histT=1.5;
   let x=0,y=0;
   for(let i=0;i<80;i++){const b=blooms[i%blooms.length];x=b.x+rand(-60,60);y=b.y+rand(-60,60);if(i>40)[x,y]=randInDish(150);if(cells.every(c=>!c.g.jaws||Math.hypot(c.x-x,c.y-y)>380))break}
@@ -516,7 +517,7 @@ function restore(sv){
     for(const k of GENES){let m=0;for(const c of nc)if(!c.isPlayer&&!c.kin&&c.g[k]>m)m=c.g[k];ms[k]=clamp(Math.round(num(sv.maxSeen&&sv.maxSeen[k],m)),0,MAX[k])}
     cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;maxSeen=ms;lastRivalNews=0;newsT=-1e9;
     dna=num(sv.dna,0);gen=Math.max(1,num(sv.gen,1));kills=num(sv.kills,0);lineT=num(sv.lineT,0);heirs=num(sv.heirs,0);won=!!sv.won;hints=num(sv.hints,0)|0;migrantT=num(sv.migrantT,45);
-    player.shield=2;cam.x=player.x;cam.y=player.y;cam.v=viewR();
+    player.shield=2;youT=3;cam.x=player.x;cam.y=player.y;cam.v=viewR();
     mode='play';paused=false;lastCensus=census();
     return true;
   }catch(e){return false}
@@ -553,7 +554,7 @@ function divide(){
   p.en=p.maxEn*.45;gen++;
   const gain=3+Math.floor(p.lv.size/3);dna+=gain;
   if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5}
-  floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);
+  floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);youT=0; // the floater takes the 'you' label's place
   askPersist();
   if(!(hints&2)){hints|=2;toast('You divided. Spend DNA in the tray to evolve.',{pri:2,ms:5000})}
 }
@@ -561,7 +562,7 @@ function kill(c,killer){
   if(c.dead)return;c.dead=true;
   const total=10+c.r*3.2,n=2+Math.floor(c.r/8);
   for(let i=0;i<n;i++){const a=rand(TAU),d=rand(c.r*.6);meat.push({x:c.x+Math.cos(a)*d,y:c.y+Math.sin(a)*d,r:clamp(2+total/n*.18,2.5,7),v:total/n,life:28,dead:false,rot:rand(6)})}
-  for(let i=0;i<10;i++){const a=rand(TAU),s=rand(20,70);parts.push({x:c.x,y:c.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.6,max:.6,col:hsl(c.hue,50,40,1),r:rand(1,2.2)})}
+  for(let i=0;i<10;i++){const a=rand(TAU),s=rand(20,70);parts.push({x:c.x,y:c.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.6,max:.6,col:hsl(dispHue(c),50,40,1),r:rand(1,2.2)})}
   if(killer&&killer.isPlayer){
     const gain=1+Math.floor(c.r/10);dna+=gain;kills++;
     if(kills===1)toast(`First kill · +${gain} DNA`);
@@ -596,7 +597,7 @@ function takeover(k){
   const old=player.lv;
   k.kin=false;k.isPlayer=true;k.life=Infinity;k.hue=338;
   k.lv={...old,size:Math.max(0,old.size-1)};k.maxHp=0;applyLv(k);k.hp=k.maxHp;k.en=Math.max(k.en,50);k.shield=3;k.tgt=null;
-  player=k;
+  player=k;youT=3;
 }
 
 /* ---------- AI ---------- */
@@ -839,6 +840,7 @@ function floater(x,y,txt,col,fs=12,fw=500){parts.push({x,y,vx:0,vy:-18,life:1.4,
 function update(dt){
   t+=dt;
   if(mode==='play'&&player)lineT+=dt;
+  if(youT>0)youT-=dt;
   algaeAcc+=dt*ALGAE_RATE;
   while(algaeAcc>1){algaeAcc--;if(algae.length<ALGAE_CAP)spawnAlgae()}
   for(const b of blooms){b.x+=b.vx*dt;b.y+=b.vy*dt;if(Math.hypot(b.x,b.y)>DISH*.75){b.vx=-b.vx;b.vy=-b.vy;b.x+=b.vx*dt*2;b.y+=b.vy*dt*2}}
@@ -990,8 +992,21 @@ function drawFood(){
     ctx.closePath();ctx.fill()}
   ctx.globalAlpha=1;
 }
+// Role look: lightness, wall weight and outline carry the role, so it survives colour-blindness (by hue alone,
+// grazer vs hunter measured dE 2.5 under deuteranopia, hunter vs kin 3.1); hue only adds flavour. Grazers are pale and
+// thin-walled; hunters dark, heavy-walled, with a prow bulging toward their jaws; kin and you eosin pink with a brass
+// nucleolus (grazer vs kin is the weakest pair under protanopia). The display hue is the role's centre plus a damped
+// share of the cell's own hue, measured from the old band centre (ROLE0): c.hue itself is unchanged, so saves and the
+// mutation code are untouched. f: fill [sat, light, alpha], s: wall [sat, light], w: wall width per radius.
+const ROLE={g:{c:200,k:.4,f:[62,64,.30],s:[60,36],w:.06},h:{c:292,k:.4,f:[42,40,.55],s:[50,16],w:.11},k:{c:338,k:.5,f:[70,66,.34],s:[62,38],w:.07}};
+const ROLE0={g:218,h:298,k:338};
+const roleOf=c=>c.isPlayer||c.kin?'k':c.g.jaws?'h':'g';
+const dispHue=(c,ro=roleOf(c))=>ROLE[ro].c+(c.hue-ROLE0[ro])*ROLE[ro].k;
+// Traits keep a minimum size on screen (px = world units per screen pixel): at phone scale rivals are 5-7 px across.
+// Under 6 px of radius a cell skips its granules and nucleus (level of detail); the trait marks always draw.
 function drawCell(c,px){
-  const r=c.r,h=c.hue,g=c.g,wa=RM?.3:1;
+  const ro=roleOf(c),R=ROLE[ro],r=c.r,h=dispHue(c,ro),g=c.g,wa=RM?.3:1,hunter=ro==='h',prow=hunter?.16:0,lod=r/px<6;
+  const sil=a=>{const ca=Math.cos(a);return ca>0?1+prow*ca*ca*ca:1}; // the outline's radius at angle a (no wobble), per r
   ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.a);
   // flagella
   if(g.speed>0){
@@ -1000,35 +1015,46 @@ function drawCell(c,px){
     for(let i=0;i<n;i++){const off=(i-(n-1)/2)*r*.32;ctx.beginPath();ctx.moveTo(-r*.9,off);
       for(let k=1;k<=12;k++){const u=k/12;ctx.lineTo(-r*.9-u*len,off+Math.sin(c.wob*5-u*7+i*1.7)*r*.2*u*wa)}ctx.stroke()}
   }
-  // spines
+  // spines, rooted on the outline (a hunter's prow too)
   if(g.spikes>0){
     const n=8+g.spikes*3,L=r*(.16+.09*g.spikes);
     ctx.strokeStyle=hsl(h,35,26,.85);ctx.lineWidth=Math.max(px,r*.05);ctx.beginPath();
-    for(let i=0;i<n;i++){const a=i/n*TAU+.2;ctx.moveTo(Math.cos(a)*r*.93,Math.sin(a)*r*.93);ctx.lineTo(Math.cos(a)*(r+L),Math.sin(a)*(r+L))}
+    for(let i=0;i<n;i++){const a=i/n*TAU+.2,ca=Math.cos(a),sa=Math.sin(a),q=r*sil(a);ctx.moveTo(ca*q*.93,sa*q*.93);ctx.lineTo(ca*(q+L),sa*(q+L))}
     ctx.stroke();
   }
   // membrane
   ctx.beginPath();
-  const NP=lowFx?16:28;for(let k=0;k<=NP;k++){const a=k/NP*TAU,rr=r*(1+(.045*Math.sin(a*3+c.wob*1.7)+.03*Math.sin(a*5-c.wob*2.3))*wa);k?ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr):ctx.moveTo(rr,0)}
+  const NP=lowFx?16:28;for(let k=0;k<=NP;k++){const a=k/NP*TAU,ca=Math.cos(a),rr=r*(1+(.045*Math.sin(a*3+c.wob*1.7)+.03*Math.sin(a*5-c.wob*2.3))*wa+(ca>0?prow*ca*ca*ca:0));k?ctx.lineTo(ca*rr,Math.sin(a)*rr):ctx.moveTo(rr,0)}
   ctx.closePath();
-  ctx.fillStyle=hsl(h,58,60,.3);ctx.fill();
-  ctx.strokeStyle=hsl(h,55,32,.95);ctx.lineWidth=Math.max(px*1.2,r*.07);ctx.stroke();
-  if(g.armor>0){ctx.save();ctx.setLineDash([r*.42,r*.12]);ctx.lineWidth=r*(.05+.035*g.armor);ctx.strokeStyle=hsl(h,30,24,.7);ctx.beginPath();ctx.arc(0,0,r*.86,0,TAU);ctx.stroke();ctx.restore()}
+  ctx.fillStyle=hsl(h,R.f[0],R.f[1],R.f[2]);ctx.fill();
+  ctx.strokeStyle=hsl(h,R.s[0],R.s[1],.95);ctx.lineWidth=Math.max(px*(hunter?1.8:1.2),r*R.w);ctx.stroke();
+  // plating: 7+level tan theca plates sitting on the membrane, thicker per level (a bronze segmented rim; a dashed ring
+  // inside the membrane read as a thicker outline at phone size). On a hunter they follow the prow.
+  if(g.armor>0){const n=7+g.armor,w=Math.max(px*1.6,r*(.07+.04*g.armor)),q=r+w*.5;
+    ctx.lineCap='butt';ctx.strokeStyle='rgba(150,112,52,.85)';ctx.lineWidth=w;ctx.beginPath();
+    for(let i=0;i<n;i++){const a0=i/n*TAU+.15,a1=a0+TAU/n*.78;
+      if(prow)for(let j=0;j<=4;j++){const a=a0+(a1-a0)*j/4,qq=r*sil(a)+w*.5;j?ctx.lineTo(Math.cos(a)*qq,Math.sin(a)*qq):ctx.moveTo(Math.cos(a)*qq,Math.sin(a)*qq)}
+      else{ctx.moveTo(Math.cos(a0)*q,Math.sin(a0)*q);ctx.arc(0,0,q,a0,a1)}}
+    ctx.stroke()}
   // granules
-  ctx.fillStyle=hsl(h,50,35,.35);ctx.beginPath();
-  for(const[dx,dy]of c.dots){ctx.moveTo(dx*r+r*.07,dy*r);ctx.arc(dx*r,dy*r,r*.07,0,TAU)}ctx.fill();
-  // chloroplasts
-  if(g.photo>0){ctx.fillStyle=COL.algae;ctx.globalAlpha=.9;ctx.beginPath();
-    for(let i=0;i<g.photo*2+1;i++){const[dx,dy]=c.dots[i%7];ctx.moveTo(dx*r*1.1+r*.12,dy*r*1.1);ctx.ellipse(dx*r*1.1,dy*r*1.1,r*.12,r*.07,i,0,TAU)}ctx.fill();ctx.globalAlpha=1}
-  // nucleus
-  ctx.fillStyle=hsl(h,55,26,.6);ctx.beginPath();ctx.ellipse(-r*.15,0,r*.3,r*.25,0,0,TAU);ctx.fill();
-  ctx.fillStyle=hsl(h,55,18,.6);ctx.beginPath();ctx.arc(-r*.12,-r*.04,r*.08,0,TAU);ctx.fill();
-  // eyespot
-  if(g.eye>0){ctx.fillStyle=COL.eyespot;ctx.beginPath();ctx.arc(r*.55,-r*.18,r*(.08+.035*g.eye),0,TAU);ctx.fill()}
-  // jaws
-  if(g.jaws>0){const L=1.12+.08*g.jaws;ctx.strokeStyle=hsl(h,45,20,.95);ctx.lineWidth=Math.max(px,r*(.07+.02*g.jaws));ctx.lineCap='round';
+  if(!lod){ctx.fillStyle=hsl(h,50,35,.35);ctx.beginPath();
+    for(const[dx,dy]of c.dots){ctx.moveTo(dx*r+r*.07,dy*r);ctx.arc(dx*r,dy*r,r*.07,0,TAU)}ctx.fill()}
+  // chloroplasts: photo+1 plastids, deeper green than free algae, at least 2.2 px long
+  if(g.photo>0){const ea=Math.max(r*.17,px*2.2),eb=ea*.6;ctx.fillStyle='#5f8a1c';ctx.globalAlpha=.95;ctx.beginPath();
+    for(let i=0;i<g.photo+1;i++){const[dx,dy]=c.dots[i%7];ctx.moveTo(dx*r*.95+ea,dy*r*.95);ctx.ellipse(dx*r*.95,dy*r*.95,ea,eb,i,0,TAU)}ctx.fill();ctx.globalAlpha=1}
+  // nucleus; kin and you: a brass nucleolus (drawn at any size: it is a role mark)
+  if(!lod){ctx.fillStyle=hsl(h,55,26,.6);ctx.beginPath();ctx.ellipse(-r*.15,0,r*.3,r*.25,0,0,TAU);ctx.fill();
+    if(ro!=='k'){ctx.fillStyle=hsl(h,55,18,.6);ctx.beginPath();ctx.arc(-r*.12,-r*.04,r*.08,0,TAU);ctx.fill()}}
+  if(ro==='k'){ctx.fillStyle=COL.brass;ctx.beginPath();ctx.arc(-r*.12,-r*.04,Math.max(r*.07,px*1.2),0,TAU);ctx.fill()}
+  // eyespot: a pale rim so it reads as an eye at a few px
+  if(g.eye>0){const er=Math.max(r*(.08+.035*g.eye),px*(1.1+.45*g.eye));ctx.fillStyle='#fff6';ctx.beginPath();ctx.arc(r*.55,-r*.18,er+px*.8,0,TAU);ctx.fill();
+    ctx.fillStyle=COL.eyespot;ctx.beginPath();ctx.arc(r*.55,-r*.18,er,0,TAU);ctx.fill()}
+  // jaws: longer and thicker per level (and past a hunter's prow); level III adds an inner tooth on each mandible
+  if(g.jaws>0){const L=1.12+prow*.9+.13*g.jaws;ctx.strokeStyle=hsl(h,45,14,.95);ctx.lineWidth=Math.max(px*(1+.35*g.jaws),r*(.07+.03*g.jaws));ctx.lineCap='round';
     const chomp=Math.sin(c.wob*3)*.06*wa;
-    ctx.beginPath();for(const s of[-1,1]){ctx.moveTo(r*.78,s*r*.38);ctx.quadraticCurveTo(r*(L+.05),s*r*(.42+chomp),r*L,s*r*(.07+chomp))}ctx.stroke()}
+    ctx.beginPath();for(const s of[-1,1]){ctx.moveTo(r*.78,s*r*.38);ctx.quadraticCurveTo(r*(L+.05),s*r*(.42+chomp),r*L,s*r*(.07+chomp));
+      if(g.jaws>2){const mx=.22+.75*L,my=.3225+.75*chomp;ctx.moveTo(r*mx,s*r*my);ctx.lineTo(r*(mx-.08),s*r*(my-.2))}}
+    ctx.stroke()}
   if(c.flash>0){ctx.strokeStyle=COL.danger;ctx.globalAlpha=c.flash/.15;ctx.lineWidth=Math.max(px*2,r*.08);ctx.beginPath();ctx.arc(0,0,r*1.04,0,TAU);ctx.stroke();ctx.globalAlpha=1}
   ctx.restore();
 }
@@ -1040,44 +1066,70 @@ function drawWake(){
   if(RM){ctx.fillStyle=COL.brass;ctx.globalAlpha=.2;ctx.beginPath();ctx.arc(p.x,p.y,p.r*1.3,0,TAU);ctx.fill();ctx.globalAlpha=1;return}
   const v=Math.hypot(p.vx,p.vy);if(v<15)return;
   const ux=p.vx/v,uy=p.vy/v,gap=Math.min(p.r*.8,v*.045),k=Math.min(1,p.burst/.6);
-  ctx.fillStyle=hsl(p.hue,50,46,1);
+  ctx.fillStyle=hsl(dispHue(p),50,46,1);
   for(let i=4;i>=1;i--){ctx.globalAlpha=.24*k*(1-i/5);ctx.beginPath();ctx.arc(p.x-ux*gap*i,p.y-uy*gap*i,p.r*(1-.1*i),0,TAU);ctx.fill()}
   ctx.globalAlpha=1;
 }
+// Markers differ by shape, not only by colour (red and brass turn the same olive under deuteranopia, dE 9.6), and they
+// draw with whatever ctx is current, in world units (px = world units per screen pixel), so a portrait can reuse them.
+// Danger, a cell that can eat you: a solid red ring with 6 outward barbs, slowly turning (static under reduced motion).
+// w scales the line (an emphasised mark).
+function drawDangerMark(x,y,r,px,w=1){
+  const R0=r+px*6,R1=R0+px*6,a0=RM?0:t*.8;
+  ctx.save();ctx.setLineDash([]);ctx.strokeStyle='#c8321f';ctx.globalAlpha=.9;ctx.lineWidth=px*2.2*w;ctx.beginPath();
+  ctx.moveTo(x+R0,y);ctx.arc(x,y,R0,0,TAU);
+  for(let i=0;i<6;i++){const a=i/6*TAU+a0,ca=Math.cos(a),sa=Math.sin(a);ctx.moveTo(x+ca*R0,y+sa*R0);ctx.lineTo(x+ca*R1,y+sa*R1)}
+  ctx.stroke();ctx.restore();
+}
+// Prey you can eat (shown with an Eyespot): four brass corner brackets, like a targeting reticle
+function drawPreyMark(x,y,r,px){
+  const R0=r+px*5,k=px*5;
+  ctx.save();ctx.setLineDash([]);ctx.strokeStyle=COL.brass;ctx.globalAlpha=.95;ctx.lineWidth=px*2;ctx.lineCap='butt';ctx.lineJoin='miter';ctx.beginPath();
+  for(const[sx,sy]of[[-1,-1],[1,-1],[1,1],[-1,1]]){ctx.moveTo(x+sx*R0,y+sy*(R0-k));ctx.lineTo(x+sx*R0,y+sy*R0);ctx.lineTo(x+sx*(R0-k),y+sy*R0)}
+  ctx.stroke();ctx.restore();
+}
 function drawCells(px){
   const vis=cells.filter(c=>inView(c.x,c.y,c.r*2.5)).sort((a,b)=>a.r-b.r);
+  // the spawn shield (a new lineage, a resume, an heir): a soft brass halo under the player, fading as it runs out
+  if(player&&player.shield>0){ctx.fillStyle=COL.brass;ctx.globalAlpha=.18*Math.min(1,player.shield/.5);ctx.beginPath();ctx.arc(player.x,player.y,player.r+px*7,0,TAU);ctx.fill();ctx.globalAlpha=1}
   drawWake();
   for(const c of vis)drawCell(c,px);
   if(!player)return;
   const warn=player.sense*(player.g.eye?1.8:1);
-  ctx.lineWidth=px*1.5;
   for(const c of vis){
     if(c===player)continue;
     const d=Math.hypot(c.x-player.x,c.y-player.y);
-    if(canEat(c,player)&&d<warn){ctx.strokeStyle=COL.danger;ctx.globalAlpha=.85;ctx.setLineDash([px*5,px*4]);ctx.beginPath();ctx.arc(c.x,c.y,c.r+px*6,0,TAU);ctx.stroke()}
-    else if(player.g.eye>0&&canEat(player,c)&&d<warn){ctx.strokeStyle=COL.brass;ctx.globalAlpha=.9;ctx.setLineDash([]);ctx.beginPath();ctx.arc(c.x,c.y,c.r+px*4,0,TAU);ctx.stroke()}
+    if(canEat(c,player)&&d<warn)drawDangerMark(c.x,c.y,c.r,px);
+    else if(player.g.eye>0&&canEat(player,c)&&d<warn)drawPreyMark(c.x,c.y,c.r,px);
   }
-  ctx.setLineDash([]);ctx.globalAlpha=1;
-  // player marker
-  ctx.save();ctx.translate(player.x,player.y);ctx.rotate(t*.6);ctx.strokeStyle=player.shield>0?COL.brass:COL.fink;ctx.globalAlpha=player.shield>0?.9:.35;
-  ctx.setLineDash([px*6,px*5]);ctx.lineWidth=px*1.5;ctx.beginPath();ctx.arc(0,0,player.r+px*9+(player.g.spikes?player.r*.4:0),0,TAU);ctx.stroke();ctx.restore();
+  // player marker: a dashed ring, turning
+  const mr=player.r+px*9+(player.g.spikes?player.r*.4:0);
+  ctx.save();ctx.translate(player.x,player.y);ctx.rotate(t*.6);ctx.strokeStyle=COL.fink;ctx.globalAlpha=.55;
+  ctx.setLineDash([px*6,px*5]);ctx.lineWidth=px*1.5;ctx.beginPath();ctx.arc(0,0,mr,0,TAU);ctx.stroke();ctx.restore();
+  // 'you' over the player for 3 s after a lineage starts, resumes or passes to an heir (fading over the last half second)
+  if(youT>0){ctx.globalAlpha=Math.min(1,youT/.5);fieldText('you',player.x,player.y-mr-px*4,px,COL.brass);ctx.globalAlpha=1}
 }
 function drawParts(px){
   for(const p of parts){
     if(!inView(p.x,p.y,40))continue;ctx.globalAlpha=Math.min(1,p.life/p.max*1.5);
-    if(p.txt){ // in the floater's own colour (brass darkened to stay readable), over a field-coloured halo
-      ctx.font=`${p.fw||500} ${(p.fs||12)*px}px "IBM Plex Mono",ui-monospace,monospace`;ctx.textAlign='center';
-      ctx.lineJoin='round';ctx.lineWidth=3*px;ctx.strokeStyle=COL.field;ctx.strokeText(p.txt,p.x,p.y);
-      ctx.fillStyle=p.col===COL.brass?INK_BRASS:p.col||COL.fink;ctx.fillText(p.txt,p.x,p.y)}
+    if(p.txt)fieldText(p.txt,p.x,p.y,px,p.col,p.fs||12,p.fw||500); // the floater's own colour over a field halo
     else{ctx.fillStyle=p.col;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,TAU);ctx.fill()}
   }
   ctx.globalAlpha=1;
 }
+// text on the field, centred at world (x,y): fs screen px, in col (brass darkened to stay readable) over a
+// field-coloured halo. The floaters and the 'you' label
+function fieldText(txt,x,y,px,col,fs=12,fw=500){
+  ctx.font=`${fw} ${fs*px}px "IBM Plex Mono",ui-monospace,monospace`;ctx.textAlign='center';
+  ctx.lineJoin='round';ctx.lineWidth=3*px;ctx.strokeStyle=COL.field;ctx.strokeText(txt,x,y);
+  ctx.fillStyle=col===COL.brass?INK_BRASS:col||COL.fink;ctx.fillText(txt,x,y);
+}
+// in screen space, under the cells (between the food and the cells, at 70%): it used to paint over them
 function drawScaleBar(s){
   const opts=[5,10,20,25,50,100,200,500];let L=opts[0];
   for(const o of opts)if(o*s<=FR*.3)L=o;
   const x=CX-FR*.52,y=CY+FR*.62,w=L*s;
-  ctx.fillStyle=COL.fink;ctx.globalAlpha=.8;ctx.fillRect(x,y,w,3);ctx.fillRect(x,y-3,1.5,9);ctx.fillRect(x+w-1.5,y-3,1.5,9);
+  ctx.fillStyle=COL.fink;ctx.globalAlpha=.7;ctx.fillRect(x,y,w,3);ctx.fillRect(x,y-3,1.5,9);ctx.fillRect(x+w-1.5,y-3,1.5,9);
   ctx.font='500 11px "IBM Plex Mono",ui-monospace,monospace';ctx.textAlign='left';ctx.fillText(L+' µm',x,y-7);ctx.globalAlpha=1;
 }
 function drawEdgeArrows(){
@@ -1105,13 +1157,14 @@ function render(){
       const sx=CX+bx*FR/700,sy=CY+by*FR/700;ctx.globalAlpha=b.a;ctx.beginPath();ctx.arc(sx,sy,b.r*FR,0,TAU);ctx.fill()}
     ctx.globalAlpha=1;
   }
-  ctx.save();ctx.translate(CX,CY);ctx.scale(s,s);ctx.translate(-cam.x,-cam.y);
-  drawGrid(px);drawRim(px);drawFood();drawCells(px);drawParts(px);
-  ctx.restore();
+  const world=()=>{ctx.save();ctx.translate(CX,CY);ctx.scale(s,s);ctx.translate(-cam.x,-cam.y)};
+  world();drawGrid(px);drawRim(px);drawFood();ctx.restore();
+  drawScaleBar(s); // screen space, under the cells
+  world();drawCells(px);drawParts(px);ctx.restore();
   ctx.restore();
   ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(vigLayer,0,0);ctx.setTransform(DPR,0,0,DPR,0,0);
   // screen-space drawing after the frame blit is not clipped: it must stay inside radius FR (the joystick excepted)
-  drawEdgeArrows();drawScaleBar(s);
+  drawEdgeArrows();
   drawJoy();
 }
 // render() outside the loop (after a resize), unwinding the save()s a throw skipped like frame() does
@@ -1124,8 +1177,8 @@ function drawSpark(){
   if(hist.length<2)return;
   const mx=Math.max(10,...hist.map(p=>Math.max(p.g,p.h,p.k)));
   for(const[key,col]of[['g',COL.g],['h',COL.h],['k',COL.k]]){
-    sx.strokeStyle=col;sx.lineWidth=1.5;sx.beginPath();
-    hist.forEach((p,i)=>{const x=i/(80-1)*w,y=h-2-(p[key]/mx)*(h-5);i?sx.lineTo(x,y):sx.moveTo(x,y)});sx.stroke();
+    sx.strokeStyle=col;sx.lineWidth=1.5;sx.setLineDash(key==='h'?[3,2]:[]);sx.beginPath(); // hunters dashed: their violet and the grazers' blue merge under deuteranopia
+    hist.forEach((p,i)=>{const x=i/(80-1)*w,y=h-2-(p[key]/mx)*(h-5);i?sx.lineTo(x,y):sx.moveTo(x,y)});sx.stroke();sx.setLineDash([]);
     const i=hist.length-1,x=i/(79)*w,y=h-2-(hist[i][key]/mx)*(h-5);sx.fillStyle=col;sx.beginPath();sx.arc(x,y,2.2,0,TAU);sx.fill();
   }
 }
