@@ -87,6 +87,11 @@ button{touch-action:manipulation}
 .tip .tc{color:var(--ink-dim)}
 .ph{white-space:nowrap}
 @keyframes tipin{from{opacity:0}}
+/* coaching nudges (update(): nudge()): a brass pulse on Burst when the first threat shows, and on the affordable traits
+   every 20 s after the first divide until the first evolve. 1 s x 4; reduced motion: a static 2 px outline for those 4 s.
+   Before .up.armed, .up.nope and #burst's own animations, so a tap's feedback wins */
+@keyframes nudge{50%{box-shadow:0 0 0 3px rgba(201,163,90,.6)}}
+.up.nudge,#burst.nudge{animation:nudge 1s 4}
 /* the first tap on a trait (phones): it explains and arms; the next tap evolves */
 .up.armed{animation:armed 1.1s ease-in-out infinite alternate;box-shadow:inset 0 0 0 1px var(--brass),inset 0 0 12px rgba(201,163,90,.45)}
 @keyframes armed{to{box-shadow:inset 0 0 0 1px var(--brass),inset 0 0 4px rgba(201,163,90,.12)}}
@@ -112,8 +117,9 @@ button{touch-action:manipulation}
 .up.nope .cost{animation:bad .6s}
 .dna-sm.bad{animation:bad .6s}
 @keyframes bad{0%,45%{color:var(--danger)}}
-.ups{display:flex;gap:6px;overflow-x:auto;min-width:0;pointer-events:auto;scrollbar-width:thin;padding-bottom:2px;
-  padding-inline:4px;margin-inline:-4px} /* room for a shaking end button, so it can't flash a scrollbar */
+.ups{display:flex;gap:6px;overflow-x:auto;min-width:0;pointer-events:auto;scrollbar-width:thin;
+  padding:3px 4px;margin:-3px -4px -1px} /* room for a shaking end button (so it can't flash a scrollbar) and for the nudge's
+  3 px ring, which the scrolling strip would clip: the negative margins cancel the padding, so the tray doesn't move */
 button{font:inherit;color:inherit}
 .up{pointer-events:auto;flex:0 0 auto;width:120px;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 9px;display:grid;gap:4px;cursor:pointer;transition:border-color .15s,background .15s}
 .up:hover:not(:disabled){background:#18252b}
@@ -147,17 +153,25 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 .overlay{position:fixed;inset:0;z-index:5;display:grid;place-items:center;background:rgba(6,10,12,.45);
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
   padding-block:calc(env(safe-area-inset-top,0px) + 16px) calc(env(safe-area-inset-bottom,0px) + 16px)}
-/* max-height: the card's padding and border (26+22+2, 20+18+2 on phones) come on top of the content-box height, so
-   'max-height:100%' let a tall card (the pause guide; the title card in landscape) run 4-9 px past the top and bottom of
-   the screen. Now it fits and scrolls inside itself, its sticky .actions in view */
-.card{width:100%;max-width:470px;max-height:calc(100% - 50px);overflow:auto;touch-action:pan-y;background:var(--panel-solid);border:1px solid var(--line);border-radius:12px;padding:26px 26px 22px;display:grid;gap:14px}
+/* border-box: the card's padding and border (26+22+2, 20+18+2 on phones) used to come on top of width:100% and
+   max-height:100%, so on phones every card ran 3 px past both screen edges (396 px wide on a 390 px screen, its corners
+   cut off) and a tall card past the top and bottom. Now it sits inside the overlay's 16 px gutters and scrolls inside
+   itself, its sticky .actions in view. max-width 524 keeps the wide card exactly as wide as before (470 + 54) */
+.card{box-sizing:border-box;width:100%;max-width:524px;max-height:100%;overflow:auto;touch-action:pan-y;background:var(--panel-solid);border:1px solid var(--line);border-radius:12px;padding:26px 26px 22px;display:grid;gap:14px}
 .card h1,.card h2{font-family:var(--f-display);font-weight:700;line-height:1.05;letter-spacing:-.01em;text-wrap:balance;margin:0}
 .card h1{font-size:clamp(28px,7vw,38px)}
 .card h2{font-size:clamp(24px,6vw,30px)}
 .card p{margin:0;line-height:1.55;font-size:14.5px;max-width:62ch}
-.how{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:13.5px;line-height:1.4}
-.how dt{font-family:var(--f-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--brass);padding-top:2px}
-.how dd{margin:0;color:var(--ink)}
+.card .tgoal{font-size:15px;line-height:1.45;text-wrap:balance}
+.lbl{font-family:var(--f-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--brass);margin-right:4px;vertical-align:1px}
+/* the title card and the pause card's Field guide: what you see in the dish. Each row is a portrait drawn by the game's
+   own drawing code (portrait(): the cell, the algae, the danger mark as they look in the field) and one line */
+.legend{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.legend li{display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:10px;align-items:center;font-size:13px;line-height:1.35;color:var(--ink-dim)}
+.legend b{font-weight:600;color:var(--ink)}
+.legend canvas{display:block;width:28px;height:28px}
+.only-sm{display:none} /* the compact layouts' wording (phones); .hide-sm is everyone else's */
+#fieldGuide .legend{gap:0} /* in the pause card its rows take the guide list's rules and padding, like the traits above */
 .stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0}
 .stats div{border-top:1px solid var(--line);padding-top:6px}
 .stats dt{font-size:11.5px;color:var(--ink-dim)}
@@ -197,6 +211,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .up:disabled .cost::after{display:none}
   #burst{width:auto;min-height:44px}
   .hide-sm{display:none}
+  .only-sm{display:inline}
   /* one 11 px line (13.2 px): on short phones the Census panel then stays no taller than the Specimen panel */
   #dominant{display:block;height:auto;white-space:nowrap;text-overflow:ellipsis;font-size:11px;line-height:1.2}
 }
@@ -216,11 +231,15 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .tray{grid-auto-rows:1fr}
   .up{min-height:44px}
   .bar{grid-template-columns:1fr;gap:3px}
-  .card{padding:20px 18px 18px;gap:12px;max-height:calc(100% - 40px)}
+  .card{padding:20px 18px 18px;gap:12px}
+  /* the title card fits a 360x640 phone with a save and a record (Continue, Begin a new lineage, the best line) */
+  #ovTitle .card{gap:10px}
+  #ovTitle .legend{gap:5px}
+  .legend li{line-height:1.3}
   .actions{bottom:-18px;margin-bottom:-18px;padding-bottom:18px}
   .card p{font-size:14px}
-  .how{font-size:13px}
 }
+@media (max-height:520px){#ovTitle .legend li:last-child{display:none}}
 @media (max-height:520px) and (min-width:561px){
   .hud{padding-block:calc(env(safe-area-inset-top,0px) + 8px) calc(env(safe-area-inset-bottom,0px) + 8px)}
   .tray{grid-template-columns:repeat(8,minmax(0,1fr));gap:5px}
@@ -277,8 +296,9 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .top>.panel:last-child>.panel-head{grid-column:2;grid-row:1}
   .top>.panel:last-child>#dominant{grid-column:1;grid-row:1;align-self:center}
 }
-@media (hover:none) and (pointer:coarse){.up kbd,#burst small{display:none}#burst.low>.blow{display:block}}
+@media (hover:none) and (pointer:coarse){.up kbd,#burst small,.keys{display:none}#burst.low>.blow{display:block}}
 @media (prefers-reduced-motion:reduce){.toast{animation:none}.fill{transition:none}.up.nope{animation:none}#dominant{transition:none}
+  .up.nudge,#burst.nudge{animation:none;outline:2px solid var(--brass);outline-offset:1px}
   .tip{animation:none}.up.armed{animation:none;box-shadow:none;outline:2px solid var(--brass);outline-offset:-3px} /* a static outline */
   #burst.nope{animation:none}#burst .bcd{transition:none}#burst.fired{animation:firedRM .4s step-end} /* a static brief tint */}
 </style>
@@ -322,14 +342,18 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   <div class="card" role="dialog" aria-modal="true" aria-labelledby="titleHead">
     <div class="eyebrow">A drop of pond water · 40× objective</div>
     <h1 id="titleHead">Under the Coverslip</h1>
-    <p>You begin as a single cell. Eat algae, divide, and spend the DNA you earn to evolve new traits. Every other organism in the dish is evolving too, by mutation and selection.</p>
-    <dl class="how">
-      <dt>Steer</dt><dd>Point the mouse, or use WASD. On a phone, touch anywhere and drag like a joystick.</dd>
-      <dt>Burst</dt><dd>Space or the Burst button gives a short dash for 6 energy.</dd>
-      <dt>Divide</dt><dd>When your energy bar fills, you split. You earn DNA and an offspring swims off.</dd>
-      <dt>Evolve</dt><dd>Spend DNA in the tray, or press 1 to 7. Gold-edged traits are affordable.</dd>
-      <dt>Survive</dt><dd>Cells with jaws eat anything 12% smaller. If you die, you carry on as one of your offspring. It keeps your traits but is one size smaller.</dd>
-    </dl>
+    <p class="tgoal"><span class="lbl">Goal</span> Grow your lineage to Leviathan size: evolve your Membrane to IX.</p>
+    <p>Drag anywhere to swim.</p>
+    <p class="small hide-sm keys">Mouse or WASD on a computer. Space bursts, P pauses, 1–7 evolve.</p>
+    <!-- the legend: the same rows are copied into the pause card's Field guide; each canvas is a portrait() of data-pt -->
+    <ul class="legend" id="legend" aria-label="What you see in the dish">
+      <li><canvas data-pt="you" aria-hidden="true"></canvas><span><b>You</b> and your pink offspring. If you die, you carry on as one of them.</span></li>
+      <li><canvas data-pt="algae" aria-hidden="true"></canvas><span><b>Eat green algae</b> to fill energy. Full energy: you divide and earn DNA.</span></li>
+      <li><canvas data-pt="grazer" aria-hidden="true"></canvas><span><b>Grazers</b> only eat algae.</span></li>
+      <li><canvas data-pt="hunter" aria-hidden="true"></canvas><span><b>Hunters</b> have jaws and eat cells 12% smaller.</span></li>
+      <li><canvas data-pt="danger" aria-hidden="true"></canvas><span><b>This ring</b> means that cell can eat you. Swim away or Burst.</span></li>
+      <li><canvas data-pt="dna" aria-hidden="true"></canvas><span><span class="only-sm"><b>DNA</b> buys traits in the tray. Tap a trait to read it; hold it to read it again.</span><span class="hide-sm"><b>Spend DNA</b> in the tray<span class="keys">, or press 1–7</span>.</span></span></li>
+    </ul>
     <p class="small" id="best"></p>
     <div class="actions"><button class="btn primary" id="resumeSaveBtn" type="button" hidden>Continue lineage</button><button class="btn primary" id="startBtn" type="button">Begin lineage</button><button class="btn upd" id="updBtn" type="button" hidden>Update ready · Reload</button></div>
   </div>
@@ -364,6 +388,10 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
       <p class="guide-loop" id="guideLoop"></p>
       <ul id="guideList"></ul>
     </section>
+    <section class="guide" id="fieldGuide" aria-label="Field guide">
+      <span class="eyebrow">Field guide</span>
+      <ul class="legend" id="legendP"></ul>
+    </section>
     <div class="actions"><button class="btn primary" id="resumeBtn" type="button">Resume</button></div>
   </div>
 </div>
@@ -371,7 +399,9 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 <script>
 (()=>{
 const $=id=>document.getElementById(id);
-const cv=$('dish'),ctx=cv.getContext('2d');
+const cv=$('dish');
+let ctx=cv.getContext('2d'); // every draw function uses this one: withCtx() swaps in another canvas's (the legend portraits)
+function withCtx(g,fn){const o=ctx;ctx=g;try{fn()}finally{ctx=o}}
 const rs=getComputedStyle(document.documentElement);
 const tok=n=>rs.getPropertyValue(n).trim();
 const COL={stage:tok('--stage'),field:tok('--field'),edge:tok('--field-edge'),fink:tok('--field-ink'),algae:tok('--algae'),meat:tok('--meat'),danger:tok('--danger'),brass:tok('--brass'),dim:tok('--ink-dim'),eyespot:tok('--eyespot'),line:tok('--line'),g:tok('--hud-grazer'),h:tok('--hud-hunter'),k:tok('--hud-kin')};
@@ -417,6 +447,13 @@ let algae=[],meat=[],cells=[],parts=[],blooms=[],player=null,mode='title',t=0,al
 const cam={x:0,y:0,v:430,ang:0};
 let dna=0,gen=1,kills=0,lineT=0,heirs=0,maxSeen={},won=false,paused=false,hints=0,migrantT=45,saveT=8,booted=false;
 let youT=0; // seconds the 'you' label still shows over the player (a new lineage, a resume, an heir taking over)
+// coaching (hints, saved): 1 the danger ring explained, 2 the first divide, 4 the first evolve, 8 the first migrant,
+// 16 the Jaws hint. coach(bit) also ORs the bit into 'coverslip-coached', which a new lineage starts from, so a player
+// is coached once per device, not once per lineage (a resumed lineage keeps its saved hints)
+const COACH_KEY='coverslip-coached';
+let coached=0;try{coached=(+localStorage.getItem(COACH_KEY))|0}catch(e){}
+function coach(bit){hints|=bit;if((coached&bit)===bit)return;coached|=bit;try{localStorage.setItem(COACH_KEY,String(coached))}catch(e){}}
+function coachedNow(){try{coached|=(+localStorage.getItem(COACH_KEY))|0}catch(e){}return coached} // another tab may have coached too
 let hist=[],histT=0,hudT=0,nextId=1;
 let errN=0,updErr=false; // frame errors so far; true while the last update() threw (saves are skipped then)
 // the census news line (news()): its two texts (wide HUD, compact HUD) and the lineT it came at; lastRivalNews: the lineT
@@ -436,6 +473,8 @@ function stageName(p){
   if(s<2)return'Protocell'; if(s<4)return'Microbe'; if(s<6)return p.g.jaws?'Hunter':'Grazer';
   if(s<8)return'Colossus'; if(s<9)return'Titan'; return'Leviathan';
 }
+// the stage after p's and the Membrane level that reaches it (the stage toast names it), or null at Leviathan
+function nextStage(p){const s=p.lv.size;return s<2?[2,'Microbe']:s<4?[4,p.g.jaws?'Hunter':'Grazer']:s<6?[6,'Colossus']:s<8?[8,'Titan']:s<9?[9,'Leviathan']:null}
 
 function randInDish(m){const a=rand(TAU),d=Math.sqrt(Math.random())*(DISH-m);return[Math.cos(a)*d,Math.sin(a)*d]}
 function spawnAlgae(){
@@ -485,7 +524,8 @@ function startLineage(){
   if(mode==='play'&&player)recordBest(gen,lineT);
   else{const sv=loadSave();if(sv&&sv.v===1)recordBest(sv.gen||0,sv.lineT||0)}
   initWorld();
-  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=0;migrantT=45;lastRivalNews=0;newsT=-1e9;youT=3;clearSave();
+  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=coachedNow();migrantT=45;lastRivalNews=0;newsT=-1e9;youT=3;clearSave();
+  unnudge();nudgeT=0;
   lastCensus=census();histT=1.5;
   let x=0,y=0;
   for(let i=0;i<80;i++){const b=blooms[i%blooms.length];x=b.x+rand(-60,60);y=b.y+rand(-60,60);if(i>40)[x,y]=randInDish(150);if(cells.every(c=>!c.g.jaws||Math.hypot(c.x-x,c.y-y)>380))break}
@@ -495,7 +535,7 @@ function startLineage(){
   cam.x=x;cam.y=y;cam.v=viewR();
   mode='play';paused=false;
   showOnly(null);hideTip();disarm();
-  toast('Eat the green algae to fill your energy.',{pri:2,ms:5000});
+  if(!(hints&2))toast('Eat the green algae to fill your energy.',{pri:2,ms:5000}); // until the first divide, on any lineage
   refreshHud(true);
 }
 function viewR(c=player){return c?150+c.r*6+c.g.eye*45:430} // the camera's view radius around c (the trait cards' 'Sight')
@@ -509,7 +549,8 @@ function spawnMigrant(){
   const g={speed:clamp(player.g.speed-(Math.random()<.5?1:0),0,MAX.speed),jaws:r>25?2:1,spikes:Math.random()<.3?1:0,armor:clamp(Math.floor(r/14),0,3),photo:0,eye:1};
   const c=makeCell(x,y,r,g,rand(285,315),{announce:5,stalk:30,migrant:true});
   c.en=c.maxEn*.4;cells.push(c);
-  toast('A larger hunter has drifted into the dish.',{pri:2});
+  if(hints&8)toast('A larger hunter has drifted into the dish.',{pri:2});
+  else{coach(8);toast('A larger hunter has drifted in. The red arrow at the edge points to it.',{pri:2,ms:5000})} // drawEdgeArrows, while announce>0
 }
 
 /* ---------- save & resume ---------- */
@@ -554,7 +595,7 @@ function restore(sv){
     // maximum would skip the news of a level one rival carries but that hasn't spread yet)
     const ms={};
     for(const k of GENES){let m=0;for(const c of nc)if(!c.isPlayer&&!c.kin&&c.g[k]>m)m=c.g[k];ms[k]=clamp(Math.round(num(sv.maxSeen&&sv.maxSeen[k],m)),0,MAX[k])}
-    cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;maxSeen=ms;lastRivalNews=0;newsT=-1e9;
+    cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;maxSeen=ms;lastRivalNews=0;newsT=-1e9;unnudge();nudgeT=0;
     dna=num(sv.dna,0);gen=Math.max(1,num(sv.gen,1));kills=num(sv.kills,0);lineT=num(sv.lineT,0);heirs=num(sv.heirs,0);won=!!sv.won;hints=num(sv.hints,0)|0;migrantT=num(sv.migrantT,45);
     player.shield=2;youT=3;cam.x=player.x;cam.y=player.y;cam.v=viewR();
     mode='play';paused=false;lastCensus=census();
@@ -596,7 +637,7 @@ function divide(){
   if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5}
   floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);youT=0; // the floater takes the 'you' label's place
   askPersist();
-  if(!(hints&2)){hints|=2;toast('You divided. Spend DNA in the tray to evolve.',{pri:2,ms:5000})}
+  if(!(hints&2)){coach(2);toast(touchUI()?'You earned DNA. Tap a gold-edged trait below.':'You earned DNA. Spend it in the tray, or press 1–7.',{pri:2,ms:5000})}
 }
 function kill(c,killer){
   if(c.dead)return;c.dead=true;
@@ -914,9 +955,27 @@ function update(dt){
   }
   if(mode==='play'&&player){const lo=player.en<player.maxEn*.15;if(lo&&!player.warned){player.warned=true;toast(player.g.jaws?'Starving. Hunt something or eat algae.':'Starving. Find algae soon.',{pri:2})}else if(player.en>player.maxEn*.4)player.warned=false}
   if(mode==='play'&&player){migrantT-=dt;if(migrantT<=0){migrantT=rand(70,110);spawnMigrant()}}
-  if(mode==='play'&&player&&!(hints&1)&&lineT>9){hints|=1;toast('Violet cells are hunters. Big ones can eat you.',{pri:2,ms:5000})}
+  if(mode==='play'&&player)coaching(dt);
   histT-=dt;
   if(histT<=0){histT=1.5;sample()}
+}
+// Coaching by event, once per device (coach()): the danger ring is explained the moment the first one is drawn (a cell
+// that can eat you, in view, inside the warn radius drawCells uses), and Burst pulses; after the first divide the
+// affordable traits pulse for 4 s every 20 s until the first evolve. Pulses end after 4 s of play (nudged: el -> lineT)
+const nudged=new Map();let nudgeT=0;
+function nudge(el,s=4){el.classList.remove('nudge');void el.offsetWidth;el.classList.add('nudge');nudged.set(el,lineT+s)}
+function unnudge(f){for(const[el]of nudged)if(!f||f(el)){el.classList.remove('nudge');nudged.delete(el)}}
+const touchUI=()=>COMPACT.matches||matchMedia('(hover:none) and (pointer:coarse)').matches; // tap wording, no keys
+function coaching(dt){
+  if(nudged.size)for(const[el,end]of nudged)if(lineT>=end){el.classList.remove('nudge');nudged.delete(el)}
+  if(!(hints&1)){const w=player.sense*(player.g.eye?1.8:1);
+    for(const c of cells)if(c!==player&&!c.dead&&canEat(c,player)&&inView(c.x,c.y,c.r*2.5)&&Math.hypot(c.x-player.x,c.y-player.y)<w){
+      coach(1);toast(touchUI()?'A red spiky ring means that cell can eat you. Swim away, or tap Burst (works while you steer).':
+        'A red spiky ring means that cell can eat you. Swim away, or press Space to Burst.',{pri:2,ms:5000});
+      nudge($('burst'));break}}
+  if((hints&2)&&!(hints&4)&&(nudgeT-=dt)<=0){ // none affordable yet: look again next step
+    const can=upBtns.filter((b,i)=>player.lv[UP[i].k]<MAX[UP[i].k]&&dna>=cost(UP[i]));
+    if(can.length){nudgeT=20;for(const b of can)nudge(b)}}
 }
 function census(){
   let g=0,h=0,k=0;const names={};
@@ -980,6 +1039,7 @@ function resize(){
   drawSpark();
   still=0;
   aqN=aqT=aqF=aqS=0; // frames around a resize (new canvas, new layers) say nothing about the device: start afresh
+  for(const id of['ovTitle','ovPause'])if(!$(id).hidden)drawPortraits($(id)); // the DPR may have changed
   // draw the new layout now: a resized canvas is blank, and the next drawn frame can be a few vsyncs away
   // (30 fps behind cards, none while paused)
   if(booted)paint();
@@ -1032,13 +1092,17 @@ function drawRim(px){
   ctx.globalAlpha=1;
 }
 function inView(x,y,r){const v=cam.v*1.05+r;return Math.abs(x-cam.x)<v&&Math.abs(y-cam.y)<v}
-function drawFood(){
+// algae: green blobs with a pale centre, batched in two paths (cull: only those in view; a portrait draws all of its own)
+function drawAlgae(list,cull){
   ctx.fillStyle=COL.algae;ctx.globalAlpha=.85;ctx.beginPath();
-  for(const f of algae){if(!inView(f.x,f.y,5))continue;ctx.moveTo(f.x+f.r*1.25,f.y);ctx.ellipse(f.x,f.y,f.r*1.25,f.r*.85,f.a,0,TAU)}
+  for(const f of list){if(cull&&!inView(f.x,f.y,5))continue;ctx.moveTo(f.x+f.r*1.25,f.y);ctx.ellipse(f.x,f.y,f.r*1.25,f.r*.85,f.a,0,TAU)}
   ctx.fill();
   ctx.fillStyle=COL.field;ctx.globalAlpha=.55;ctx.beginPath();
-  for(const f of algae){if(!inView(f.x,f.y,5))continue;ctx.moveTo(f.x+f.r*.3,f.y);ctx.arc(f.x,f.y,f.r*.3,0,TAU)}
-  ctx.fill();
+  for(const f of list){if(cull&&!inView(f.x,f.y,5))continue;ctx.moveTo(f.x+f.r*.3,f.y);ctx.arc(f.x,f.y,f.r*.3,0,TAU)}
+  ctx.fill();ctx.globalAlpha=1;
+}
+function drawFood(){
+  drawAlgae(algae,true);
   ctx.fillStyle=COL.meat;
   for(const m of meat){if(!inView(m.x,m.y,8))continue;ctx.globalAlpha=.8*Math.min(1,m.life/4);ctx.beginPath();
     for(let i=0;i<7;i++){const a=i/7*TAU+m.rot,rr=m.r*(.8+.25*Math.sin(i*2.3+m.rot));i?ctx.lineTo(m.x+Math.cos(a)*rr,m.y+Math.sin(a)*rr):ctx.moveTo(m.x+Math.cos(a)*rr,m.y+Math.sin(a)*rr)}
@@ -1126,9 +1190,9 @@ function drawWake(){
 // Markers differ by shape, not only by colour (red and brass turn the same olive under deuteranopia, dE 9.6), and they
 // draw with whatever ctx is current, in world units (px = world units per screen pixel), so a portrait can reuse them.
 // Danger, a cell that can eat you: a solid red ring with 6 outward barbs, slowly turning (static under reduced motion).
-// w scales the line (an emphasised mark).
-function drawDangerMark(x,y,r,px,w=1){
-  const R0=r+px*6,R1=R0+px*6,a0=RM?0:t*.8;
+// w scales the line (an emphasised mark); a0 sets the barbs' angle (a legend portrait holds them still).
+function drawDangerMark(x,y,r,px,w=1,a0=RM?0:t*.8){
+  const R0=r+px*6,R1=R0+px*6;
   ctx.save();ctx.setLineDash([]);ctx.strokeStyle='#c8321f';ctx.globalAlpha=.9;ctx.lineWidth=px*2.2*w;ctx.beginPath();
   ctx.moveTo(x+R0,y);ctx.arc(x,y,R0,0,TAU);
   for(let i=0;i<6;i++){const a=i/6*TAU+a0,ca=Math.cos(a),sa=Math.sin(a);ctx.moveTo(x+ca*R0,y+sa*R0);ctx.lineTo(x+ca*R1,y+sa*R1)}
@@ -1196,6 +1260,40 @@ function drawEdgeArrows(){
     ctx.beginPath();ctx.moveTo(8,0);ctx.lineTo(-5,-7);ctx.lineTo(-5,7);ctx.closePath();ctx.fill();ctx.restore();
   }
 }
+// A legend portrait (the title card, the pause card's Field guide): one subject drawn by the game's own drawing code into
+// a size x size CSS-px canvas at the screen's DPR, scaled to fill about 70% of it, on a disc of the lit field (the DNA dot
+// on the card itself). The cells are made with makeCell and never put in cells (nextId is restored); fixed angle, wobble
+// and granules, so a portrait is the same every time. Drawn when the card that holds it opens and on a resize
+// (drawPortraits), never per frame.
+const PT_DOTS=[[-.3,-.28],[.22,-.36],[.36,.12],[-.05,.38],[-.42,.16],[.12,-.05],[-.2,.02]];
+function portrait(cnv,kind,size){
+  const d=clamp(window.devicePixelRatio||1,1,3),n=Math.round(size*d);
+  if(cnv.width!==n||cnv.height!==n){cnv.width=n;cnv.height=n}
+  cnv.style.width=cnv.style.height=size+'px';
+  const g=cnv.getContext('2d');if(!g)return;
+  g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,n,n);g.setTransform(d,0,0,d,0,0);
+  const h=size/2;
+  if(kind==='dna'){g.fillStyle=COL.brass;g.beginPath();g.arc(h,h,size*.2,0,TAU);g.fill();return} // the tray's DNA dot
+  const gr=g.createRadialGradient(h,h*.8,size*.04,h,h,h);gr.addColorStop(0,COL.field);gr.addColorStop(1,COL.edge);
+  g.fillStyle=gr;g.beginPath();g.arc(h,h,h,0,TAU);g.fill();
+  const id0=nextId,lf=lowFx;
+  const cell=(r,gn,hue,o)=>{const c=makeCell(0,0,r,{speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0,...gn},hue,{a:0,wob:0,...o});c.dots=PT_DOTS;return c};
+  // fit: the subject's extent in units of its radius ([left, right, half height]) fills 70% of the disc's width
+  const fit=(r,[x0,x1,y],k=.7)=>{const s=k*size/(r*Math.max(x1-x0,2*y));g.translate(h-(x0+x1)/2*r*s,h);g.scale(s,s);return 1/s};
+  try{lowFx=false;withCtx(g,()=>{
+    if(kind==='algae'){fit(3,[-2.3,2.3,2.3]);
+      drawAlgae([{x:-3.2,y:2.4,r:3.2,a:.5},{x:3.4,y:1.2,r:2.7,a:2.2},{x:.4,y:-3.6,r:2.9,a:1.2}],false);return}
+    if(kind==='you'){const c=cell(10,{},ROLE0.k,{isPlayer:true});drawCell(c,fit(10,[-1.08,1.08,1.08]));return}
+    if(kind==='grazer'){const c=cell(9,{},ROLE0.g);drawCell(c,fit(9,[-1.08,1.08,1.08]));return}
+    const c=cell(12,{jaws:1},ROLE0.h);
+    if(kind==='hunter'){drawCell(c,fit(12,[-1.08,1.45,1.08],.74));return}
+    // danger: the hunter inside its mark. In the field the mark's offsets are screen px (6 to the ring, 6 more to the
+    // barb tips: a 13 px hunter's ring at 1.45 r); here they are r/12 each: the ring at 1.5 r, clear of the jaws (1.39 r)
+    drawCell(c,fit(12,[-2,2,2],.82));drawDangerMark(0,0,12,12/12,1.3,Math.PI/6);
+  })}finally{lowFx=lf;nextId=id0}
+}
+// a portrait that fails (a canvas the browser won't give a context) must never stop a card opening or a resize
+function drawPortraits(root){if(root)for(const cnv of root.querySelectorAll('canvas[data-pt]'))try{portrait(cnv,cnv.dataset.pt,28)}catch(e){}}
 function render(){
   ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(bgLayer,0,0);
   ctx.setTransform(DPR,0,0,DPR,0,0);
@@ -1358,11 +1456,12 @@ function buy(i){
   if(dna<c){nope(i);return false}
   const pv=traitPreview(i),before=stageName(player);
   dna-=c;player.lv[u.k]++;applyLv(player);disarm();
+  if(!(hints&4)){coach(4);unnudge(el=>el!==$('burst'))} // the first evolve ends the traits' nudges
   const nm=plain(u.name),L=ROMAN[player.lv[u.k]];
   floater(player.x,player.y-player.r-8,`${nm} ${L}`,COL.brass,13,600);youT=0; // the floater takes the 'you' label's place
-  if(u.k==='jaws'&&player.lv.jaws===1)toast('Jaws: you can eat cells 12% smaller than you.',{pri:2,ms:5000});
+  if(u.k==='jaws'&&player.lv.jaws===1&&!(hints&16)){coach(16);toast('Jaws: you can eat cells 12% smaller than you.',{pri:2,ms:5000})}
   const after=stageName(player);
-  if(after!==before)toast('Stage reached: '+after);
+  if(after!==before){const nx=nextStage(player);toast(`Stage reached: ${after}.`+(nx?` Next: ${nx[1]} at Membrane ${ROMAN[nx[0]]}.`:''))}
   if(player.lv.size>=9&&!won){won=true;paused=true;$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));showOnly('ovWin');$('contBtn').focus()}
   refreshHud(true);
   if(!paused){
@@ -1380,7 +1479,7 @@ function renderGuide(){
   const rows=UP.map((u,i)=>{const lv=player.lv[u.k],mx=lv>=MAX[u.k],c=mx?0:cost(u);
     return `<li data-k="${u.k}"><span class="gr-h">${plain(u.name)}<span class="gr-l">${lv}/${MAX[u.k]}</span></span><span class="gr-c${!mx&&dna>=c?' can':''}">${mx?'max':c+' DNA'}</span>`+
       `<span class="gr-fx">${fxFull(u)}</span><span class="gr-n">${mx?'Fully evolved':`Next ${ROMAN[lv+1]}: ${pvHtml(traitPreview(i))}`}</span></li>`});
-  const touch=COMPACT.matches||matchMedia('(hover:none) and (pointer:coarse)').matches;
+  const touch=touchUI();
   rows.push(`<li data-k="burst"><span class="gr-h">Burst</span><span class="gr-c">${BURST_EN} energy</span><span class="gr-fx">Short dash at ${BURST_X===2?'double':BURST_X+'×'} speed for ${BURST_T} s. `+
     `Costs ${BURST_EN} energy, recharges in ${BURST_CD} s. ${touch?'Works while you steer: tap it with a second finger.':'Press Space, or click it.'}</span></li>`);
   $('guideList').innerHTML=rows.join('');
@@ -1486,7 +1585,7 @@ function askPersist(){if(!STANDALONE||askedPersist)return;askedPersist=true;try{
 const UPD_MSG='Update downloaded. It loads next time you open the game.';
 let updShown=false,updToast=false;
 function showOnly(id){for(const o of['ovTitle','ovOver','ovWin','ovPause'])$(o).hidden=o!==id;$('hud').inert=!!id;still=0;
-  if(id){wakeOff();dropBack();hideTip();disarm()}
+  if(id){wakeOff();dropBack();hideTip();disarm();drawPortraits($(id))}
   else if(mode==='play'){wakeOn();armBack();if(updToast){updToast=false;toast(UPD_MSG)}}
 }
 function togglePause(){
@@ -1535,9 +1634,10 @@ if(location.protocol!=='file:')try{
     document.addEventListener('visibilitychange',()=>{if(document.hidden)return;try{const c=navigator.serviceWorker.controller;if(c)c.postMessage('check')}catch(e){}});
   }
 }catch(e){}
-try{const b=JSON.parse(localStorage.getItem('coverslip-best')||'null');if(b&&b.gen)$('best').textContent=`Your longest lineage on this device: ${b.gen} generations in ${fmt(b.time||0)}.`}catch(e){}
+try{const b=JSON.parse(localStorage.getItem('coverslip-best')||'null');if(b&&b.gen)$('best').textContent=`Your best lineage here: ${b.gen} generations in ${fmt(b.time||0)}.`}catch(e){}
 
 /* ---------- boot ---------- */
+$('legendP').innerHTML=$('legend').innerHTML; // the pause card's Field guide: the title card's legend (its portraits: resize, showOnly)
 function boot(data){
   initWorld();
   for(let i=0;i<40;i++)update(.05); // let the ecosystem settle before the first frame
