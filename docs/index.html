@@ -415,6 +415,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
     <div class="eyebrow">Lineage extinct</div>
     <h2 id="overHead">Your line has ended</h2>
     <dl class="stats" id="overStats"></dl>
+    <p class="small" id="overSave"></p>
     <div class="actions"><button class="btn primary" id="againBtn" type="button">Start a new lineage</button><button class="btn upd" id="updBtn2" type="button" hidden>Update ready · Reload</button></div>
   </div>
 </div>
@@ -424,6 +425,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
     <div class="eyebrow">Stage reached · Leviathan</div>
     <h2 id="winHead">Your lineage reached Leviathan size</h2>
     <p>You have outgrown everything that lives in the dish. Larger hunters still drift in from outside, so keep evolving, or start again with a fresh cell.</p>
+    <p class="small" id="winSave"></p>
     <dl class="stats" id="winStats"></dl>
     <div class="actions"><button class="btn primary" id="contBtn" type="button">Keep evolving</button><button class="btn" id="newBtn" type="button">New lineage</button></div>
   </div>
@@ -434,6 +436,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
     <div class="eyebrow">Stage locked</div>
     <h2 id="pauseHead">Paused</h2>
     <p class="small" id="pauseStats"></p>
+    <p class="small" id="saveNote"></p>
     <section class="guide" id="traitGuide" aria-label="How it works">
       <div class="guide-head"><span class="eyebrow">How it works</span><span class="mono small" id="guideDna"></span></div>
       <p class="guide-loop" id="guideLoop"></p>
@@ -730,6 +733,12 @@ function spawnMigrant(){
 
 /* ---------- save & resume ---------- */
 const SAVE_KEY='coverslip-save';
+// Can this window keep the lineage? Blocked or throwing storage (a sandboxed frame without allow-same-origin, site data
+// blocked) can't: the title, pause, win and game-over cards then say so, and the game plays on as before. The cards say
+// what the last save attempt found: a save that throws turns it off (one notice per page, saveWarned), one that works
+// turns it back on. Safari's private tabs don't throw, so nothing here can tell those apart
+let canSave=(()=>{try{localStorage.setItem('coverslip-probe','1');localStorage.removeItem('coverslip-probe');return true}catch(e){return false}})();
+let saveWarned=false;
 const r1=v=>Math.round(v*10)/10;
 function snapshot(){
   if(mode!=='play'||!player||player.dead)return null;
@@ -777,7 +786,9 @@ function restore(sv){
     return true;
   }catch(e){return false}
 }
-function saveGame(){if(updErr)return;const sv=snapshot();if(!sv)return;try{localStorage.setItem(SAVE_KEY,JSON.stringify(sv))}catch(e){}}
+function saveGame(){if(updErr)return;const sv=snapshot();if(!sv)return;
+  try{localStorage.setItem(SAVE_KEY,JSON.stringify(sv));canSave=true}
+  catch(e){if(canSave&&!saveWarned){saveWarned=true;toast("Can't save here, so this lineage ends when the window closes.",{pri:2,ms:5000})}canSave=false}}
 function clearSave(){try{localStorage.removeItem(SAVE_KEY)}catch(e){}}
 function loadSave(){try{return JSON.parse(localStorage.getItem(SAVE_KEY)||'null')}catch(e){return null}}
 const saveGen=sv=>Math.max(1,Number.isFinite(sv.gen)?sv.gen:1); // the generation restore() will resume at
@@ -855,8 +866,10 @@ function onPlayerDeath(killer){
     const final=binomial(p.g,p.r);
     player=null;mode='over';clearSave();FX.extinct();
     const prior=+readBest().gen||0,isBest=recordBest(gen,lineT); // the record before this lineage: none = the first one
-    $('overHead').textContent=!prior?'Your first lineage has ended':isBest?'A new record for this slide':'Your line has ended';
+    $('overHead').textContent=won?'Your Leviathan lineage has ended':!prior?'Your first lineage has ended':isBest?'A new record for this slide':'Your line has ended';
     $('overStats').innerHTML=statsHTML(final,deathCause);
+    // its save is gone (clearSave above): say so, and where the record lives
+    $('overSave').textContent=canSave?"An extinct lineage can't be continued. Your best record stays on this device.":"An extinct lineage can't be continued, and this window can't keep records.";
     // the card fades in once the death has been seen (CSS #ovOver); until then it takes no taps or keys
     const ov=$('ovOver');ov.inert=true;showOnly('ovOver');clearTimeout(overT);
     overT=setTimeout(()=>{ov.inert=false;if(!ov.hidden)$('againBtn').focus()},RM?300:1100);
@@ -1792,7 +1805,9 @@ function buy(i){
   if(!winning){ring(player,COL.brass,player.r*1.05,player.r*2.4,.6,2);spray(player.x,player.y,COL.brass,10,60,1.5,.6,player.r)}
   upBtns[i].classList.remove('nope');bumpEl(upBtns[i],'got');
   if(after!==before){const nx=nextStage(player);toast(`Stage reached: ${after}.`+(nx?` Next: ${nx[1]} at Membrane ${ROMAN[nx[0]]}.`:''));if(!winning)FX.stage();bumpEl($('stage'),'bump')} // the win's chord stands for Leviathan
-  if(winning){won=true;paused=true;FX.win();$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));
+  if(winning){won=true;saveGame(); // the won lineage is kept now, not at the next autosave: the card says so
+    $('winSave').textContent=canSave?'Saved: close the game any time and keep evolving later.':"This window can't save, so this lineage ends when it closes.";
+    paused=true;FX.win();$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));
     // the card waits while the rings spread (CSS #ovWin: 1.6 s, 0.5 s under reduced motion), taking no taps or keys
     // until it starts to show; Escape still closes it at once
     const ov=$('ovWin');ov.inert=true;showOnly('ovWin');
@@ -1951,17 +1966,22 @@ function togglePause(){
   if(!$('ovWin').hidden)return;
   paused=!paused;still=0;
   // the compact phone HUD hides kills and time, so the pause card shows them
-  if(paused&&player){$('pauseStats').textContent=`Generation ${gen} · Kills ${kills} · ${fmt(lineT)} · ${goalTxt()}`;renderGuide()}
+  // the card says the lineage is saved, so it saves now (not only at the last 8 s autosave)
+  if(paused&&player){saveGame();$('pauseStats').textContent=`Generation ${gen} · Kills ${kills} · ${fmt(lineT)} · ${goalTxt()}`;
+    $('saveNote').textContent=canSave?'Saved on this device. Close the game any time; Continue picks it up again.':"Not saved: this window can't keep your lineage, so it ends when you close it.";
+    renderGuide()}
   showOnly(paused?'ovPause':null);if(paused)$('resumeBtn').focus();
 }
 // Starting over when that would discard a lineage takes two taps: the first only arms the button for 4 s and says
-// what it would discard; a second tap within 4 s starts over. need() gives that label, or '' when nothing is lost.
+// what it would discard; a second tap 400 ms to 4 s later starts over. One sooner (a fast accidental double tap, a
+// bounce) is ignored: the button stays armed and its 4 s run on. need() gives that label, or '' when nothing is lost.
 function twoTap(id,need){
-  const b=$(id);let until=0,tm=0,label='';
+  const b=$(id);let until=0,at=0,tm=0,label='';
   const disarm=()=>{clearTimeout(tm);until=0;if(label){b.textContent=label;label=''}b.classList.remove('armed')};
   b.addEventListener('click',()=>{
-    const msg=performance.now()<until?'':need();
-    if(msg){if(!label)label=b.textContent;until=performance.now()+4000;b.textContent=msg;b.classList.add('armed');clearTimeout(tm);tm=setTimeout(disarm,4100);return}
+    const now=performance.now();if(now<until&&now-at<400)return;
+    const msg=now<until?'':need();
+    if(msg){if(!label)label=b.textContent;at=now;until=now+4000;b.textContent=msg;b.classList.add('armed');clearTimeout(tm);tm=setTimeout(disarm,4100);return}
     disarm();startLineage();
   });
 }
@@ -1985,7 +2005,7 @@ $('vibBtn').addEventListener('click',()=>{FX.setVibrate(!FX.vibrate);syncSnd()})
 // (not for M or the Sound buttons: they toggle it themselves, and muting must not make a context first)
 const sndKey=e=>e.code==='KeyM'||!!(e.target&&e.target.closest&&e.target.closest('#sndBtn,#sndCardBtn'));
 for(const ev of['pointerdown','touchend','keydown','click'])addEventListener(ev,e=>{if(!sndKey(e))FX.unlock()},{capture:true,passive:true});
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='play'){saveGame();if(!paused)togglePause()}
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='play'){if(paused)saveGame();else togglePause()} // pausing saves
   if(document.hidden){wakeOff();FX.suspend()}else wakeOn(); // wakeOn() only takes the lock when playing and not paused
   if(!document.hidden)still=0}); // redraw a frozen (paused) frame on return, in case the canvas was dropped while hidden
 /* ---------- updates of the installed app ---------- */
@@ -2006,7 +2026,14 @@ if(location.protocol!=='file:')try{
     document.addEventListener('visibilitychange',()=>{if(document.hidden)return;try{const c=navigator.serviceWorker.controller;if(c)c.postMessage('check')}catch(e){}});
   }
 }catch(e){}
-try{const b=JSON.parse(localStorage.getItem('coverslip-best')||'null');if(b&&b.gen)$('best').textContent=`Your best lineage here: ${b.gen} generations in ${fmt(b.time||0)}.`}catch(e){}
+// the title card's last line (#best, at boot): the record, then whether this window keeps a lineage. With a save it is
+// the record alone: the Continue button says the rest (and a 360x640 card with a save and a record has 6 px to spare)
+function titleNote(hasSave){
+  if(!canSave)return'Saving is off in this window (private browsing or an embedded view), so a lineage ends when it closes.';
+  let rec='';
+  try{const b=JSON.parse(localStorage.getItem('coverslip-best')||'null'),g=b&&+b.gen;if(g>0)rec=`Your best lineage here: ${g} generation${g===1?'':'s'} in ${fmt(+b.time||0)}.`}catch(e){}
+  return hasSave?rec:(rec&&rec+' ')+'Your lineage saves on this device as you play. Close the game any time; Continue picks it up again.';
+}
 
 /* ---------- boot ---------- */
 $('legendP').innerHTML=$('legend').innerHTML; // the pause card's Field guide: the title card's legend (its portraits: resize, showOnly)
@@ -2016,8 +2043,9 @@ function boot(data){
   sample();
   if(data&&data.save&&restore(data.save)){showOnly(null)}
   else{
-    const sv=loadSave();
-    if(sv&&sv.v===1){
+    const sv=loadSave(),has=!!(sv&&sv.v===1);
+    $('best').textContent=titleNote(has);
+    if(has){
       const b=$('resumeSaveBtn');b.hidden=false;b.textContent=`Continue lineage · generation ${saveGen(sv)}`;
       $('startBtn').classList.remove('primary');$('startBtn').textContent='Begin a new lineage';
       b.addEventListener('click',()=>{if(restore(loadSave())){showOnly(null);toast('Welcome back. Your lineage picks up where it left off.')}else{clearSave();startLineage()}refreshHud(true)});
