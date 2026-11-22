@@ -63,6 +63,16 @@ button{touch-action:manipulation}
 #pauseBtn::after{content:"";position:absolute;inset:-12px -10px}
 #pauseBtn:hover{color:var(--ink)}
 #pauseBtn:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+/* the Census head's buttons: Sound (a speaker icon, aria-pressed) beside Pause. Their invisible hit areas (::after) meet
+   in the middle of the 6 px gap and never overlap: Pause's reaches 3 px left, Sound's 3 px right */
+.head-btns{margin-left:auto;display:flex;gap:6px}
+#pauseBtn::after{left:-3px}
+#sndBtn{pointer-events:auto;cursor:pointer;background:transparent;border:1px solid var(--line);border-radius:6px;padding:2px 5px;color:var(--ink-dim);display:grid;place-items:center;position:relative}
+#sndBtn::after{content:"";position:absolute;inset:-12px -3px -12px -10px}
+#sndBtn svg{width:14px;height:14px;display:block}
+#sndBtn[aria-pressed="false"] .on,#sndBtn[aria-pressed="true"] .off{display:none}
+#sndBtn:hover{color:var(--ink)}
+#sndBtn:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
 .dna-sm{display:none;font-family:var(--f-mono);font-weight:500;font-size:12px;color:var(--brass);font-variant-numeric:tabular-nums}
 .counts{display:grid;gap:3px;font-size:12.5px}
 .counts div{display:flex;align-items:center;gap:7px}
@@ -193,6 +203,8 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 /* a newer build of the installed app is downloaded: a quiet, secondary button with a brass status dot */
 .btn.upd{font-size:13px;padding:10px 14px;border-color:var(--line);display:inline-flex;align-items:center;gap:8px} /* smaller type: 38 px tall on a row of its own, 40 px beside a full-size button */
 .btn.upd::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--brass);flex:none}
+/* the pause card's Sound and Vibration toggles: quiet settings buttons after Resume */
+.btn.tog{font-size:13px;font-weight:500;padding:10px;border-color:var(--line);color:var(--ink)}
 .btn:hover{filter:brightness(1.08)}
 @media (max-width:560px),(max-height:520px){
   .tray{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
@@ -246,6 +258,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .legend li{line-height:1.3}
   .actions{bottom:-18px;margin-bottom:-18px;padding-bottom:18px}
   .card p{font-size:14px}
+  .btn.tog{padding-inline:8px} /* Resume, 'Sound: off' and 'Vibration: off' on one row at 360 px, also in the fallback fonts */
 }
 @media (max-height:520px){#ovTitle .legend li:last-child{display:none}}
 @media (max-height:520px) and (min-width:561px){
@@ -277,6 +290,12 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .up{padding:5px 7px;gap:3px}
   #burst{min-height:0}
 }
+@media (max-width:409px){
+  /* the Census head is the eyebrow, Sound and Pause: under 410 px the three no longer fit side by side (136 px of a
+     120-133 px head on the tall phones that show eyebrows), so the census eyebrow goes; the counts say what it is */
+  .top>.panel:last-child .eyebrow{display:none}
+}
+.panel-head .eyebrow{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} /* never wider than its panel */
 @media (max-width:359px){
   /* 320-359 px (small phones, folding phones' cover screens), tall or short: more of the width for the Specimen row,
      and no eyebrows (the census eyebrow and Pause no longer fit side by side); in the tray, 'Membrane' needs a
@@ -328,7 +347,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
       <div class="mono small" id="meta"><span class="goal-wide" id="metaL" title="Membrane level. Reach IX to win.">Leviathan 0/9</span><span id="metaK">Kills 0</span> · <span id="metaT">0:00</span><span class="hide-sm" id="metaF"></span></div>
     </section>
     <section class="panel" aria-label="Population census">
-      <div class="panel-head"><span class="eyebrow">Census</span><button id="pauseBtn" type="button" aria-label="Pause">Pause</button></div>
+      <div class="panel-head"><span class="eyebrow">Census</span><span class="head-btns"><button id="sndBtn" type="button" aria-pressed="true" aria-label="Sound" title="Sound (M)"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z" fill="currentColor" stroke="none"/><path class="on" d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.6a6 6 0 0 1 0 8.8"/><path class="off" d="M11 6l4 4M15 6l-4 4"/></svg></button><button id="pauseBtn" type="button" aria-label="Pause">Pause</button></span></div>
       <div class="counts">
         <div><span class="sw" style="background:var(--hud-grazer)"></span>Grazers<b id="nG">0</b></div>
         <div><span class="sw" style="background:var(--hud-hunter)"></span>Hunters<b id="nH">0</b></div>
@@ -401,7 +420,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
       <span class="eyebrow">Field guide</span>
       <ul class="legend" id="legendP"></ul>
     </section>
-    <div class="actions"><button class="btn primary" id="resumeBtn" type="button">Resume</button></div>
+    <div class="actions"><button class="btn primary" id="resumeBtn" type="button">Resume</button><button class="btn tog" id="sndCardBtn" type="button">Sound: on</button><button class="btn tog" id="vibBtn" type="button" hidden>Vibration: on</button></div>
   </div>
 </div>
 
@@ -451,6 +470,94 @@ const fmt=s=>{s=Math.floor(s);return Math.floor(s/60)+':'+String(s%60).padStart(
 const hsl=(h,s,l,a)=>`hsla(${h},${s}%,${l}%,${a})`;
 // restart a one-shot CSS animation class (remove, force a reflow, add back)
 const bumpEl=(el,c)=>{if(!el)return;el.classList.remove(c);void el.offsetWidth;el.classList.add(c)};
+
+/* ---------- sound and haptics ---------- */
+// Every sound is synthesised (no files). The AudioContext is made, and woken, only inside the capture-phase gesture
+// listeners (unlock(), wired at the end) and only with sound on: browsers refuse audio before a gesture, and iOS reports
+// 'interrupted' after a call or Siri, so any state but 'running' is resumed on the next tap or key. Where the browser
+// says a gesture isn't one (a touch's pointerdown: its touchend is), it waits for the next. navigator.audioSession
+// 'ambient' (Safari) lets the player's own music keep playing. Routing: master gain -> compressor -> speakers, one
+// shared 0.5 s noise buffer; every volume <= .28 into the compressor, and at most 24 voices at once. Behind a card the
+// context sleeps 2.5 s after it opens (rest(): the win chord and the extinction's fall ring out first), and at once when
+// the page hides. Haptics: navigator.vibrate (Android; iOS has none), only on touch screens (desktop Chrome has a no-op
+// one) and only once the page has had a gesture (a cross-origin frame, like the claude.ai Artifact, logs an error
+// otherwise). Both toggles are remembered ('coverslip-sound', 'coverslip-vibrate': '1'/'0', on by default; in memory
+// where storage is blocked). With sound off no AudioContext is ever made. FX is a plain object: later code may extend it
+// (FX.st is the shared state). Eating never vibrates.
+const FX=(()=>{
+  const get=k=>{try{return localStorage.getItem(k)!=='0'}catch(e){return true}};
+  const put=(k,v)=>{try{localStorage.setItem(k,v?'1':'0')}catch(e){}};
+  let snd=get('coverslip-sound'),vibOn=get('coverslip-vibrate'),ac=null,out=null,nbuf=null,ends=[],restT=0;
+  const UA=navigator.userActivation;
+  const canVib=(()=>{try{return typeof navigator.vibrate==='function'&&(navigator.maxTouchPoints>0||matchMedia('(any-pointer:coarse)').matches)}catch(e){return false}})();
+  const st={last:{}};
+  const quiet=p=>{if(p&&p.catch)p.catch(()=>{})};
+  function unlock(){
+    if(!snd||UA&&!UA.isActive)return null;
+    try{
+      if(!ac){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;
+        try{if(navigator.audioSession)navigator.audioSession.type='ambient'}catch(e){}
+        ac=new AC();
+        const comp=ac.createDynamicsCompressor();comp.threshold.value=-20;comp.ratio.value=6;comp.connect(ac.destination);
+        out=ac.createGain();out.gain.value=.8;out.connect(comp);
+        nbuf=ac.createBuffer(1,ac.sampleRate*.5|0,ac.sampleRate);const d=nbuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1}
+      if(ac.state!=='running'){const r=ac.resume();quiet(r);return r||null}
+    }catch(e){}
+    return null;
+  }
+  const sleep=()=>{try{if(ac&&ac.state==='running')quiet(ac.suspend())}catch(e){}};
+  // voices still sounding, by their stop times on the audio clock (which stands still while the context sleeps)
+  const room=()=>{if(ends.length>=24){const n=ac.currentTime;ends=ends.filter(e=>e>n)}return ends.length<24};
+  const ok=()=>snd&&ac&&ac.state==='running'&&room();
+  // rate-limit a repeating sound: true at most once per ms
+  const gate=(k,ms)=>{const n=performance.now();if(n-(st.last[k]??-1e9)<ms)return false;st.last[k]=n;return true};
+  // a tone: f Hz for dur s; o: type, vol, to (glide to Hz), at (delay s), attack (s), lp (lowpass Hz)
+  function tone(f,dur,o={}){
+    if(!ok())return;
+    try{const t0=ac.currentTime+(o.at||0),osc=ac.createOscillator(),g=ac.createGain();
+      osc.type=o.type||'sine';osc.frequency.setValueAtTime(f,t0);if(o.to)osc.frequency.exponentialRampToValueAtTime(o.to,t0+dur);
+      g.gain.setValueAtTime(.0001,t0);g.gain.exponentialRampToValueAtTime(o.vol||.08,t0+(o.attack||.006));g.gain.exponentialRampToValueAtTime(.0001,t0+dur);
+      let n=osc;if(o.lp){const lp=ac.createBiquadFilter();lp.type='lowpass';lp.frequency.value=o.lp;osc.connect(lp);n=lp}
+      n.connect(g);g.connect(out);osc.start(t0);osc.stop(t0+dur+.05);ends.push(t0+dur+.05)}catch(e){}
+  }
+  // filtered noise for dur s; o: ft (filter type, bandpass), f / fto (its Hz, gliding), q, vol, at
+  function hiss(dur,o={}){
+    if(!ok())return;
+    try{const t0=ac.currentTime+(o.at||0),s=ac.createBufferSource(),f=ac.createBiquadFilter(),g=ac.createGain();
+      s.buffer=nbuf;f.type=o.ft||'bandpass';f.frequency.setValueAtTime(o.f||900,t0);if(o.fto)f.frequency.exponentialRampToValueAtTime(o.fto,t0+dur);f.Q.value=o.q||1;
+      g.gain.setValueAtTime(.0001,t0);g.gain.exponentialRampToValueAtTime(o.vol||.06,t0+.004);g.gain.exponentialRampToValueAtTime(.0001,t0+dur);
+      s.connect(f);f.connect(g);g.connect(out);s.start(t0);s.stop(t0+dur+.05);ends.push(t0+dur+.05)}catch(e){}
+  }
+  const vib=p=>{if(!canVib||!vibOn||UA&&!UA.hasBeenActive)return;try{navigator.vibrate(p)}catch(e){}};
+  // the energy bar walks up a pentatonic scale, so the eating plinks climb toward each divide
+  const PENTA=[523,587,659,784,880,1047,1175,1319,1568,1760];
+  // behind a card nothing plays: sleep 2.5 s after it opens (or a toggle sounded there), if a card is still up
+  function rest(){clearTimeout(restT);if(ac)restT=setTimeout(()=>{if(mode!=='play'||paused)sleep()},2500)}
+  return{st,canVib,unlock,tone,hiss,vib,gate,rest,
+    get sound(){return snd},get vibrate(){return vibOn},get ctx(){return ac},
+    setSound(v){snd=!!v;put('coverslip-sound',snd);
+      if(snd){const r=unlock();(r&&r.then?r:Promise.resolve()).then(()=>tone(784,.12,{vol:.06}),()=>{});rest()}else sleep()},
+    setVibrate(v){vibOn=!!v;put('coverslip-vibrate',vibOn);if(vibOn)vib(15)},
+    suspend:sleep,
+    // the player's hooks (feed, bite, kill, divide, buy, burst, spawnMigrant, onPlayerDeath, the win)
+    eat(fill){if(gate('eat',55))tone(PENTA[clamp(Math.floor(fill*10),0,9)]*(1+rand(-.008,.008)),.09,{vol:.045})},
+    meat(){if(gate('eat',55)){tone(220,.11,{type:'triangle',vol:.07,to:330});hiss(.05,{f:600,vol:.03})}},
+    hurt(a,b,frac){if(gate('hurt',220)){tone(95,.2,{vol:.26,to:48});hiss(.12,{ft:'lowpass',f:500,vol:.1})}if(gate('hurtv',320))vib(22)}, // bitten
+    spike(){if(gate('spike',300))tone(1900,.04,{type:'square',vol:.02,lp:3000})}, // your spines hit a biter
+    chomp(){if(gate('chomp',260))hiss(.05,{f:1600,q:2,vol:.05})}, // biting
+    kill(){tone(330,.14,{type:'triangle',vol:.09,to:660});tone(990,.18,{vol:.04,at:.08});vib(14)},
+    divide(){tone(784,.6,{vol:.08});tone(1175,.7,{vol:.06,at:.07});hiss(.06,{f:2500,vol:.03});vib([10,45,16])},
+    buy(k,lv){const base=k==='size'?196:392;[1,1.25,1.5].forEach((m,i)=>tone(base*m*(1+lv*.03),.22,{type:'triangle',vol:.08,at:i*.06}));vib(12)},
+    stage(){[523,659,784,1047].forEach((f,i)=>tone(f,.5,{type:'triangle',vol:.06,at:.22+i*.09}))},
+    nope(){tone(150,.09,{type:'square',vol:.035,lp:900});tone(130,.09,{type:'square',vol:.035,lp:900,at:.11});vib([8,40,8])},
+    burst(){hiss(.22,{f:700,fto:2600,vol:.05})},
+    hunter(){tone(55,2.2,{type:'sawtooth',vol:.12,attack:.6,lp:260});tone(58.5,2.2,{type:'sawtooth',vol:.09,attack:.7,lp:260});vib([40,80,40])}, // a migrant
+    death(){tone(440,.7,{type:'triangle',vol:.12,to:90});hiss(.3,{ft:'lowpass',f:900,fto:200,vol:.1});vib(90)},
+    takeover(at=.55){tone(392,.25,{vol:.07,at});tone(587,.4,{vol:.07,at:at+.15})}, // at: when the camera reaches the heir
+    extinct(){tone(196,1.6,{type:'triangle',vol:.1,to:65,at:.35})},
+    win(){[523,659,784,1047,1319].forEach((f,i)=>tone(f,1.4-i*.1,{type:'triangle',vol:.07,at:i*.11}));vib([30,60,30,60,140])},
+  };
+})();
 
 let W=0,H=0,DPR=1,FR=200,CX=0,CY=0;
 let algae=[],meat=[],cells=[],parts=[],blooms=[],player=null,mode='title',t=0,algaeAcc=0;
@@ -565,7 +672,7 @@ function spawnMigrant(){
   const r=clamp(player.r*rand(1.18,1.38),12,44);
   const g={speed:clamp(player.g.speed-(Math.random()<.5?1:0),0,MAX.speed),jaws:r>25?2:1,spikes:Math.random()<.3?1:0,armor:clamp(Math.floor(r/14),0,3),photo:0,eye:1};
   const c=makeCell(x,y,r,g,rand(285,315),{announce:5,stalk:30,migrant:true});
-  c.en=c.maxEn*.4;cells.push(c);
+  c.en=c.maxEn*.4;cells.push(c);FX.hunter();
   if(hints&8)toast('A larger hunter has drifted into the dish.',{pri:2});
   else{coach(8);toast('A larger hunter has drifted in. The red arrow at the edge points to it.',{pri:2,ms:5000})} // drawEdgeArrows, while announce>0
 }
@@ -653,7 +760,7 @@ function divide(){
   const gain=divGain(p.lv);dna+=gain;
   if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5}
   floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);youT=0; // the floater takes the 'you' label's place
-  askPersist();
+  FX.divide();askPersist();
   if(!(hints&2)){coach(2);toast(touchUI()?'You earned DNA. Tap a gold-edged trait below.':'You earned DNA. Spend it in the tray, or press 1–7.',{pri:2,ms:5000})}
 }
 function kill(c,killer){
@@ -664,7 +771,7 @@ function kill(c,killer){
   if(killer&&killer.isPlayer){
     const gain=1+Math.floor(c.r/10);dna+=gain;kills++;
     if(kills===1)toast(`First kill · +${gain} DNA`);
-    floater(c.x,c.y,`+${gain} DNA`,COL.brass,13,600);
+    floater(c.x,c.y,`+${gain} DNA`,COL.brass,13,600);FX.kill();
   }
   if(c.isPlayer)onPlayerDeath(killer);
 }
@@ -682,18 +789,18 @@ function recordBest(g,tm){
 function onPlayerDeath(killer){
   const p=player,nm=killer&&binomial(killer.g,killer.r);
   deathCause=killer&&canEat(killer,p)?{kind:'eaten',name:nm,pct:Math.round((killer.r/p.r-1)*100),mig:!!killer.migrant}:killer?{kind:'spines',name:nm}:{kind:'starved'};
-  deathCam={x:p.x,y:p.y,t:DEATH_T,k:killer||null,from:null};
+  deathCam={x:p.x,y:p.y,t:DEATH_T,k:killer||null,from:null};FX.death();
   if(!tipBtn)hideTip();disarm(); // a trait card or an armed trait was the dead cell's: clear the view for the beat
   let best=null,bd=Infinity;
   for(const k of cells) if(k.kin&&!k.dead){const d=Math.hypot(k.x-p.x,k.y-p.y);if(d<bd){bd=d;best=k}}
   if(best){const shrank=p.lv.size>0;
     // the heir is safe from the killer and from every stalking migrant for 10 s (they would come straight for it)
     for(const c of cells)if(c.stalk>0||c===killer){c.stalk=0;c.ignore=best;c.ignoreT=10;if(c.tgt===p||c.tgt===best)c.tgt=null}
-    takeover(best);heirs++;
+    takeover(best);heirs++;FX.takeover((DEATH_T-DEATH_PAN)/(RM?1:.5)+.15); // its two notes as the camera reaches the heir
     toast(`${causeText(deathCause,COMPACT.matches)} You carry on as your offspring${shrank?', one size smaller':''}.`,{pri:2,ms:5000})}
   else{
     const final=binomial(p.g,p.r);
-    player=null;mode='over';clearSave();
+    player=null;mode='over';clearSave();FX.extinct();
     const prior=+readBest().gen||0,isBest=recordBest(gen,lineT); // the record before this lineage: none = the first one
     $('overHead').textContent=!prior?'Your first lineage has ended':isBest?'A new record for this slide':'Your line has ended';
     $('overStats').innerHTML=statsHTML(final,deathCause);
@@ -854,6 +961,7 @@ const KEYMAP={ArrowLeft:'l',KeyA:'l',ArrowRight:'r',KeyD:'r',ArrowUp:'u',KeyW:'u
 const onButton=e=>!!(e.target&&e.target.closest&&e.target.closest('button'));
 addEventListener('keydown',e=>{
   if(e.metaKey||e.ctrlKey||e.altKey)return;
+  if(e.code==='KeyM'){if(!e.repeat)toggleSound(true);return}
   if(KEYMAP[e.code]){keys.add(KEYMAP[e.code]);if(mode==='play'&&!paused)e.preventDefault();return}
   if(e.code==='Space'&&mode==='play'&&!paused&&!onButton(e)){e.preventDefault();if(!e.repeat)burst();return}
   if(e.code==='Escape'&&!$('ovWin').hidden){$('contBtn').click();return}
@@ -901,7 +1009,7 @@ function burst(){
   if(!player||mode!=='play'||paused||deathCam&&deathCam.t>0)return; // not during the death beat: the heir waits
   const b=$('burst');
   if(player.burstCd>0||player.en<BURST_MIN){b.classList.remove('fired');bumpEl(b,'nope');return}
-  player.burst=BURST_T;player.burstCd=BURST_CD;player.en-=BURST_EN;
+  player.burst=BURST_T;player.burstCd=BURST_CD;player.en-=BURST_EN;FX.burst();
   b.classList.remove('nope');bumpEl(b,'fired');refreshHud(); // dim it and start the recharge bar now, not on the next HUD tick
 }
 
@@ -938,6 +1046,7 @@ function bite(a,b,dt){
   if(b.shield>0)return;
   const dmg=biteDps(a,b)*dt;
   b.hp-=dmg;b.flash=.15;b.lastHit=t;a.en=Math.min(a.maxEn,a.en+dmg*.6);
+  if(b.isPlayer){FX.hurt(a,b,dmg/b.maxHp);if(b.g.spikes)FX.spike()}else if(a.isPlayer)FX.chomp();
   if(b.g.spikes){a.hp-=spineDps(a,b)*dt;a.flash=.15;a.lastHit=t}
   if(b.hp<=0)kill(b,a);
   if(a.hp<=0&&!a.dead)kill(a,b);
@@ -964,12 +1073,12 @@ function feed(){
       if(f.dead)continue;
       const dx=f.x-c.x,dy=f.y-c.y,rr=c.r+f.r*.5;
       if(dx>rr||dx<-rr||dy>rr||dy<-rr)continue;
-      if(dx*dx+dy*dy<rr*rr){f.dead=true;c.en=Math.min(c.maxEn,c.en+av);if(c.isPlayer)pop(f.x,f.y,COL.algae)}
+      if(dx*dx+dy*dy<rr*rr){f.dead=true;c.en=Math.min(c.maxEn,c.en+av);if(c.isPlayer){pop(f.x,f.y,COL.algae);FX.eat(c.en/c.maxEn)}}
     }
     if(c.g.jaws) for(const m of meat){
       if(m.dead)continue;
       const dx=m.x-c.x,dy=m.y-c.y,rr=c.r+m.r*.5;
-      if(dx*dx+dy*dy<rr*rr){m.dead=true;c.en=Math.min(c.maxEn,c.en+m.v);if(c.isPlayer)pop(m.x,m.y,COL.meat)}
+      if(dx*dx+dy*dy<rr*rr){m.dead=true;c.en=Math.min(c.maxEn,c.en+m.v);if(c.isPlayer){pop(m.x,m.y,COL.meat);FX.meat()}}
     }
   }
   algae=algae.filter(f=>!f.dead);
@@ -1488,7 +1597,7 @@ function disarm(){clearTimeout(armT);if(armedI>=0)upBtns[armedI].classList.remov
 function arm(i){disarm();armedI=i;upBtns[i].classList.add('armed');armT=setTimeout(disarm,4000)}
 // can't afford it: shake the DNA box (wide tray) and the tapped trait, and flash its cost and the small DNA readout
 // red (#dnaBox is hidden on phones, so the trait button and #dna2 carry the "no" there)
-const nope=i=>{bumpEl($('dnaBox'),'nope');bumpEl(upBtns[i],'nope');bumpEl($('dna2'),'bad')};
+const nope=i=>{bumpEl($('dnaBox'),'nope');bumpEl(upBtns[i],'nope');bumpEl($('dna2'),'bad');FX.nope()};
 // A trait button's tap or click. Desktops and tablets buy at once. Phones (COMPACT): the first tap on a trait the player
 // hasn't read shows its card and arms it (or says what it needs, with the 'no' shake), later taps buy; a maxed trait
 // says so; an unaffordable one shakes and says what it needs
@@ -1516,14 +1625,14 @@ function buy(i){
   const c=cost(u);
   if(dna<c){nope(i);return false}
   const pv=traitPreview(i),before=stageName(player);
-  dna-=c;player.lv[u.k]++;applyLv(player);disarm();
+  dna-=c;player.lv[u.k]++;applyLv(player);disarm();FX.buy(u.k,player.lv[u.k]);
   if(!(hints&4)){coach(4);unnudge(el=>el!==$('burst'))} // the first evolve ends the traits' nudges
   const nm=plain(u.name),L=ROMAN[player.lv[u.k]];
   floater(player.x,player.y-player.r-8,`${nm} ${L}`,COL.brass,13,600);youT=0; // the floater takes the 'you' label's place
   if(u.k==='jaws'&&player.lv.jaws===1&&!(hints&16)){coach(16);toast('Jaws: you can eat cells 12% smaller than you.',{pri:2,ms:5000})}
-  const after=stageName(player);
-  if(after!==before){const nx=nextStage(player);toast(`Stage reached: ${after}.`+(nx?` Next: ${nx[1]} at Membrane ${ROMAN[nx[0]]}.`:''))}
-  if(player.lv.size>=9&&!won){won=true;paused=true;$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));showOnly('ovWin');$('contBtn').focus()}
+  const after=stageName(player),winning=player.lv.size>=9&&!won;
+  if(after!==before){const nx=nextStage(player);toast(`Stage reached: ${after}.`+(nx?` Next: ${nx[1]} at Membrane ${ROMAN[nx[0]]}.`:''));if(!winning)FX.stage()} // the win's chord stands for Leviathan
+  if(winning){won=true;paused=true;FX.win();$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));showOnly('ovWin');$('contBtn').focus()}
   refreshHud(true);
   if(!paused){
     if(COMPACT.matches)showTip(`<b>Evolved ${nm} ${L}</b>: ${fxFull(u)}${pv.length?`<br><span class="tn">${pvHtml(pv)}</span>`:''}`,2200);
@@ -1646,7 +1755,7 @@ function askPersist(){if(!STANDALONE||askedPersist)return;askedPersist=true;try{
 const UPD_MSG='Update downloaded. It loads next time you open the game.';
 let updShown=false,updToast=false;
 function showOnly(id){for(const o of['ovTitle','ovOver','ovWin','ovPause'])$(o).hidden=o!==id;$('hud').inert=!!id;still=0;
-  if(id){wakeOff();dropBack();hideTip();disarm();drawPortraits($(id))}
+  if(id){wakeOff();dropBack();hideTip();disarm();drawPortraits($(id));FX.rest()}
   else if(mode==='play'){wakeOn();armBack();if(updToast){updToast=false;toast(UPD_MSG)}}
 }
 function togglePause(){
@@ -1674,8 +1783,21 @@ $('againBtn').addEventListener('click',startLineage);
 $('contBtn').addEventListener('click',()=>{paused=false;showOnly(null)});
 $('resumeBtn').addEventListener('click',togglePause);
 $('pauseBtn').addEventListener('click',e=>{togglePause();if(e.detail>0)e.currentTarget.blur()});
+// Sound and Vibration: the speaker beside Pause, the M key and the pause card's two buttons (Vibration only where the
+// device can vibrate). The capture-phase gesture listeners make or wake the AudioContext before the tap's own handler
+// runs, so its sound plays (FX.unlock: only with sound on, only in a real gesture)
+function syncSnd(){$('sndBtn').setAttribute('aria-pressed',String(FX.sound));$('sndCardBtn').textContent='Sound: '+(FX.sound?'on':'off');
+  $('vibBtn').textContent='Vibration: '+(FX.vibrate?'on':'off')}
+function toggleSound(say){FX.setSound(!FX.sound);syncSnd();if(say&&mode==='play'&&!paused)toast(FX.sound?'Sound on':'Sound off',{pri:0,ms:1500})}
+$('vibBtn').hidden=!FX.canVib;syncSnd();
+$('sndBtn').addEventListener('click',e=>{toggleSound(false);if(e.detail>0)e.currentTarget.blur()});
+$('sndCardBtn').addEventListener('click',()=>toggleSound(false));
+$('vibBtn').addEventListener('click',()=>{FX.setVibrate(!FX.vibrate);syncSnd()});
+// (not for M or the Sound buttons: they toggle it themselves, and muting must not make a context first)
+const sndKey=e=>e.code==='KeyM'||!!(e.target&&e.target.closest&&e.target.closest('#sndBtn,#sndCardBtn'));
+for(const ev of['pointerdown','touchend','keydown','click'])addEventListener(ev,e=>{if(!sndKey(e))FX.unlock()},{capture:true,passive:true});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&mode==='play'){saveGame();if(!paused)togglePause()}
-  if(document.hidden)wakeOff();else wakeOn(); // wakeOn() only takes the lock when playing and not paused
+  if(document.hidden){wakeOff();FX.suspend()}else wakeOn(); // wakeOn() only takes the lock when playing and not paused
   if(!document.hidden)still=0}); // redraw a frozen (paused) frame on return, in case the canvas was dropped while hidden
 /* ---------- updates of the installed app ---------- */
 // sw.js tells open pages when it has stored a newer game file. Never reload mid-game: on the title or game-over card
