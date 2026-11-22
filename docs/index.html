@@ -127,6 +127,23 @@ button{touch-action:manipulation}
 .up.nope .cost{animation:bad .6s}
 .dna-sm.bad{animation:bad .6s}
 @keyframes bad{0%,45%{color:var(--danger)}}
+/* a buy (buy()): the trait button flashes brass and its new pip pops; the DNA readouts bump when DNA rises, the stage
+   chip when the stage changes, and the name glows brass when it changes (refreshHud). After .up.nope and .up.armed:
+   the code removes the other one-shot class first, so they never fight. Reduced motion: colour only (below) */
+.up.got{animation:got .6s ease-out}
+@keyframes got{0%{background:rgba(201,163,90,.45);border-color:#f0d08c}100%{background:var(--panel)}}
+.pips i.new{animation:pip .5s ease-out}
+@keyframes pip{0%{transform:scale(2.4);background:#ffe7b0}}
+@keyframes pipRM{0%{background:#ffe7b0}}
+.bump{animation:bump .45s ease-out}
+@keyframes bump{30%{transform:scale(1.28);color:#ffe2a6}}
+@keyframes bumpRM{30%{color:#ffe2a6}}
+.renamed{animation:renamed 1.4s ease-out}
+@keyframes renamed{0%{color:var(--brass);text-shadow:0 0 12px rgba(201,163,90,.55)}}
+/* bitten, or low on health: a red vignette over the field (drawHurt() writes its opacity only when it changes; resize()
+   lays it exactly over the field). A DOM layer, not a canvas gradient: that cost 44-48 ms a frame at 4x CPU throttle */
+#hurt{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;border-radius:50%;opacity:0;
+  background:radial-gradient(closest-side,rgba(226,85,63,0) 55%,rgba(226,85,63,.45));will-change:opacity}
 .ups{display:flex;gap:6px;overflow-x:auto;min-width:0;pointer-events:auto;scrollbar-width:thin;
   padding:3px 4px;margin:-3px -4px -1px} /* room for a shaking end button (so it can't flash a scrollbar) and for the nudge's
   3 px ring, which the scrolling strip would clip: the negative margins cancel the padding, so the tray doesn't move */
@@ -196,6 +213,9 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
    keys until it starts to show (inert, set by onPlayerDeath), so a finger still on the dish can't start a new lineage unseen */
 #ovOver:not([hidden]){animation:ovin .45s 1.1s both ease-out}
 @keyframes ovin{from{opacity:0}}
+/* the win: the dish keeps drawing (wake) while brass rings spread from the grown cell, then the card fades in. It is
+   inert until then (buy()), so a tap or key meant for the game can't dismiss a card not yet seen */
+#ovWin:not([hidden]){animation:ovin .45s 1.6s both ease-out}
 .actions{display:flex;gap:8px;flex-wrap:wrap;position:sticky;bottom:-22px;margin-bottom:-22px;padding-block:12px 22px;background:var(--panel-solid);border-top:1px solid var(--line)}
 .btn{border:1px solid var(--brass);border-radius:8px;padding:10px 16px;font-weight:600;font-size:14px;cursor:pointer;background:transparent;color:var(--brass)}
 .btn.primary{background:var(--brass);color:var(--brass-ink)}
@@ -210,7 +230,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .tray{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
   .ups{display:contents}
   .dna{display:none}
-  .dna-sm{display:inline}
+  .dna-sm{display:inline-block} /* its .bump scales it (a flex or grid item in the Specimen row either way) */
   #goal{display:block}
   .dna-sm,#goal{line-height:15.6px} /* DNA's own line (12 px x 1.3): the row's second line is as tall whichever of the two is on it */
   .goal-wide{display:none}
@@ -328,13 +348,16 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
   .up.nudge,#burst.nudge{animation:none;outline:2px solid var(--brass);outline-offset:1px}
   .tip{animation:none}.up.armed{animation:none;box-shadow:none;outline:2px solid var(--brass);outline-offset:-3px} /* a static outline */
   #burst.nope{animation:none}#burst .bcd{transition:none}#burst.fired{animation:firedRM .4s step-end} /* a static brief tint */
-  #ovOver:not([hidden]){animation:ovin .3s .3s both linear} /* a plain fade, sooner */}
+  #ovOver:not([hidden]){animation:ovin .3s .3s both linear} /* a plain fade, sooner */
+  #ovWin:not([hidden]){animation:ovin .3s .5s both linear}
+  .pips i.new{animation-name:pipRM}.bump{animation-name:bumpRM} /* colour only */}
 </style>
 <style>body{margin:0}</style>
 </head>
 <body>
 
 <canvas id="dish" aria-label="Microscope view of the dish. Steer your cell with the mouse, a finger, or WASD."></canvas>
+<div id="hurt" aria-hidden="true"></div>
 
 <div class="hud" id="hud" inert>
   <div class="top" id="top">
@@ -490,7 +513,11 @@ const FX=(()=>{
   let snd=get('coverslip-sound'),vibOn=get('coverslip-vibrate'),ac=null,out=null,nbuf=null,ends=[],restT=0;
   const UA=navigator.userActivation;
   const canVib=(()=>{try{return typeof navigator.vibrate==='function'&&(navigator.maxTouchPoints>0||matchMedia('(any-pointer:coarse)').matches)}catch(e){return false}})();
-  const st={last:{}};
+  // last: the gates' timestamps. On the field (tick() moves these in real time): kx/ky, kvx/kvy the bite kick's spring
+  // (screen px the world is drawn off by), hurt the bite vignette's strength, win the seconds of the win's rings left
+  const st={last:{},kx:0,ky:0,kvx:0,kvy:0,hurt:0,win:0};
+  // the kick: an impulse along (dx,dy), from the biter to you, on a spring (320, damping 22) that peaks about 4.6 px
+  const kick=(dx,dy)=>{if(RM)return;const d=Math.hypot(dx,dy)||1;st.kvx+=dx/d*200;st.kvy+=dy/d*200};
   const quiet=p=>{if(p&&p.catch)p.catch(()=>{})};
   function unlock(){
     if(!snd||UA&&!UA.isActive)return null;
@@ -542,7 +569,10 @@ const FX=(()=>{
     // the player's hooks (feed, bite, kill, divide, buy, burst, spawnMigrant, onPlayerDeath, the win)
     eat(fill){if(gate('eat',55))tone(PENTA[clamp(Math.floor(fill*10),0,9)]*(1+rand(-.008,.008)),.09,{vol:.045})},
     meat(){if(gate('eat',55)){tone(220,.11,{type:'triangle',vol:.07,to:330});hiss(.05,{f:600,vol:.03})}},
-    hurt(a,b,frac){if(gate('hurt',220)){tone(95,.2,{vol:.26,to:48});hiss(.12,{ft:'lowpass',f:500,vol:.1})}if(gate('hurtv',320))vib(22)}, // bitten
+    // bitten: the vignette at least .55 (more as the bites add up), and once per 220 ms a thud and the world kicked away
+    // from the biter
+    hurt(a,b,frac){st.hurt=Math.min(1,Math.max(st.hurt,.55)+frac*10);
+      if(gate('hurt',220)){tone(95,.2,{vol:.26,to:48});hiss(.12,{ft:'lowpass',f:500,vol:.1});kick(b.x-a.x,b.y-a.y)}if(gate('hurtv',320))vib(22)},
     spike(){if(gate('spike',300))tone(1900,.04,{type:'square',vol:.02,lp:3000})}, // your spines hit a biter
     chomp(){if(gate('chomp',260))hiss(.05,{f:1600,q:2,vol:.05})}, // biting
     kill(){tone(330,.14,{type:'triangle',vol:.09,to:660});tone(990,.18,{vol:.04,at:.08});vib(14)},
@@ -555,7 +585,23 @@ const FX=(()=>{
     death(){tone(440,.7,{type:'triangle',vol:.12,to:90});hiss(.3,{ft:'lowpass',f:900,fto:200,vol:.1});vib(90)},
     takeover(at=.55){tone(392,.25,{vol:.07,at});tone(587,.4,{vol:.07,at:at+.15})}, // at: when the camera reaches the heir
     extinct(){tone(196,1.6,{type:'triangle',vol:.1,to:65,at:.35})},
-    win(){[523,659,784,1047,1319].forEach((f,i)=>tone(f,1.4-i*.1,{type:'triangle',vol:.07,at:i*.11}));vib([30,60,30,60,140])},
+    // the win: its rings (drawWin) for 2.4 s, the paused dish kept drawing meanwhile (wake), then the card fades in
+    win(){[523,659,784,1047,1319].forEach((f,i)=>tone(f,1.4-i*.1,{type:'triangle',vol:.07,at:i*.11}));vib([30,60,30,60,140]);st.win=2.4;wake(2600)},
+    // every drawn frame, before update(), with the real (unscaled, clamped) dt: so it runs through the death beat's slow
+    // motion and while a paused game still draws (the win). Springs in fixed 1/120 s steps, so a 30 fps screen kicks as
+    // far as a 60 fps one. The membrane (a buy): the drawn radius dr springs (260, damping 14) from the old size to the
+    // new one, overshooting about 2.5%; reduced motion snaps it
+    tick(rdt){
+      const n=Math.ceil(rdt*120-1e-6),h=n>0?rdt/n:0,p=player,mem=p&&p.dr!==undefined;
+      for(let i=0;i<n;i++){
+        st.kvx+=(-st.kx*320-st.kvx*22)*h;st.kvy+=(-st.ky*320-st.kvy*22)*h;st.kx+=st.kvx*h;st.ky+=st.kvy*h;
+        if(mem&&!RM){p.drv+=((p.r-p.dr)*260-p.drv*14)*h;p.dr+=p.drv*h}}
+      if(Math.abs(st.kx)+Math.abs(st.ky)<.01&&Math.abs(st.kvx)+Math.abs(st.kvy)<.1)st.kx=st.ky=st.kvx=st.kvy=0;
+      if(mem&&(RM||Math.abs(p.r-p.dr)<.02&&Math.abs(p.drv)<.1))p.dr=undefined;
+      if(st.hurt>0)st.hurt=Math.max(0,st.hurt-rdt*2.2);
+      if(st.win>0)st.win-=rdt;
+    },
+    calm(){st.kx=st.ky=st.kvx=st.kvy=st.hurt=st.win=0}, // a new lineage, a resume
   };
 })();
 
@@ -568,7 +614,7 @@ let youT=0; // seconds the 'you' label still shows over the player (a new lineag
 // the killer (on the death point if there is none, or it died) for DEATH_T s of sim time, which frame() runs at half speed
 // (about 1.6 s), then pans to the heir over its last DEATH_PAN s (a cut under reduced motion). The heir waits meanwhile
 // (playerInput, burst). Both transient: never saved, cleared by a new lineage and a resume
-let deathCause=null,deathCam=null,overT=0;
+let deathCause=null,deathCam=null,overT=0,winT=0; // winT: lifts #ovWin.inert once the win's card shows
 const DEATH_T=.8,DEATH_PAN=.25;
 // coaching (hints, saved): 1 the danger ring explained, 2 the first divide, 4 the first evolve, 8 the first migrant,
 // 16 the Jaws hint. coach(bit) also ORs the bit into 'coverslip-coached', which a new lineage starts from, so a player
@@ -648,8 +694,8 @@ function startLineage(){
   else{const sv=loadSave();if(sv&&sv.v===1)recordBest(sv.gen||0,sv.lineT||0)}
   initWorld();
   dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=coachedNow();migrantT=45;lastRivalNews=0;newsT=-1e9;youT=3;clearSave();
-  deathCam=deathCause=null;clearTimeout(overT);$('ovOver').inert=false;
-  unnudge();nudgeT=0;
+  deathCam=deathCause=null;clearTimeout(overT);$('ovOver').inert=false;clearTimeout(winT);$('ovWin').inert=false;
+  unnudge();nudgeT=0;FX.calm();hudDna=-1;hudName='';
   lastCensus=census();histT=1.5;
   let x=0,y=0;
   for(let i=0;i<80;i++){const b=blooms[i%blooms.length];x=b.x+rand(-60,60);y=b.y+rand(-60,60);if(i>40)[x,y]=randInDish(150);if(cells.every(c=>!c.g.jaws||Math.hypot(c.x-x,c.y-y)>380))break}
@@ -721,7 +767,7 @@ function restore(sv){
     for(const k of GENES){let m=0;for(const c of nc)if(!c.isPlayer&&!c.kin&&c.g[k]>m)m=c.g[k];ms[k]=clamp(Math.round(num(sv.maxSeen&&sv.maxSeen[k],m)),0,MAX[k])}
     cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;maxSeen=ms;lastRivalNews=0;newsT=-1e9;unnudge();nudgeT=0;
     dna=num(sv.dna,0);gen=Math.max(1,num(sv.gen,1));kills=num(sv.kills,0);lineT=num(sv.lineT,0);heirs=num(sv.heirs,0);won=!!sv.won;hints=num(sv.hints,0)|0;migrantT=num(sv.migrantT,45);
-    player.shield=2;youT=3;deathCam=deathCause=null;cam.x=player.x;cam.y=player.y;cam.v=viewR();
+    player.shield=2;youT=3;deathCam=deathCause=null;cam.x=player.x;cam.y=player.y;cam.v=viewR();FX.calm();hudDna=-1;hudName='';
     mode='play';paused=false;lastCensus=census();
     return true;
   }catch(e){return false}
@@ -758,7 +804,9 @@ function divide(){
   const p=player;
   p.en=p.maxEn*.45;gen++;
   const gain=divGain(p.lv);dna+=gain;
-  if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5}
+  // the offspring stays joined to you by a thinning neck for .45 s (drawCells), and a brass ring spreads from you
+  if(cells.length<CAP+10){const k=offspring(p);k.en=k.maxEn*.5;k.split=.45;k.parent=p}
+  ring(p,COL.brass,p.r*1.05,p.r*2.6,.55,2);
   floater(p.x,p.y-p.r-8,`Gen ${gen} · +${gain} DNA`,COL.brass,14,600);youT=0; // the floater takes the 'you' label's place
   FX.divide();askPersist();
   if(!(hints&2)){coach(2);toast(touchUI()?'You earned DNA. Tap a gold-edged trait below.':'You earned DNA. Spend it in the tray, or press 1–7.',{pri:2,ms:5000})}
@@ -767,7 +815,7 @@ function kill(c,killer){
   if(c.dead)return;c.dead=true;
   const total=10+c.r*3.2,n=2+Math.floor(c.r/8);
   for(let i=0;i<n;i++){const a=rand(TAU),d=rand(c.r*.6);meat.push({x:c.x+Math.cos(a)*d,y:c.y+Math.sin(a)*d,r:clamp(2+total/n*.18,2.5,7),v:total/n,life:28,dead:false,rot:rand(6)})}
-  for(let i=0;i<10;i++){const a=rand(TAU),s=rand(20,70);parts.push({x:c.x,y:c.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.6,max:.6,col:hsl(dispHue(c),50,40,1),r:rand(1,2.2)})}
+  for(let i=0;i<10;i++){const a=rand(TAU),s=rand(20,70);addPart({x:c.x,y:c.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.6,max:.6,col:hsl(dispHue(c),50,40,1),r:rand(1,2.2)})}
   if(killer&&killer.isPlayer){
     const gain=1+Math.floor(c.r/10);dna+=gain;kills++;
     if(kills===1)toast(`First kill · +${gain} DNA`);
@@ -1028,7 +1076,7 @@ function updateCell(c,dt){
   const move=Math.min(1,v/c.maxSpd);
   c.en+=(photoGain(c)-c.drain*(.45+.55*move))*dt;
   if(c.announce>0)c.announce-=dt;
-  if(c.burst>0)c.burst-=dt;if(c.burstCd>0)c.burstCd-=dt;if(c.shield>0)c.shield-=dt;if(c.flash>0)c.flash-=dt;
+  if(c.burst>0)c.burst-=dt;if(c.burstCd>0)c.burstCd-=dt;if(c.shield>0)c.shield-=dt;if(c.flash>0)c.flash-=dt;if(c.gulp>0)c.gulp-=dt*.5;if(c.split>0&&(c.split-=dt)<=0)c.parent=null;
   if(c.en<=0){c.en=0;c.hp-=4*dt;c.lastHit=t;if(c.hp<=0){kill(c,null);return}}
   else if(c.en>c.maxEn*.3&&c.hp<c.maxHp&&t-c.lastHit>2)c.hp=Math.min(c.maxHp,c.hp+(1+c.r*.05)*dt);
   if(!c.isPlayer){
@@ -1073,18 +1121,32 @@ function feed(){
       if(f.dead)continue;
       const dx=f.x-c.x,dy=f.y-c.y,rr=c.r+f.r*.5;
       if(dx>rr||dx<-rr||dy>rr||dy<-rr)continue;
-      if(dx*dx+dy*dy<rr*rr){f.dead=true;c.en=Math.min(c.maxEn,c.en+av);if(c.isPlayer){pop(f.x,f.y,COL.algae);FX.eat(c.en/c.maxEn)}}
+      if(dx*dx+dy*dy<rr*rr){f.dead=true;c.en=Math.min(c.maxEn,c.en+av);if(c.isPlayer){pop(f.x,f.y,COL.algae);if(!RM)c.gulp=.07;FX.eat(c.en/c.maxEn)}}
     }
     if(c.g.jaws) for(const m of meat){
       if(m.dead)continue;
       const dx=m.x-c.x,dy=m.y-c.y,rr=c.r+m.r*.5;
-      if(dx*dx+dy*dy<rr*rr){m.dead=true;c.en=Math.min(c.maxEn,c.en+m.v);if(c.isPlayer){pop(m.x,m.y,COL.meat);FX.meat()}}
+      if(dx*dx+dy*dy<rr*rr){m.dead=true;c.en=Math.min(c.maxEn,c.en+m.v);if(c.isPlayer){pop(m.x,m.y,COL.meat);if(!RM)c.gulp=.09;FX.meat()}}
     }
   }
   algae=algae.filter(f=>!f.dead);
   meat=meat.filter(m=>!m.dead&&m.life>0);
 }
-function pop(x,y,col){for(let i=0;i<3;i++){const a=rand(TAU),s=rand(10,30);parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.35,max:.35,col,r:1.1})}}
+// Particles and rings are sized in screen px (w: world units per screen px now), so they look the same at any zoom. At
+// most PART_CAP of them (a floater's text always gets in). spray(): n sparks flying out from radius r0 (world) around
+// (x,y); ring(): an expanding ring that follows f (a cell) while it lives
+const PART_CAP=400;
+const addPart=q=>{if(q.txt||parts.length<PART_CAP)parts.push(q)};
+function spray(x,y,col,n,sp,sz,life,r0=0){const w=cam.v/FR;for(let i=0;i<n;i++){const a=rand(TAU),s=rand(sp*.35,sp)*w,ca=Math.cos(a),sa=Math.sin(a);addPart({x:x+ca*r0,y:y+sa*r0,vx:ca*s,vy:sa*s,life,max:life,col,r:sz*w})}}
+function ring(f,col,r0,r1,life,lw=1.2){addPart({x:f.x,y:f.y,vx:0,vy:0,life,max:life,col,ring:1,r0,r1,lw,follow:f})}
+// you ate: a few sparks and a 0.32 s ripple in the food's colour
+function pop(x,y,col){const w=cam.v/FR;spray(x,y,col,4,34,1.3,.4);addPart({x,y,vx:0,vy:0,life:.32,max:.32,col,ring:1,r0:2*w,r1:10*w,lw:1.2})}
+// move and age the particles, rings and floaters (update(); and in real time while the win's rings play over the paused
+// dish, so a buy's ring or the winning floater finishes instead of hanging there)
+function stepParts(dt){
+  for(const p of parts){if(p.follow&&!p.follow.dead){p.x=p.follow.x;p.y=p.follow.y}p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(!p.txt){p.vx*=.92;p.vy*=.92}}
+  parts=parts.filter(p=>p.life>0);
+}
 function floater(x,y,txt,col,fs=12,fw=500){parts.push({x,y,vx:0,vy:-18,life:1.4,max:1.4,txt,col,fs,fw})}
 
 function update(dt){
@@ -1100,8 +1162,7 @@ function update(dt){
   feed();
   if(player&&!player.dead&&player.en>=player.maxEn-.01)divide();
   cells=cells.filter(c=>!c.dead);
-  for(const p of parts){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(!p.txt){p.vx*=.92;p.vy*=.92}}
-  parts=parts.filter(p=>p.life>0);
+  stepParts(dt);
   // camera. The death beat (deathCam): hold on the killer, or on the death point, then pan to the heir over the last
   // DEATH_PAN s (ease in and out; a cut under reduced motion). Without an heir the attract drift follows the hold
   const dc=deathCam;
@@ -1199,6 +1260,7 @@ function resize(){
   else{FR=rA;CY=(topB+trayT)/2}
   if(FR<90){FR=90;CY=Math.max(CY,insetT+FR)}
   CX=W/2;layoutSide=side;placeTip();
+  {const hz=$('hurt').style;hz.left=(CX-FR)+'px';hz.top=(CY-FR)+'px';hz.width=hz.height=(2*FR)+'px'} // the vignette: over the field
   $('toasts').style.top=(side?CY-FR+16:Math.max(topB+6,CY-FR+16))+'px';
   $('toasts').style.width=side?Math.min(FR*1.6,420)+'px':'';
   buildLayers();
@@ -1288,7 +1350,8 @@ const dispHue=(c,ro=roleOf(c))=>ROLE[ro].c+(c.hue-ROLE0[ro])*ROLE[ro].k;
 // Traits keep a minimum size on screen (px = world units per screen pixel): at phone scale rivals are 5-7 px across.
 // Under 6 px of radius a cell skips its granules and nucleus (level of detail); the trait marks always draw.
 function drawCell(c,px){
-  const ro=roleOf(c),R=ROLE[ro],r=c.r,h=dispHue(c,ro),g=c.g,wa=RM?.3:1,hunter=ro==='h',prow=hunter?.16:0,lod=r/px<6;
+  // drawn at dr while a bought Membrane swells (FX.tick), r*(1+gulp) for a moment after you eat
+  const ro=roleOf(c),R=ROLE[ro],r=(c.dr||c.r)*(c.gulp>0?1+c.gulp:1),h=dispHue(c,ro),g=c.g,wa=RM?.3:1,hunter=ro==='h',prow=hunter?.16:0,lod=r/px<6;
   const sil=a=>{const ca=Math.cos(a);return ca>0?1+prow*ca*ca*ca:1}; // the outline's radius at angle a (no wobble), per r
   ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.a);
   // flagella
@@ -1374,8 +1437,15 @@ function drawPreyMark(x,y,r,px){
 function drawCells(px){
   const vis=cells.filter(c=>inView(c.x,c.y,c.r*2.5)).sort((a,b)=>a.r-b.r);
   // the spawn shield (a new lineage, a resume, an heir): a soft brass halo under the player, fading as it runs out
-  if(player&&player.shield>0){ctx.fillStyle=COL.brass;ctx.globalAlpha=.18*Math.min(1,player.shield/.5);ctx.beginPath();ctx.arc(player.x,player.y,player.r+px*7,0,TAU);ctx.fill();ctx.globalAlpha=1}
+  const pr=player?player.dr||player.r:0; // the player as drawn (a bought Membrane swells)
+  if(player&&player.shield>0){ctx.fillStyle=COL.brass;ctx.globalAlpha=.18*Math.min(1,player.shield/.5);ctx.beginPath();ctx.arc(player.x,player.y,pr+px*7,0,TAU);ctx.fill();ctx.globalAlpha=1}
   drawWake();
+  // a division: the offspring stays joined to its parent by a neck that thins away over .45 s (under the cells, in the
+  // kin's own colour: a dark outline, then a pale fill)
+  for(const c of vis)if(c.split>0&&c.parent&&!c.parent.dead){const p=c.parent,u=Math.min(1,c.split/.45),w=Math.min(c.r,p.dr||p.r)*1.15*u,h=dispHue(c);
+    ctx.save();ctx.lineCap='round';ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(c.x,c.y);
+    ctx.strokeStyle=hsl(h,55,32,.8*u);ctx.lineWidth=w+Math.max(px*2.4,c.r*.14);ctx.stroke();
+    ctx.strokeStyle=hsl(h,58,82,1);ctx.lineWidth=w;ctx.stroke();ctx.restore()}
   for(const c of vis)drawCell(c,px);
   // the death beat: the killer's danger mark, heavier, and what it did, while the camera holds on it
   const dk=deathCam&&deathCam.t>0&&deathCam.k&&!deathCam.k.dead?deathCam.k:null;
@@ -1390,7 +1460,7 @@ function drawCells(px){
     else if(player.g.eye>0&&canEat(player,c)&&d<warn)drawPreyMark(c.x,c.y,c.r,px);
   }
   // player marker: a dashed ring, turning
-  const mr=player.r+px*9+(player.g.spikes?player.r*.4:0);
+  const mr=pr+px*9+(player.g.spikes?pr*.4:0);
   ctx.save();ctx.translate(player.x,player.y);ctx.rotate(t*.6);ctx.strokeStyle=COL.fink;ctx.globalAlpha=.55;
   ctx.setLineDash([px*6,px*5]);ctx.lineWidth=px*1.5;ctx.beginPath();ctx.arc(0,0,mr,0,TAU);ctx.stroke();ctx.restore();
   // 'you' over the player for 3 s after a lineage starts, resumes or passes to an heir (fading over the last half second)
@@ -1400,6 +1470,7 @@ function drawParts(px){
   for(const p of parts){
     if(!inView(p.x,p.y,40))continue;ctx.globalAlpha=Math.min(1,p.life/p.max*1.5);
     if(p.txt)fieldText(p.txt,p.x,p.y,px,p.col,p.fs||12,p.fw||500); // the floater's own colour over a field halo
+    else if(p.ring){const u=p.life/p.max,e=1-u*u;ctx.globalAlpha=u*.85;ctx.strokeStyle=p.col;ctx.lineWidth=p.lw*px;ctx.beginPath();ctx.arc(p.x,p.y,p.r0+(p.r1-p.r0)*e,0,TAU);ctx.stroke()} // eases out, fading
     else{ctx.fillStyle=p.col;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,TAU);ctx.fill()}
   }
   ctx.globalAlpha=1;
@@ -1410,6 +1481,33 @@ function fieldText(txt,x,y,px,col,fs=12,fw=500){
   ctx.font=`${fw} ${fs*px}px "IBM Plex Mono",ui-monospace,monospace`;ctx.textAlign='center';
   ctx.lineJoin='round';ctx.lineWidth=3*px;ctx.strokeStyle=COL.field;ctx.strokeText(txt,x,y);
   ctx.fillStyle=col===COL.brass?INK_BRASS:col||COL.fink;ctx.fillText(txt,x,y);
+}
+// the win (FX.st.win counts 2.4 s down, in real time while the paused dish keeps drawing): three brass rings spread from
+// the grown cell, .35 s apart. Reduced motion: one still halo, fading
+function drawWin(px){
+  const w=FX.st.win;if(!(w>0)||!player)return;
+  const k=2.4-w,r=player.dr||player.r;ctx.strokeStyle=COL.brass;ctx.lineWidth=3*px;
+  for(let i=0;i<3;i++){const u=RM?.5:k-i*.35;if(u<0||u>1.4)continue;
+    ctx.globalAlpha=(1-u/1.4)*.9*(RM?w/2.4:1);ctx.beginPath();ctx.arc(player.x,player.y,r*(1.1+u*2.2),0,TAU);ctx.stroke();if(RM)break}
+  ctx.globalAlpha=1;
+}
+// bitten, or under 30% health: the #hurt vignette's opacity, written only when it changes (in steps of .02). The bite's
+// strength (FX.st.hurt, decaying 2.2/s) or a slow pulse while health is low (static under reduced motion); none while
+// paused or off play
+let hurtO='0';
+function drawHurt(){
+  let v=0;
+  if(mode==='play'&&!paused&&player){v=FX.st.hurt;if(player.hp<player.maxHp*.3)v=Math.max(v,RM?.16:.12+.08*Math.sin(t*5.5))}
+  const o=String(Math.round(clamp(v,0,1)*50)/50);if(o!==hurtO){hurtO=o;hEl('hurt').style.opacity=o}
+}
+// a hunter that can eat you has drifted in (announce): a red arc pulses on the inside of the rim toward it, where the
+// phone HUD panels can't cover it (screen space, after the frame layer). Reduced motion: still, at .75
+function drawThreatArc(){
+  if(!player||deathCam&&deathCam.t>0)return; // like the edge arrows: the camera isn't on the player then
+  for(const c of cells){if(!(c.announce>0)||c.dead||!canEat(c,player))continue;
+    const a=Math.atan2(c.y-player.y,c.x-player.x);
+    ctx.save();ctx.strokeStyle=COL.danger;ctx.globalAlpha=(RM?.75:.55+.45*Math.sin(t*9))*Math.min(1,c.announce);ctx.lineWidth=4;ctx.lineCap='round';
+    ctx.beginPath();ctx.arc(CX,CY,FR-5,a-.24,a+.24);ctx.stroke();ctx.restore()}
 }
 // in screen space, under the cells (between the food and the cells, at 70%): it used to paint over them
 function drawScaleBar(s){
@@ -1425,8 +1523,8 @@ function drawEdgeArrows(){
     if(!canEat(c,player)||(player.g.eye<2&&!(c.announce>0)))continue;
     const dx=c.x-player.x,dy=c.y-player.y,d=Math.hypot(dx,dy);
     if(d<cam.v*.95||d>cam.v*2.4)continue;
-    const a=Math.atan2(dy,dx),x=CX+Math.cos(a)*(FR-16),y=CY+Math.sin(a)*(FR-16);
-    ctx.save();ctx.translate(x,y);ctx.rotate(a);ctx.fillStyle=COL.danger;ctx.globalAlpha=.85;
+    const a=Math.atan2(dy,dx),x=CX+Math.cos(a)*(FR-16),y=CY+Math.sin(a)*(FR-16),sc=c.announce>0&&!RM?1+.3*Math.max(0,Math.sin(t*9)):1; // a new arrival's pulses
+    ctx.save();ctx.translate(x,y);ctx.rotate(a);ctx.scale(sc,sc);ctx.fillStyle=COL.danger;ctx.globalAlpha=.85;
     ctx.beginPath();ctx.moveTo(8,0);ctx.lineTo(-5,-7);ctx.lineTo(-5,7);ctx.closePath();ctx.fill();ctx.restore();
   }
 }
@@ -1478,14 +1576,17 @@ function render(){
       const sx=CX+bx*FR/700,sy=CY+by*FR/700;ctx.globalAlpha=b.a;ctx.beginPath();ctx.arc(sx,sy,b.r*FR,0,TAU);ctx.fill()}
     ctx.globalAlpha=1;
   }
-  const world=()=>{ctx.save();ctx.translate(CX,CY);ctx.scale(s,s);ctx.translate(-cam.x,-cam.y)};
+  // the world transform carries the bite's kick (FX.st.kx/ky, screen px): the world jolts, the microscope frame and the
+  // HUD stay still
+  const kx=FX.st.kx,ky=FX.st.ky,world=()=>{ctx.save();ctx.translate(CX+kx,CY+ky);ctx.scale(s,s);ctx.translate(-cam.x,-cam.y)};
   world();drawGrid(px);drawRim(px);drawFood();ctx.restore();
   drawScaleBar(s); // screen space, under the cells
-  world();drawCells(px);drawParts(px);ctx.restore();
+  world();drawCells(px);drawParts(px);drawWin(px);ctx.restore();
   ctx.restore();
   ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(vigLayer,0,0);ctx.setTransform(DPR,0,0,DPR,0,0);
+  drawHurt();
   // screen-space drawing after the frame blit is not clipped: it must stay inside radius FR (the joystick excepted)
-  drawEdgeArrows();
+  drawThreatArc();drawEdgeArrows();
   drawJoy();
 }
 // render() outside the loop (after a resize), unwinding the save()s a throw skipped like frame() does
@@ -1594,10 +1695,10 @@ function placeTip(){
 // the first tap's mark on a phone: an inset brass glow for 4 s ('tap again to evolve')
 let armedI=-1,armT=0;
 function disarm(){clearTimeout(armT);if(armedI>=0)upBtns[armedI].classList.remove('armed');armedI=-1}
-function arm(i){disarm();armedI=i;upBtns[i].classList.add('armed');armT=setTimeout(disarm,4000)}
+function arm(i){disarm();armedI=i;upBtns[i].classList.remove('got');upBtns[i].classList.add('armed');armT=setTimeout(disarm,4000)}
 // can't afford it: shake the DNA box (wide tray) and the tapped trait, and flash its cost and the small DNA readout
 // red (#dnaBox is hidden on phones, so the trait button and #dna2 carry the "no" there)
-const nope=i=>{bumpEl($('dnaBox'),'nope');bumpEl(upBtns[i],'nope');bumpEl($('dna2'),'bad');FX.nope()};
+const nope=i=>{bumpEl($('dnaBox'),'nope');upBtns[i].classList.remove('got');bumpEl(upBtns[i],'nope');$('dna2').classList.remove('bump');bumpEl($('dna2'),'bad');FX.nope()};
 // A trait button's tap or click. Desktops and tablets buy at once. Phones (COMPACT): the first tap on a trait the player
 // hasn't read shows its card and arms it (or says what it needs, with the 'no' shake), later taps buy; a maxed trait
 // says so; an unaffordable one shakes and says what it needs
@@ -1624,16 +1725,27 @@ function buy(i){
   learn(u.k); // keys 1-7 and a desktop click count as knowing the trait: a phone never previews it afterwards
   const c=cost(u);
   if(dna<c){nope(i);return false}
-  const pv=traitPreview(i),before=stageName(player);
+  const pv=traitPreview(i),before=stageName(player),oldR=player.r;
   dna-=c;player.lv[u.k]++;applyLv(player);disarm();FX.buy(u.k,player.lv[u.k]);
+  // the membrane swells to its new size (FX.tick; a swell still running carries on toward the new size); reduced motion: at once
+  if(player.r!==oldR&&!RM&&player.dr===undefined){player.dr=oldR;player.drv=0}
   if(!(hints&4)){coach(4);unnudge(el=>el!==$('burst'))} // the first evolve ends the traits' nudges
   const nm=plain(u.name),L=ROMAN[player.lv[u.k]];
   floater(player.x,player.y-player.r-8,`${nm} ${L}`,COL.brass,13,600);youT=0; // the floater takes the 'you' label's place
   if(u.k==='jaws'&&player.lv.jaws===1&&!(hints&16)){coach(16);toast('Jaws: you can eat cells 12% smaller than you.',{pri:2,ms:5000})}
   const after=stageName(player),winning=player.lv.size>=9&&!won;
-  if(after!==before){const nx=nextStage(player);toast(`Stage reached: ${after}.`+(nx?` Next: ${nx[1]} at Membrane ${ROMAN[nx[0]]}.`:''));if(!winning)FX.stage()} // the win's chord stands for Leviathan
-  if(winning){won=true;paused=true;FX.win();$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));showOnly('ovWin');$('contBtn').focus()}
+  // a brass ring and sparks from you, the button flashes brass. Not on the winning buy: the win has its own rings
+  // (drawWin), and the game pauses for them
+  if(!winning){ring(player,COL.brass,player.r*1.05,player.r*2.4,.6,2);spray(player.x,player.y,COL.brass,10,60,1.5,.6,player.r)}
+  upBtns[i].classList.remove('nope');bumpEl(upBtns[i],'got');
+  if(after!==before){const nx=nextStage(player);toast(`Stage reached: ${after}.`+(nx?` Next: ${nx[1]} at Membrane ${ROMAN[nx[0]]}.`:''));if(!winning)FX.stage();bumpEl($('stage'),'bump')} // the win's chord stands for Leviathan
+  if(winning){won=true;paused=true;FX.win();$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));
+    // the card waits while the rings spread (CSS #ovWin: 1.6 s, 0.5 s under reduced motion), taking no taps or keys
+    // until it starts to show; Escape still closes it at once
+    const ov=$('ovWin');ov.inert=true;showOnly('ovWin');
+    clearTimeout(winT);winT=setTimeout(()=>{ov.inert=false;if(!ov.hidden)$('contBtn').focus()},RM?500:1600)}
   refreshHud(true);
+  const pip=upBtns[i].querySelectorAll('.pips i')[player.lv[u.k]-1];if(pip)bumpEl(pip,'new'); // the level just lit
   if(!paused){
     if(COMPACT.matches)showTip(`<b>Evolved ${nm} ${L}</b>: ${fxFull(u)}${pv.length?`<br><span class="tn">${pvHtml(pv)}</span>`:''}`,2200);
     else if(tipBtn===upBtns[i])showTip(traitCard(i,'hover'),0,tipBtn); // the hovered card moves on to the next level
@@ -1665,10 +1777,26 @@ const setBar=(id,f,low)=>{f=Math.round(clamp(f,0,1)*200)/200;
   if(hudC[id+'.low']!==low){hudC[id+'.low']=low;hEl(id).classList.toggle('low',low)}};
 const DNA_U='<span class="hide-sm"> DNA</span>'; // a trait's cost: '3 DNA', or '3' and a DNA dot (CSS) in the compact tray
 const goalTxt=()=>'Leviathan '+(player?player.lv.size:0)+'/9';
+// the DNA and the name the HUD last showed in play (-1, '': none yet, so a new lineage or a resume doesn't flash them)
+let hudDna=-1,hudName='';
+// item 13's one-shot classes go once their animation has played, or was cut off (a layout change hid its element), so
+// none lingers to replay when a layout change shows its element again. A paused game writes nothing to the HUD (item 03):
+// one that ends while paused waits in oneShotLeft and goes as play resumes (showOnly(null)). One that bumpEl restarted
+// is running again by the time its old animation's event arrives, and is kept
+const ONE_SHOT={got:'got',pip:'new',pipRM:'new',bump:'bump',bumpRM:'bump',renamed:'renamed'};
+const oneShotLeft=[];
+const animRunning=(el,n)=>{try{return !!el.getAnimations&&el.getAnimations().some(a=>a.animationName===n)}catch(e){return false}};
+function oneShotDone(e){const c=ONE_SHOT[e.animationName],el=e.target;
+  if(!c||!el||!el.classList||!el.classList.contains(c)||animRunning(el,e.animationName))return;
+  if(paused)oneShotLeft.push([el,c,e.animationName]);else el.classList.remove(c)}
+document.addEventListener('animationend',oneShotDone);document.addEventListener('animationcancel',oneShotDone);
+function flushOneShots(){for(const [el,c,n] of oneShotLeft.splice(0))if(!animRunning(el,n))el.classList.remove(c)}
 function refreshHud(force){
   if(force)for(const k in hudC)delete hudC[k];
   if(player){
-    setT('name',binomial(player.g,player.r));
+    const nm=binomial(player.g,player.r);
+    if(mode==='play'){if(hudName&&nm!==hudName)bumpEl(hEl('name'),'renamed');hudName=nm} // a new name glows brass
+    setT('name',nm);
     setT('stage',stageName(player));
     setT('genN',gen);setT('goal',goalTxt());setT('metaL',goalTxt());
     const ef=player.en/player.maxEn,hf=player.hp/player.maxHp;
@@ -1696,6 +1824,9 @@ function refreshHud(force){
     hudC.noPlayer=true;
     UP.forEach((u,i)=>{delete hudC['up'+i];const b=upBtns[i];b.disabled=true;b.classList.remove('can');b.querySelector('.cost').innerHTML=u.base+DNA_U});
   }
+  // DNA rose: bump the readout on screen (#dna2 in the compact layouts, #dna elsewhere: a class left on the hidden one
+  // would play when a rotation shows it)
+  if(mode==='play'){if(hudDna>=0&&dna>hudDna){const d=hEl(COMPACT.matches?'dna2':'dna');d.classList.remove('bad');bumpEl(d,'bump')}hudDna=dna}
   setT('dna',dna);setT('dna2','DNA '+dna);
   const c=lastCensus;setT('nG',c.g);setT('nH',c.h);setT('nK',c.k);
   // the news line: an item for 8 s of play (brass for the first 2.5 s), then the most common rival. The compact HUD has
@@ -1756,7 +1887,7 @@ const UPD_MSG='Update downloaded. It loads next time you open the game.';
 let updShown=false,updToast=false;
 function showOnly(id){for(const o of['ovTitle','ovOver','ovWin','ovPause'])$(o).hidden=o!==id;$('hud').inert=!!id;still=0;
   if(id){wakeOff();dropBack();hideTip();disarm();drawPortraits($(id));FX.rest()}
-  else if(mode==='play'){wakeOn();armBack();if(updToast){updToast=false;toast(UPD_MSG)}}
+  else{if(!paused)flushOneShots();if(mode==='play'){wakeOn();armBack();if(updToast){updToast=false;toast(UPD_MSG)}}}
 }
 function togglePause(){
   if(mode!=='play')return;
@@ -1863,7 +1994,8 @@ function frame(now){
   // Play: skip a vsync that comes <10 ms after the last frame, so 120/144 Hz screens draw 60/72 fps (60 and 90 Hz
   // unchanged; the sim is dt-based). Behind the title and game-over cards the drifting dish only needs ~30 fps.
   if(gap<(mode==='play'?10:30))return;
-  // Paused (and behind the win card) the scene is frozen: draw two frames, then leave it on screen (see wake()).
+  // Paused (and behind the win card) the scene is frozen: draw two frames, then leave it on screen (see wake(): the
+  // win's rings keep it drawing for 2.6 s).
   if(paused&&still>1&&now>=wakeUntil){last=now;return}
   still=paused?still+1:0;
   const raw=gap/1000,dt=Math.min(.05,Math.max(0,raw));last=now;
@@ -1877,6 +2009,7 @@ function frame(now){
   if(mode==='play'&&!paused&&!document.hidden&&raw<.5){aqT+=Math.min(raw,.05);if(raw<.02)aqF++;
     if(++aqN>=45){const a=aqT/aqN;aqS=a>.035||(a>.0275&&aqF>=3)?aqS+1:0;aqN=aqT=aqF=0;
       if(aqS>=2){aqS=0;if(DPR>1){maxDPR=Math.max(1,DPR-.5);resize()}else lowFx=true}}}
+  try{FX.tick(dt);if(paused&&FX.st.win>0)stepParts(dt)}catch(e){onErr(e)} // the field's springs and fades, in real time (also in slow motion, and in the win)
   // a throwing update() skips the autosave, so the last good save is kept
   try{
     if(!paused){update(dt*(deathCam&&deathCam.t>0&&!RM?.5:1));updErr=false} // the death beat runs at half speed
