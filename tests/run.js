@@ -4120,6 +4120,14 @@ let BASE;
     await ctx.setOffline(false);
     const mf = await page.evaluate(async () => (await fetch('manifest.webmanifest')).json());
     check(mf.icons.some(i => i.sizes === '512x512') && mf.icons.some(i => i.sizes === '192x192') && mf.display === 'standalone', 'manifest is installable');
+    // A neighbour's offline copy survives ours. CacheStorage belongs to the whole host, so another site on the same
+    // github.io account keeps working. Read from the source, because activate only runs when sw.js itself changes.
+    const swSrc = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+    const act = swSrc.slice(swSrc.indexOf("addEventListener('activate'"), swSrc.indexOf("addEventListener('fetch'"));
+    check(/caches\.keys\(\)/.test(act) && /startsWith\('pathwarden-'\)/.test(act), 'sw.js deletes only its own old caches, so a site beside it keeps its offline copy');
+    await page.evaluate(() => caches.open('bq-v1').then(c => c.put('/neighbour', new Response('x'))));
+    await page.reload(); await page.waitForTimeout(300);
+    check((await page.evaluate(() => caches.keys())).includes('bq-v1'), "a neighbour's cache is still there after a reload");
     check(page.errors.length === 0, 'no console errors: ' + page.errors.join('|'));
     await ctx.close();
   }

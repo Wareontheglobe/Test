@@ -11,7 +11,9 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      // Only our own old caches. Caches are shared by every page on the host, so a site next to
+      // this one (another project on the same github.io account) must keep its offline copy.
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE && k.startsWith('pathwarden-')).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
