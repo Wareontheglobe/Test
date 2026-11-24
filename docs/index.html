@@ -528,7 +528,7 @@ const EPI={speed:'velox',spikes:'spinosa',armor:'loricata',photo:'viridis',eye:'
 // Rival species' names (nameSpecies): a genus by role, soft for grazers and predatory for hunters, never one of the
 // player's genera above (so a rival can't share your name), and an epithet from the founder's strongest trait. Made up
 // for this game; real organisms' names are avoided where known (Micromonas, the player's first genus, is a real alga and
-// stays as it was). Epithets are at most 9 letters, so 'Rival: P. vigilans (12)' fits the compact HUD's one line
+// stays as it was). Epithets are at most 9 letters, so 'Rival: Pla. vigilans (12)' fits the compact HUD's one line
 const SPG={g:['Placidella','Nubicyta','Pellucella','Serenocyta','Pallidella','Otiocyta','Glebomonas','Vagicella','Lumicyta','Tardicyta','Mollicella','Quietomonas','Lenicyta','Sedulella'],
   h:['Velocella','Praedocyta','Dentimonas','Furocella','Rapacyta','Mordicella','Lupicyta','Sicariella','Harpocyta','Avidomonas','Ferocella','Vorocyta','Cruentella','Insidella']};
 const SPE={speed:['cursor','agilis','fugax','celer','volans'],spikes:['hirsuta','echinata','aculeata','horrida','setosa'],
@@ -800,7 +800,7 @@ function spawnMigrant(){
 // otherwise a total of SP_D levels away from the founder does. Measured over 20 sim-minutes (eco.js-style, 3 runs each):
 // with no player, SP_D 2 founds 148-204 species and 45-49 reach 3 members; 3 founds 84-113, 24-35 reach 3 and 15-25
 // reach 4 (6-13 of those die out); 4 founds 64-79. Played (an algae bot), SP_D 2 filled nearly every 25 s news slot (25 species items) and crowded the trait news
-// out (6-8 items, 10-11 otherwise); at 3 trait news is untouched. A species is news at SP_NEWS living members: at 3 that
+// out (6-8 items, 10-11 otherwise); at 3 it barely moves (7.0 to 6.5 trait items per 12 minutes). A species is news at SP_NEWS living members: at 3 that
 // was 17-24 items in 20 minutes, most of them clades of exactly 3; at 4 it is 10-11, about one every two minutes.
 // A new species' founder genes are its first cell's. Drifting hunters are outsiders: one drifting species while the
 // drifters stay alike (they are sized from you, so they change as you grow), a new one when they have drifted SP_D away.
@@ -2267,7 +2267,7 @@ function refreshHud(force){
   setT('dna',dna);setT('dna2','DNA '+dna);
   const c=lastCensus;setT('nG',c.g);setT('nH',c.h);setT('nK',c.k);
   // the news line: an item for 8 s of play (brass for the first 2.5 s), then the most common rival. The compact HUD has
-  // one short line: 'Rival:' and the genus as an initial ('M. simplex'), news in its short form
+  // one short line: 'Rival:' and the genus's first three letters ('Pla. cursor'), news in its short form
   const cm=COMPACT.matches,age=mode==='play'?lineT-newsT:1e9,fresh=age<2.5;
   setT('dominant',age<8?(cm?newsSm:newsTxt):(cm?'Rival: ':'Most common rival: ')+(c.dom?`${cm?c.dom.replace(/^(\w{3})\w* /,'$1. '):c.dom} (${c.dn})`:'none yet'));
   if(hudC.fresh!==fresh){hudC.fresh=fresh;hEl('dominant').classList.toggle('fresh',fresh)}
