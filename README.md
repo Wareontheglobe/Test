@@ -2,11 +2,13 @@
 
 An original tower defense game for phones. It is one HTML file with no outside dependencies, so it runs with no internet connection.
 
+**Play it: https://wareontheglobe.github.io/pathwarden/**
+
 ## Play it offline on your phone
 
 **Best: install it as an app (works fully offline afterwards)**
-1. Host this folder on any static web host (for example GitHub Pages: repository Settings → Pages → deploy from this branch).
-2. Open the page once on your phone.
+1. Open https://wareontheglobe.github.io/pathwarden/ on your phone. (It is served by GitHub Pages from `main`, folder `/`. Pushing to `main` updates it; an installed copy downloads the new version the first time it is opened online and shows it from the launch after that. To host it somewhere else, copy this folder to any static web host.)
+2. Wait for the road menu to appear, so the game is cached for offline play.
 3. Add it to your home screen:
    - iPhone (Safari): Share → *Add to Home Screen*
    - Android (Chrome): menu ⋮ → *Install app* / *Add to Home screen*
