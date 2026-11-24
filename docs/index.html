@@ -1065,8 +1065,9 @@ $('tray').addEventListener('click',e=>{if(performance.now()<traySw){traySw=0;e.s
 // pointerup then does nothing, and its touchend is cancelled like a tap's. Moving 12 px first cancels it (it steers).
 // A card that just closed (cardClosedT, showOnly) doesn't pass on its double tap: a touch going down on one of these
 // buttons under 350 ms after it is the second half of a double tap on Resume, Keep evolving or Continue lineage, which
-// on phones sit over the tray. It does nothing (no onDown, no tap armed, no long press), and the click that may follow is
-// ignored as after any touch. Mouse and keyboard are unaffected.
+// on phones sit over the tray. It does nothing (no tap armed, no long press), and the click that may follow is ignored
+// as after any touch. Mouse and keyboard are unaffected. Burst (onDown) is exempt: a player who resumes and taps Burst
+// at once to escape must get the dash, and a stray burst only costs a little energy, where a stray tap could buy a trait.
 const LONG_MS=450;
 let tapGhost=null,cardClosedT=-1e9;
 document.addEventListener('click',e=>{const g=tapGhost;if(!g||!e.detail)return; // detail 0: keyboard or script
@@ -1078,7 +1079,7 @@ function onTap(b,fn,o={}){
   let id=null,x=0,y=0,tT=-1e9,act=false,lp=0;
   const run=e=>{tapGhost={t:performance.now(),x:e.clientX,y:e.clientY,b};if(e.pointerType==='touch')act=true;fn(e)};
   b.addEventListener('pointerdown',e=>{if(!isT(e))return;tT=performance.now();
-    if(performance.now()-cardClosedT<350)return;
+    if(!o.onDown&&performance.now()-cardClosedT<350)return;
     if(o.onDown)run(e);else{id=e.pointerId;x=e.clientX;y=e.clientY;
       if(o.onLong){const pid=id,pt=e.pointerType;clearTimeout(lp);
         lp=setTimeout(()=>{if(id!==pid||joy.id===pid)return;id=null;if(pt==='touch')act=true;o.onLong(e)},LONG_MS)}}});
@@ -2029,7 +2030,7 @@ function togglePause(){
   // the compact phone HUD hides kills and time, so the pause card shows them
   // the card says the lineage is saved, so it saves now (not only at the last 8 s autosave)
   if(paused&&player){saveGame();$('pauseStats').textContent=`Generation ${gen} · Kills ${kills} · ${fmt(lineT)} · ${goalTxt()}`;
-    $('saveNote').textContent=canSave?'Saved on this device. Close the game any time; Continue picks it up again.':"Not saved: this window can't keep your lineage, so it ends when you close it.";
+    $('saveNote').textContent=updErr?'Not saved just now: something went wrong. Your last autosave is kept.':canSave?'Saved on this device. Close the game any time; Continue picks it up again.':"Not saved: this window can't keep your lineage, so it ends when you close it.";
     renderGuide()}
   showOnly(paused?'ovPause':null);if(paused)$('resumeBtn').focus();
 }
@@ -2092,6 +2093,7 @@ if(location.protocol!=='file:')try{
 // the title card's last line (#best, at boot): the record, then whether this window keeps a lineage. With a save it is
 // the record alone: the Continue button says the rest (and a 360x640 card with a save and a record has 6 px to spare)
 function titleNote(hasSave){
+  if(!canSave&&hasSave)return"Your last save can be continued, but this window can't save new progress, so play from here ends when it closes.";
   if(!canSave)return'Saving is off in this window (private browsing or an embedded view), so a lineage ends when it closes.';
   let rec='';
   try{const b=JSON.parse(localStorage.getItem('coverslip-best')||'null'),g=b&&+b.gen;if(g>0)rec=`Your best lineage here: ${g} generation${g===1?'':'s'} in ${fmt(+b.time||0)}.`}catch(e){}
