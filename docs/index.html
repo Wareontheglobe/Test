@@ -215,6 +215,27 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 .stats .cause dd{font-style:normal;font-weight:400;font-size:14.5px;line-height:1.45}
 .stats .cause i{font-weight:600}
 .card .stats .dtip{margin:5px 0 0;font-size:13px;line-height:1.45;color:var(--ink-dim)}
+/* the lineage record (showRecord): a portrait of every form the line passed through, oldest to newest, then its key
+   moments. The strip scrolls sideways inside the card, which scrolls up and down; min-width 0 keeps the strip from
+   widening the card's grid. Each portrait's name and 'Gen N · m:ss' are text beside its (aria-hidden) canvas */
+.rec{display:grid;gap:8px;min-width:0}
+.forms{display:flex;align-items:flex-start;gap:3px;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;touch-action:pan-x pan-y;padding:2px 2px 6px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.forms:focus-visible{outline:2px solid var(--brass);outline-offset:1px;border-radius:4px}
+.form{flex:none;width:86px;display:grid;justify-items:center;align-content:start;gap:3px;text-align:center}
+.form canvas{display:block;width:60px;height:60px}
+.form b{font-style:italic;font-weight:600;font-size:12.5px;line-height:1.2;overflow-wrap:anywhere}
+.form span{font-family:var(--f-mono);font-size:10.5px;line-height:1.25;color:var(--ink-dim);font-variant-numeric:tabular-nums}
+.forms .arr{flex:none;width:14px;height:10px;margin-top:27px;fill:none;stroke:var(--brass);stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round} /* level with the portraits' centres */
+.forms .more{flex:none;margin-top:24px;font-family:var(--f-mono);font-size:10.5px;color:var(--ink-dim);white-space:nowrap}
+.moments{list-style:none;margin:0;padding:0;display:grid;gap:4px}
+.moments li{display:grid;grid-template-columns:3.3em minmax(0,1fr);column-gap:8px;font-size:13px;line-height:1.4;color:var(--ink-dim)}
+.moments time{font-family:var(--f-mono);font-size:11.5px;color:var(--brass);font-variant-numeric:tabular-nums;padding-top:1px}
+.moments i{color:var(--ink);font-weight:600}
+/* the pause card's copy is compact: smaller portraits and four moments (Resume stays in its sticky bar) */
+#pauseRec .form{width:76px}
+#pauseRec .form canvas{width:44px;height:44px}
+#pauseRec .arr{margin-top:19px}
+#pauseRec .more{margin-top:16px}
 /* the game-over card waits while the camera holds on the killer (or where you died), then fades in. It takes no taps or
    keys until it starts to show (inert, set by onPlayerDeath), so a finger still on the dish can't start a new lineage unseen */
 #ovOver:not([hidden]){animation:ovin .45s 1.1s both ease-out}
@@ -422,6 +443,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
     <h2 id="overHead">Your line has ended</h2>
     <dl class="stats" id="overStats"></dl>
     <p class="small" id="overSave"></p>
+    <section class="rec" id="overRec" aria-label="Your lineage" hidden></section>
     <div class="actions"><button class="btn primary" id="againBtn" type="button">Start a new lineage</button><button class="btn upd" id="updBtn2" type="button" hidden>Update ready · Reload</button></div>
   </div>
 </div>
@@ -433,6 +455,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
     <p>You have outgrown everything that lives in the dish. Larger hunters still drift in from outside, so keep evolving, or start again with a fresh cell.</p>
     <p class="small" id="winSave"></p>
     <dl class="stats" id="winStats"></dl>
+    <section class="rec" id="winRec" aria-label="Your lineage" hidden></section>
     <div class="actions"><button class="btn primary" id="contBtn" type="button">Keep evolving</button><button class="btn" id="newBtn" type="button">New lineage</button></div>
   </div>
 </div>
@@ -448,6 +471,7 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
       <p class="guide-loop" id="guideLoop"></p>
       <ul id="guideList"></ul>
     </section>
+    <section class="rec" id="pauseRec" aria-label="Your lineage so far" hidden></section>
     <section class="guide" id="fieldGuide" aria-label="Field guide">
       <span class="eyebrow">Field guide</span>
       <ul class="legend" id="legendP"></ul>
@@ -714,6 +738,7 @@ function startLineage(){
   player=makeCell(x,y,10,{speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0},338,{isPlayer:true,life:Infinity,lv:{size:0,speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0}});
   recompute(player);player.hp=player.maxHp;player.en=40;player.shield=4;
   cells.push(player);
+  chron=[];chronAdd('start',`Began the line as ${binomial(player.g,player.r)}.`);
   // a sibling from the start: without one, a lineage that died before its first divide had no heir (1-4% of new ones).
   // Level with you or below: the 'you' label sits above you for the first 3 s
   const sib=makeCell(x+rand(-30,30),y+rand(0,30),9,{speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0},rand(330,346),{kin:true});sib.shield=4;cells.push(sib);
@@ -751,6 +776,18 @@ const SAVE_KEY='coverslip-save';
 let canSave=(()=>{try{localStorage.setItem('coverslip-probe','1');localStorage.removeItem('coverslip-probe');return true}catch(e){return false}})();
 let saveWarned=false;
 const r1=v=>Math.round(v*10)/10;
+// The lineage record (chron, saved): this lineage's moments, oldest first, each with the form the player had then (its
+// genes g and radius r), so the game-over, win and pause cards can show every form the line passed through (showRecord).
+// kind: start; form (a buy changed the species name); stage (a buy changed the stage); kill (the first); heir (a takeover,
+// with its cause); win; end (extinction). t is lineT in whole seconds. At most CHRON_MAX entries: when it is full the
+// first (how the line began) stays and the oldest after it goes
+let chron=[];
+const CHRON_MAX=60,CHRON_KINDS=['start','form','stage','kill','heir','win','end'];
+function chronAdd(kind,txt){
+  if(!player)return;
+  chron.push({t:Math.floor(lineT),gen,kind,txt,g:{...player.g},r:r1(player.r)});
+  if(chron.length>CHRON_MAX)chron.splice(1,chron.length-CHRON_MAX);
+}
 function snapshot(){
   if(mode!=='play'||!player||player.dead)return null;
   return{v:1,dna,gen,kills,lineT:r1(lineT),heirs,won,hints,maxSeen,migrantT:r1(migrantT),
@@ -758,7 +795,7 @@ function snapshot(){
       st:c.stalk>0?r1(c.stalk):undefined,an:c.announce>0?r1(c.announce):undefined,mg:c.migrant?1:undefined})),
     algae:algae.map(f=>[r1(f.x),r1(f.y),r1(f.r),r1(f.a)]),
     meat:meat.map(m=>[r1(m.x),r1(m.y),r1(m.r),r1(m.v),r1(m.life),r1(m.rot)]),
-    blooms:blooms.map(b=>({x:r1(b.x),y:r1(b.y),s:r1(b.s),vx:r1(b.vx),vy:r1(b.vy)})),hist:hist.slice(-80)};
+    blooms:blooms.map(b=>({x:r1(b.x),y:r1(b.y),s:r1(b.s),vx:r1(b.vx),vy:r1(b.vy)})),hist:hist.slice(-80),chron};
 }
 function restore(sv){
   if(!sv||sv.v!==1||!Array.isArray(sv.cells))return false;
@@ -785,13 +822,19 @@ function restore(sv){
     const okB=Array.isArray(sv.blooms)&&sv.blooms.length&&sv.blooms.every(b=>b&&fin([b.x,b.y,b.s,b.vx,b.vy]));
     const nb=okB?sv.blooms.map(({x,y,s,vx,vy})=>({x,y,s,vx,vy})):blooms;
     const nh=Array.isArray(sv.hist)?sv.hist.filter(p=>p&&fin([p.g,p.h,p.k])).slice(-80):[];
+    // the lineage record: a save from before it was kept has none ([]); an entry without a known kind, its words, a time,
+    // a generation or a form is dropped, and the genes it has are kept within their levels
+    const nr=Array.isArray(sv.chron)?sv.chron.filter(e=>e&&CHRON_KINDS.includes(e.kind)&&typeof e.txt==='string'&&e.g&&typeof e.g==='object'&&fin([e.t,e.gen,e.r])&&e.r>0)
+      .map(e=>{const g={};for(const k of GENES)g[k]=clamp(Math.round(num(e.g[k],0)),0,MAX[k]);return{t:Math.max(0,Math.floor(e.t)),gen:Math.max(1,Math.round(e.gen)),kind:e.kind,txt:e.txt.slice(0,240),g,r:e.r}}):[];
+    if(nr.length>CHRON_MAX)nr.splice(1,nr.length-CHRON_MAX);
     // maxSeen: the highest rival level announced. A gene the save lacks starts from what the rivals already carry, as a
     // new dish does (initWorld), so that isn't announced as news; a saved level is kept as it is (raising it to the live
     // maximum would skip the news of a level one rival carries but that hasn't spread yet)
     const ms={};
     for(const k of GENES){let m=0;for(const c of nc)if(!c.isPlayer&&!c.kin&&c.g[k]>m)m=c.g[k];ms[k]=clamp(Math.round(num(sv.maxSeen&&sv.maxSeen[k],m)),0,MAX[k])}
-    cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;maxSeen=ms;lastRivalNews=0;newsT=-1e9;unnudge();nudgeT=0;
+    cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;chron=nr;maxSeen=ms;lastRivalNews=0;newsT=-1e9;unnudge();nudgeT=0;
     dna=num(sv.dna,0);gen=Math.max(1,num(sv.gen,1));kills=num(sv.kills,0);lineT=num(sv.lineT,0);heirs=num(sv.heirs,0);won=!!sv.won;hints=num(sv.hints,0)|0;migrantT=num(sv.migrantT,75);
+    if(!chron.length)chronAdd('start',`Continued the line as ${binomial(player.g,player.r)}.`); // a save from before the record existed
     player.shield=2;youT=3;deathCam=deathCause=null;cam.x=player.x;cam.y=player.y;cam.v=viewR();FX.calm();hudDna=-1;hudName='';
     mode='play';paused=false;lastCensus=census();
     return true;
@@ -846,7 +889,7 @@ function kill(c,killer){
   for(let i=0;i<10;i++){const a=rand(TAU),s=rand(20,70);addPart({x:c.x,y:c.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.6,max:.6,col:hsl(dispHue(c),50,40,1),r:rand(1,2.2)})}
   if(killer&&killer.isPlayer){
     const gain=1+Math.floor(c.r/15);dna+=gain;kills++;
-    if(kills===1)toast(`First kill · +${gain} DNA`);
+    if(kills===1){toast(`First kill · +${gain} DNA`);chronAdd('kill',`First kill: ${binomial(c.g,c.r)}.`)}
     floater(c.x,c.y,`+${gain} DNA`,COL.brass,13,600);FX.kill();
   }
   if(c.isPlayer)onPlayerDeath(killer);
@@ -873,13 +916,15 @@ function onPlayerDeath(killer){
     // the heir is safe from the killer and from every stalking migrant for 10 s (they would come straight for it)
     for(const c of cells)if(c.stalk>0||c===killer){c.stalk=0;c.ignore=best;c.ignoreT=10;if(c.tgt===p||c.tgt===best)c.tgt=null}
     takeover(best);heirs++;FX.takeover((DEATH_T-DEATH_PAN)/(RM?1:.5)+.15); // its two notes as the camera reaches the heir
+    chronAdd('heir',`${causeText(deathCause,false)} Carried on as an offspring${shrank?', one size smaller':''}.`); // the heir's form
     toast(`${causeText(deathCause,COMPACT.matches)} You carry on as your offspring${shrank?', one size smaller':''}.`,{pri:2,ms:5000})}
   else{
     const final=binomial(p.g,p.r);
+    chronAdd('end',`${causeText(deathCause,false)} No offspring were left.`); // the last form, while player is still the dead cell
     player=null;mode='over';clearSave();FX.extinct();
     const prior=+readBest().gen||0,isBest=recordBest(gen,lineT); // the record before this lineage: none = the first one
     $('overHead').textContent=won?'Your Leviathan lineage has ended':!prior?'Your first lineage has ended':isBest?'A new record for this slide':'Your line has ended';
-    $('overStats').innerHTML=statsHTML(final,deathCause);
+    $('overStats').innerHTML=statsHTML(final,deathCause);showRecord('overRec');
     // its save is gone (clearSave above): say so, and where the record lives
     $('overSave').textContent=canSave?"An extinct lineage can't be continued. Your best record stays on this device.":"An extinct lineage can't be continued, and this window can't keep records.";
     // the card fades in once the death has been seen (CSS #ovOver); until then it takes no taps or keys
@@ -904,6 +949,44 @@ function statsHTML(name,dc){
   return cause+`<div><dt>Generations</dt><dd>${gen}</dd></div><div><dt>Time alive</dt><dd>${fmt(lineT)}</dd></div>
   <div><dt>Kills</dt><dd>${kills}</dd></div><div><dt>Descendants played</dt><dd>${heirs}</dd></div>
   <div class="wide"><dt>Final form</dt><dd>${name}</dd></div>`;
+}
+// The lineage record on a card (#overRec, #winRec, #pauseRec): a strip of portraits of every form the line passed through,
+// oldest to newest, joined by brass arrows, and below it the key moments with their times. Written when the card opens;
+// the portraits are drawn by drawPortraits (showOnly, resize), never per frame. compact (the pause card): smaller
+// portraits, fewer moments, and only once the line has had two forms. A form is a species name and a stage: the player's
+// radius is 10 x 1.15^Membrane, so its stage comes back from r
+const escHtml=s=>String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+const BIN_RE=new RegExp(`\\b(?:${[...GEN_H,...GEN_C].join('|')}) (?:${[...new Set([...Object.values(EPI),'simplex','mordax'])].join('|')})\\b`,'g'); // a species name, set in italics
+const formStage=e=>stageName({lv:{size:Math.round(Math.log(e.r/10)/Math.log(1.15))},g:e.g});
+function lineForms(){
+  const out=[];
+  for(const e of chron){const n=binomial(e.g,e.r),st=formStage(e),key=n+'|'+st,last=out[out.length-1];if(!last||last.key!==key)out.push({e,n,st,key})}
+  return out;
+}
+function showRecord(id,compact){
+  const box=$(id);if(!box)return;
+  const forms=lineForms();
+  box.hidden=!forms.length||compact&&forms.length<2;
+  if(box.hidden){box.textContent='';return}
+  // a long line keeps its first form and its latest ones (the strip scrolls sideways); the moments: the start, then the latest
+  const FM=compact?12:24,NM=compact?4:COMPACT.matches?6:8,size=compact?44:60;
+  const shown=forms.length>FM?[forms[0],...forms.slice(1-FM)]:forms,skip=forms.length-shown.length;
+  const arrow='<svg class="arr" viewBox="0 0 14 10" aria-hidden="true"><path d="M1 5h11.5M9 1.5 12.5 5 9 8.5"/></svg>';
+  let strip='';
+  shown.forEach((f,i)=>{
+    if(i)strip+=arrow;
+    if(i===1&&skip)strip+=`<span class="more" role="listitem">${skip} more</span>`+arrow;
+    strip+=`<div class="form" role="listitem"><canvas data-form="${i}" aria-hidden="true"></canvas><b>${escHtml(f.n)}</b><span>${f.st}<br>Gen ${f.e.gen} · ${fmt(f.e.t)}</span></div>`;
+  });
+  const ev=chron.filter(e=>e.kind!=='form'),mo=ev.length>NM?[ev[0],...ev.slice(1-NM)]:ev;
+  box.innerHTML=`<div class="eyebrow">${compact?'Your lineage so far':'Your lineage'}</div>`+
+    `<div class="forms" role="list" tabindex="0" aria-label="The forms your line passed through, oldest first">${strip}</div>`+
+    `<ol class="moments" aria-label="Key moments">${mo.map(e=>`<li><time>${fmt(e.t)}</time><span>${escHtml(e.txt).replace(BIN_RE,'<i>$&</i>')}</span></li>`).join('')}</ol>`;
+  // a bigger form is drawn bigger: its membrane's radius runs from 15% of the disc (a form with no size) to 30% for the
+  // largest on the strip, so a Protocell beside a Leviathan (3.5 times its radius) is still big enough to read
+  const fs=box.querySelector('.forms');if(fs)requestAnimationFrame(()=>{fs.scrollLeft=fs.scrollWidth}); // open on the newest forms
+  const rmax=Math.max(...shown.map(f=>f.e.r));
+  for(const cnv of box.querySelectorAll('canvas[data-form]')){const f=shown[+cnv.dataset.form];FORM_PT.set(cnv,{g:f.e.g,r:f.e.r,size,R:size*(.15+.15*f.e.r/rmax)})}
 }
 // The heir takes your traits (lv). Before the win it is one Membrane level smaller; after it, it keeps the Leviathan's
 // size: drifters are sized from you, so a shrinking heir met smaller drifters, sank further with each death, and buying
@@ -1373,7 +1456,7 @@ function resize(){
   drawSpark();
   still=0;
   aqN=aqT=aqF=aqS=0; // frames around a resize (new canvas, new layers) say nothing about the device: start afresh
-  for(const id of['ovTitle','ovPause'])if(!$(id).hidden)drawPortraits($(id)); // the DPR may have changed
+  for(const id of CARDS)if(!$(id).hidden)drawPortraits($(id)); // the DPR may have changed (the legend, the lineage record)
   // draw the new layout now: a resized canvas is blank, and the next drawn frame can be a few vsyncs away
   // (30 fps behind cards, none while paused)
   if(booted)paint();
@@ -1640,34 +1723,64 @@ function drawEdgeArrows(){
 // and granules, so a portrait is the same every time. Drawn when the card that holds it opens and on a resize
 // (drawPortraits), never per frame.
 const PT_DOTS=[[-.3,-.28],[.22,-.36],[.36,.12],[-.05,.38],[-.42,.16],[.12,-.05],[-.2,.02]];
-function portrait(cnv,kind,size){
+// the portraits' shared steps: size the canvas for the screen's DPR (cleared, in CSS px), paint the lit field's disc, make
+// a still cell (fixed angle, wobble and granules), scale a subject to fill k of the disc, and draw with the game's code
+function ptCanvas(cnv,size){
   const d=clamp(window.devicePixelRatio||1,1,3),n=Math.round(size*d);
   if(cnv.width!==n||cnv.height!==n){cnv.width=n;cnv.height=n}
   cnv.style.width=cnv.style.height=size+'px';
-  const g=cnv.getContext('2d');if(!g)return;
-  g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,n,n);g.setTransform(d,0,0,d,0,0);
+  const g=cnv.getContext('2d');if(!g)return null;
+  g.setTransform(1,0,0,1,0,0);g.clearRect(0,0,n,n);g.setTransform(d,0,0,d,0,0);return g;
+}
+function ptDisc(g,size){const h=size/2,gr=g.createRadialGradient(h,h*.8,size*.04,h,h,h);gr.addColorStop(0,COL.field);gr.addColorStop(1,COL.edge);
+  g.fillStyle=gr;g.beginPath();g.arc(h,h,h,0,TAU);g.fill()}
+function ptCell(r,gn,hue,o){const c=makeCell(0,0,r,{speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0,...gn},hue,{a:0,wob:0,...o});c.dots=PT_DOTS;return c}
+// fit: the subject's extent in units of its radius ([left, right, half height]) fills k of the disc's width
+function ptFit(g,size,r,[x0,x1,y],k=.7){const h=size/2,s=k*size/(r*Math.max(x1-x0,2*y));g.translate(h-(x0+x1)/2*r*s,h);g.scale(s,s);return 1/s}
+// the cells made here never join cells, and nextId is put back, so a portrait leaves the dish exactly as it was
+function ptDraw(g,fn){const id0=nextId,lf=lowFx;try{lowFx=false;withCtx(g,fn)}finally{lowFx=lf;nextId=id0}}
+function portrait(cnv,kind,size){
+  const g=ptCanvas(cnv,size);if(!g)return;
   const h=size/2;
   if(kind==='dna'){g.fillStyle=COL.brass;g.beginPath();g.arc(h,h,size*.2,0,TAU);g.fill();return} // the tray's DNA dot
-  const gr=g.createRadialGradient(h,h*.8,size*.04,h,h,h);gr.addColorStop(0,COL.field);gr.addColorStop(1,COL.edge);
-  g.fillStyle=gr;g.beginPath();g.arc(h,h,h,0,TAU);g.fill();
-  const id0=nextId,lf=lowFx;
-  const cell=(r,gn,hue,o)=>{const c=makeCell(0,0,r,{speed:0,jaws:0,spikes:0,armor:0,photo:0,eye:0,...gn},hue,{a:0,wob:0,...o});c.dots=PT_DOTS;return c};
-  // fit: the subject's extent in units of its radius ([left, right, half height]) fills 70% of the disc's width
-  const fit=(r,[x0,x1,y],k=.7)=>{const s=k*size/(r*Math.max(x1-x0,2*y));g.translate(h-(x0+x1)/2*r*s,h);g.scale(s,s);return 1/s};
-  try{lowFx=false;withCtx(g,()=>{
+  ptDisc(g,size);
+  const fit=(r,ext,k)=>ptFit(g,size,r,ext,k);
+  ptDraw(g,()=>{
     if(kind==='algae'){fit(3,[-2.3,2.3,2.3]);
       drawAlgae([{x:-3.2,y:2.4,r:3.2,a:.5},{x:3.4,y:1.2,r:2.7,a:2.2},{x:.4,y:-3.6,r:2.9,a:1.2}],false);return}
-    if(kind==='you'){const c=cell(10,{},ROLE0.k,{isPlayer:true});drawCell(c,fit(10,[-1.08,1.08,1.08]));return}
-    if(kind==='grazer'){const c=cell(9,{},ROLE0.g);drawCell(c,fit(9,[-1.08,1.08,1.08]));return}
-    const c=cell(12,{jaws:1},ROLE0.h);
+    if(kind==='you'){const c=ptCell(10,{},ROLE0.k,{isPlayer:true});drawCell(c,fit(10,[-1.08,1.08,1.08]));return}
+    if(kind==='grazer'){const c=ptCell(9,{},ROLE0.g);drawCell(c,fit(9,[-1.08,1.08,1.08]));return}
+    const c=ptCell(12,{jaws:1},ROLE0.h);
     if(kind==='hunter'){drawCell(c,fit(12,[-1.08,1.45,1.08],.74));return}
     // danger: the hunter inside its mark. In the field the mark's offsets are screen px (6 to the ring, 6 more to the
     // barb tips: a 13 px hunter's ring at 1.45 r); here they are r/12 each: the ring at 1.5 r, clear of the jaws (1.39 r)
     drawCell(c,fit(12,[-2,2,2],.82));drawDangerMark(0,0,12,12/12,1.3,Math.PI/6);
-  })}finally{lowFx=lf;nextId=id0}
+  });
 }
+// A recorded form's extent in units of its radius ([behind, ahead, half height]), as drawCell draws a pink cell: flagella
+// trail from .9 r, 1.1 + .18 per level long; jaws reach 1.12 + .13 per level ahead; spines and plating stand off the
+// membrane (1.16 + .09 and 1.07 + .04 per level), whose still outline reaches about 1.08
+function formExt(g){
+  const rim=Math.max(1.08,g.spikes?1.16+.09*g.spikes:0,g.armor?1.08+.04*g.armor:0);
+  return[-Math.max(rim,g.speed?2+.18*g.speed:0),Math.max(rim,g.jaws?1.14+.13*g.jaws:0),rim];
+}
+// A form from the lineage record ({g, r}, size, and R: its membrane's radius in CSS px, which showRecord sets from r so
+// the strip shows the line growing): the player's own pink cell with those traits, facing right, like the legend's 'you'.
+// Long flagella or jaws can't leave the disc: then the whole form shrinks to fit 88% of its width
+function formPortrait(cnv,f){
+  const g=ptCanvas(cnv,f.size);if(!g)return;
+  ptDisc(g,f.size);
+  const h=f.size/2,[x0,x1,y]=formExt(f.g),s=Math.min(f.R/f.r,.88*f.size/(f.r*Math.max(x1-x0,2*y)));
+  g.translate(h-(x0+x1)/2*f.r*s,h);g.scale(s,s);
+  ptDraw(g,()=>drawCell(ptCell(f.r,f.g,ROLE0.k,{isPlayer:true}),1/s));
+}
+const FORM_PT=new WeakMap(); // a lineage record's canvas -> the form it shows ({g, r, size, R}), set by showRecord
 // a portrait that fails (a canvas the browser won't give a context) must never stop a card opening or a resize
-function drawPortraits(root){if(root)for(const cnv of root.querySelectorAll('canvas[data-pt]'))try{portrait(cnv,cnv.dataset.pt,28)}catch(e){}}
+function drawPortraits(root){
+  if(!root)return;
+  for(const cnv of root.querySelectorAll('canvas[data-pt]'))try{portrait(cnv,cnv.dataset.pt,28)}catch(e){}
+  for(const cnv of root.querySelectorAll('canvas[data-form]'))try{const f=FORM_PT.get(cnv);if(f)formPortrait(cnv,f)}catch(e){}
+}
 function render(){
   ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(bgLayer,0,0);
   ctx.setTransform(DPR,0,0,DPR,0,0);
@@ -1843,7 +1956,7 @@ function buy(i){
   learn(u.k); // keys 1-7 and a desktop click count as knowing the trait: a phone never previews it afterwards
   const c=cost(u);
   if(dna<c){nope(i);return false}
-  const pv=traitPreview(i),before=stageName(player),oldR=player.r;
+  const pv=traitPreview(i),before=stageName(player),oldR=player.r,nameB=binomial(player.g,player.r);
   dna-=c;player.lv[u.k]++;applyLv(player);disarm();FX.buy(u.k,player.lv[u.k]);
   // the membrane swells to its new size (FX.tick; a swell still running carries on toward the new size); reduced motion: at once
   if(player.r!==oldR&&!RM&&player.dr===undefined){player.dr=oldR;player.drv=0}
@@ -1853,6 +1966,11 @@ function buy(i){
   if(deathCam&&deathCam.t>0)youAbove(fl);else youT=0; // the floater takes the 'you' label's place (in the death beat: youAbove, as in divide())
   if(u.k==='jaws'&&player.lv.jaws===1&&!(hints&16)){coach(16);toast('Jaws: you can eat cells 12% smaller than you.',{pri:2,ms:5000})}
   const after=stageName(player),winning=player.lv.size>=9&&!won;
+  // the lineage record: one entry per new form (a new species name or stage), naming the trait that made it
+  {const nameA=binomial(player.g,player.r),how=`evolved ${nm} ${L}`;
+    if(winning)chronAdd('win',`Reached Leviathan size as ${nameA}: ${how}.`);
+    else if(after!==before)chronAdd('stage',`Became ${nameA!==nameB?nameA+', ':''}a ${after}: ${how}.`);
+    else if(nameA!==nameB)chronAdd('form',`Became ${nameA}: ${how}.`)}
   // a brass ring and sparks from you, the button flashes brass. Not on the winning buy: the win has its own rings
   // (drawWin), and the game pauses for them
   // (reduced motion: no sparks, a still halo that fades)
@@ -1861,7 +1979,7 @@ function buy(i){
   if(after!==before){const nx=nextStage(player);toast(`Stage reached: ${after}.`+(nx?` Next: ${nx[1]} at Membrane ${ROMAN[nx[0]]}.`:''));if(!winning)FX.stage();bumpEl($('stage'),'bump')} // the win's chord stands for Leviathan
   if(winning){won=true;saveGame(); // the won lineage is kept now, not at the next autosave: the card says so
     $('winSave').textContent=canSave?'Saved: close the game any time and keep evolving later.':"This window can't save, so this lineage ends when it closes.";
-    paused=true;FX.win();$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));
+    paused=true;FX.win();$('winStats').innerHTML=statsHTML(binomial(player.g,player.r));showRecord('winRec');
     // the card waits while the rings spread (CSS #ovWin: 1.6 s, 0.5 s under reduced motion), taking no taps or keys
     // until it starts to show; Escape still closes it at once
     const ov=$('ovWin');ov.inert=true;showOnly('ovWin');
@@ -2031,7 +2149,7 @@ function togglePause(){
   // the card says the lineage is saved, so it saves now (not only at the last 8 s autosave)
   if(paused&&player){saveGame();$('pauseStats').textContent=`Generation ${gen} · Kills ${kills} · ${fmt(lineT)} · ${goalTxt()}`;
     $('saveNote').textContent=updErr?'Not saved just now: something went wrong. Your last autosave is kept.':canSave?'Saved on this device. Close the game any time; Continue picks it up again.':"Not saved: this window can't keep your lineage, so it ends when you close it.";
-    renderGuide()}
+    renderGuide();showRecord('pauseRec',true)}
   showOnly(paused?'ovPause':null);if(paused)$('resumeBtn').focus();
 }
 // Starting over when that would discard a lineage takes two taps: the first only arms the button for 4 s and says
