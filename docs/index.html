@@ -204,7 +204,8 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
 .legend b{font-weight:600;color:var(--ink)}
 .legend canvas{display:block;width:28px;height:28px}
 .only-sm{display:none} /* the compact layouts' wording (phones); .hide-sm is everyone else's */
-#fieldGuide .legend{gap:0} /* in the pause card its rows take the guide list's rules and padding, like the traits above */
+#fieldGuide .legend,#rivalGuide .legend{gap:0} /* in the pause card its rows take the guide list's rules and padding, like the traits above */
+#rivalGuide .warn{color:var(--danger-ink);font-weight:600} /* 'Can eat you now': words first, the colour only adds to them */
 .stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0}
 .stats div{border-top:1px solid var(--line);padding-top:6px}
 .stats dt{font-size:11.5px;color:var(--ink-dim)}
@@ -472,6 +473,11 @@ kbd{font-family:var(--f-mono);font-size:10px;color:var(--ink-dim);border:1px sol
       <ul id="guideList"></ul>
     </section>
     <section class="rec" id="pauseRec" aria-label="Your lineage so far" hidden></section>
+    <!-- the rival species now in the dish (showRivals); each canvas is a portrait of the species' largest member -->
+    <section class="guide" id="rivalGuide" aria-label="Rival species" hidden>
+      <span class="eyebrow">Rival species</span>
+      <ul class="legend" id="rivalList"></ul>
+    </section>
     <section class="guide" id="fieldGuide" aria-label="Field guide">
       <span class="eyebrow">Field guide</span>
       <ul class="legend" id="legendP"></ul>
@@ -519,6 +525,17 @@ const fxFull=u=>u.dn?u.fx+' '+u.dn:u.fx;
 const GEN_H=['Micromonas','Planktella','Dorsocyta','Megacella','Gigantocyta'];
 const GEN_C=['Lycomonas','Voracella','Raptocyta','Tyrannocyta','Leviathella'];
 const EPI={speed:'velox',spikes:'spinosa',armor:'loricata',photo:'viridis',eye:'oculata'};
+// Rival species' names (nameSpecies): a genus by role, soft for grazers and predatory for hunters, never one of the
+// player's genera above (so a rival can't share your name), and an epithet from the founder's strongest trait. Made up
+// for this game; real organisms' names are avoided where known (Micromonas, the player's first genus, is a real alga and
+// stays as it was). Epithets are at most 9 letters, so 'Rival: P. vigilans (12)' fits the compact HUD's one line
+const SPG={g:['Placidella','Nubicyta','Pellucella','Serenocyta','Pallidella','Otiocyta','Glebomonas','Vagicella','Lumicyta','Tardicyta','Mollicella','Quietomonas','Lenicyta','Sedulella'],
+  h:['Velocella','Praedocyta','Dentimonas','Furocella','Rapacyta','Mordicella','Lupicyta','Sicariella','Harpocyta','Avidomonas','Ferocella','Vorocyta','Cruentella','Insidella']};
+const SPE={speed:['cursor','agilis','fugax','celer','volans'],spikes:['hirsuta','echinata','aculeata','horrida','setosa'],
+  armor:['scutata','tecta','clipeata','munita','galeata'],photo:['solaris','viridula','lucida','chlorina','aprica'],
+  eye:['vigilans','perspicax','argus','oculifera','speculans'],jaws:['rapax','vorax','edax','ferox','mordens'],
+  none:['vulgaris','modesta','tenuis','humilis','placida','minuta','communis']};
+const SPE_ALL=Object.values(SPE).flat();
 
 const rand=(a=1,b)=>b===undefined?Math.random()*a:a+Math.random()*(b-a);
 const clamp=(v,a,b)=>v<a?a:v>b?b:v;
@@ -664,6 +681,8 @@ let errN=0,updErr=false; // frame errors so far; true while the last update() th
 // the census news line (news()): its two texts (wide HUD, compact HUD) and the lineT it came at; lastRivalNews: the lineT
 // of the last rival-evolution item. maxSeen (saved): per gene, the highest rival level announced so far
 let newsTxt='',newsSm='',newsT=-1e9,lastRivalNews=0;
+// the rival species (saved; see 'rival species' below): id -> record, the next id, and the lineT of the last species item
+let species=new Map(),nextSp=1,lastSpNews=0;
 
 function binomial(g,r){
   const i=clamp(Math.floor((r-6)/7),0,4);
@@ -717,6 +736,12 @@ function initWorld(){
   for(let i=0;i<7;i++)cells.push(newAI(true));
   // staggered ages: from age 0 the age>8 breeding gate released all 41 at t=8 s together (life spans are 100-170 s)
   for(const c of cells)c.age=rand(0,8);
+  // the founding species: one per starting variant (grazers and hunters, each with and without Flagella), so a new dish
+  // starts with two grazer and two hunter species without changing who it starts with
+  species=new Map();nextSp=1;lastSpNews=0;
+  const first={};
+  for(const c of cells){const key=(c.g.jaws?'h':'g')+c.g.speed;const s=first[key]||(first[key]=foundSpecies(c.g,c.r,null,false));joinSpecies(c,s,false)}
+  for(const s of species.values())s.born=0; // lineT still holds the last lineage's time here
   maxSeen={};GENES.forEach(k=>maxSeen[k]=Math.max(...cells.map(c=>c.g[k])));
 }
 function applyLv(p){
@@ -729,7 +754,7 @@ function startLineage(){
   if(mode==='play'&&player)recordBest(gen,lineT);
   else{const sv=loadSave();if(sv&&sv.v===1)recordBest(sv.gen||0,sv.lineT||0)}
   initWorld();
-  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=coachedNow();migrantT=75;lastRivalNews=0;newsT=-1e9;youT=3;clearSave();
+  dna=0;gen=1;kills=0;lineT=0;heirs=0;won=false;hints=coachedNow();migrantT=75;lastRivalNews=0;lastSpNews=0;newsT=-1e9;youT=3;clearSave();
   deathCam=deathCause=null;clearTimeout(overT);$('ovOver').inert=false;clearTimeout(winT);$('ovWin').inert=false;
   unnudge();nudgeT=0;FX.calm();hudDna=-1;hudName='';
   histT=1.5;
@@ -762,10 +787,129 @@ function spawnMigrant(){
   // it stalks you for 30 s before the win, 10 s after (then it hunts like any other): a Leviathan's upkeep empties a
   // divide's 45 energy in about 14 s of flight, so a 30 s stalk every 45-70 s starved the lineage down
   const c=makeCell(x,y,r,g,rand(285,315),{announce:5,stalk:won?10:30,migrant:true});
+  joinSpecies(c,outsiderSpecies(g,r),false);
   c.en=c.maxEn*.4;cells.push(c);FX.hunter();
   if(hints&8)toast('A larger hunter has drifted into the dish.',{pri:2});
   else{coach(8);toast('A larger hunter has drifted in. The red arrow at the edge points to it.',{pri:2,ms:5000})} // drawEdgeArrows, while announce>0
 }
+
+/* ---------- rival species ---------- */
+// Rivals belong to real lineages (clades), not to labels worked out from their genes. Every rival (not you, not your
+// kin) carries a species id c.sp; an offspring inherits its parent's, unless its genes have drifted far from the genes
+// its species was founded with: a flip between grazer and hunter (Jaws gained or lost) always founds a new species, and
+// otherwise a total of SP_D levels away from the founder does. Measured over 20 sim-minutes (eco.js-style, 3 runs each):
+// with no player, SP_D 2 founds 148-204 species and 45-49 reach 3 members; 3 founds 84-113, 24-35 reach 3 and 15-25
+// reach 4 (6-13 of those die out); 4 founds 64-79. Played (an algae bot), SP_D 2 filled nearly every 25 s news slot (25 species items) and crowded the trait news
+// out (6-8 items, 10-11 otherwise); at 3 trait news is untouched. A species is news at SP_NEWS living members: at 3 that
+// was 17-24 items in 20 minutes, most of them clades of exactly 3; at 4 it is 10-11, about one every two minutes.
+// A new species' founder genes are its first cell's. Drifting hunters are outsiders: one drifting species while the
+// drifters stay alike (they are sized from you, so they change as you grow), a new one when they have drifted SP_D away.
+// Species are bookkeeping, names and looks only: nothing in the game's rules reads them.
+// A record: {id, name, role 'g'|'h', g (founder genes), born (lineT), parent (id or null), pn (the parent's name, kept so a
+// pruned parent needs no lookup), peak, n (alive at the last census), ext (lineT it died out, or null), mig (outsiders),
+// told (its arrival was news, or it founded the dish), toldExt, top (it was once the most common rival), hue, dots}
+const SP_D=3,SP_NEWS=4,SP_KEEP=20,SP_BAND={g:[192,244],h:[272,324]};
+// a species' look: its cells share one granule layout (dots), which also carries the outline: lobes (3-5 bumps on the
+// membrane) and asp (elongation along the swim axis, area kept). A cell with dots of its own (you, kin, a portrait, a
+// cell a test stages) draws the plain outline, as before
+const SP_LOOKS=[[3,1],[4,1.07],[5,1],[3,1.14],[4,1],[5,1.07],[3,1.07],[4,1.14],[5,1.14]];
+const geneDist=(a,b)=>{let d=0;for(const k of GENES)d+=Math.abs((a[k]||0)-(b[k]||0));return d};
+// a rival's name as the game shows it: its species', or (a cell without one) the name its genes would give it
+function spName(c){const s=c&&c.sp&&species.get(c.sp);return s?s.name:c?binomial(c.g,c.r):''}
+// a unique name among the species on record (living ones always; the kept extinct ones too while names last)
+function nameSpecies(role,g){
+  let k='none',bv=0;for(const q in EPI)if(g[q]>bv){bv=g[q];k=q}
+  if(role==='h'&&g.jaws>=bv)k='jaws';
+  const all=new Set(),live=new Set();for(const s of species.values()){all.add(s.name);if(s.ext===null)live.add(s.name)}
+  const G=SPG[role],pick=a=>a[(Math.random()*a.length)|0];
+  for(let i=0;i<60;i++){const n=pick(G)+' '+pick(i<30?SPE[k]:SPE_ALL);if(!all.has(n))return n}
+  for(const a of G)for(const b of SPE_ALL){const n=a+' '+b;if(!live.has(n))return n}
+  return pick(G)+' '+pick(SPE[k]); // over 400 living species of one role: never in a dish capped at CAP cells
+}
+// a new species' look: the hue (in its role's band) farthest from the living species of its role, and the outline
+// least used among them, never its parent's
+function speciesLook(role,par){
+  const live=[];for(const s of species.values())if(s.ext===null&&s.role===role)live.push(s);
+  const [lo,hi]=SP_BAND[role];let hue=lo,bd=-1;
+  for(let i=0;i<9;i++){const h=lo+(hi-lo)*i/8;let d=99;for(const s of live)d=Math.min(d,Math.abs(s.hue-h));d+=rand(.5);if(d>bd){bd=d;hue=h}}
+  let li=0,bu=1e9;
+  SP_LOOKS.forEach(([l,a],i)=>{if(par&&par.dots.lobe===l&&par.dots.asp===a)return;let u=rand(.5);for(const s of live)if(s.dots.lobe===l&&s.dots.asp===a)u++;if(u<bu){bu=u;li=i}});
+  const dots=[];for(let i=0;i<7;i++){const a=rand(TAU),d=Math.sqrt(Math.random())*.55;dots.push([Math.cos(a)*d,Math.sin(a)*d])}
+  dots.lobe=SP_LOOKS[li][0];dots.asp=SP_LOOKS[li][1];
+  return{hue,dots};
+}
+function foundSpecies(g,r,par,mig){
+  const role=g.jaws>0?'h':'g',{hue,dots}=speciesLook(role,par);
+  const s={id:nextSp++,name:nameSpecies(role,g),role,g:{...g},born:Math.floor(lineT),parent:par?par.id:null,pn:par?par.name:null,
+    peak:0,n:0,ext:null,mig:!!mig,told:!par&&!mig,toldExt:false,top:false,hue,dots};
+  species.set(s.id,s);return s;
+}
+// c joins s: its id, its look, and its hue: the species' own (exact, its founder) or close to it, so members look alike
+function joinSpecies(c,s,exact){
+  c.sp=s.id;c.dots=s.dots;s.n++;
+  const [lo,hi]=SP_BAND[s.role];c.hue=exact?s.hue:clamp(s.hue+gauss()*2.5,lo,hi);
+}
+// the species an offspring of p (genes g) belongs to: p's, or a new one split from it
+function childSpecies(p,g,r){
+  const ps=p.sp&&species.get(p.sp);
+  if(!ps)return adoptSpecies(g,r,!!p.migrant);
+  if((g.jaws>0)!==(ps.g.jaws>0)||geneDist(g,ps.g)>=SP_D)return foundSpecies(g,r,ps,false);
+  return ps;
+}
+// a cell with no species (an old save, a cell made by hand): a living species of its role whose founder is near its
+// genes, else a new founding one
+function adoptSpecies(g,r,mig){
+  const role=g.jaws>0?'h':'g';let best=null,bd=SP_D;
+  for(const s of species.values())if(s.ext===null&&s.role===role&&s.mig===mig){const d=geneDist(g,s.g);if(d<bd){bd=d;best=s}}
+  return best||foundSpecies(g,r,null,mig);
+}
+function outsiderSpecies(g,r){return adoptSpecies(g,r,true)}
+// census(): count the living per species, note peaks, extinctions and the most common one; prune the table: an extinct
+// species that never reached SP_NEWS goes at once (it was never news), and only the SP_KEEP latest other extinct ones stay
+function countSpecies(){
+  for(const s of species.values())s.n=0;
+  for(const c of cells){if(c.isPlayer||c.kin||c.dead)continue;let s=c.sp&&species.get(c.sp);if(!s){s=adoptSpecies(c.g,c.r,!!c.migrant);c.sp=s.id}s.n++} // an adopted cell keeps its own look
+  let dom=null,ext=0;
+  for(const s of species.values()){
+    if(s.n>s.peak)s.peak=s.n;
+    if(s.n>0)s.ext=null;else if(s.ext===null)s.ext=Math.floor(lineT);
+    if(s.n>0&&(!dom||s.n>dom.n))dom=s;
+    if(s.ext!==null)ext++;
+  }
+  if(dom)dom.top=true;
+  if(ext)for(const s of species.values())if(s.ext!==null&&s.peak<SP_NEWS)species.delete(s.id);
+  let kept=0;for(const s of species.values())if(s.ext!==null)kept++;
+  if(kept>SP_KEEP){const old=[...species.values()].filter(s=>s.ext!==null).sort((a,b)=>a.ext-b.ext);for(const s of old.slice(0,kept-SP_KEEP))species.delete(s.id)}
+  return dom;
+}
+// Species news, on the census news line when no trait news is due (rivalNews: one item per 25 s, shared): a species
+// once it has SP_NEWS living members (most never get there: most new species are a cell or two that die out), and the
+// extinction of one that had SP_NEWS or more and was ever news (the founding species count). Stale items are dropped: a
+// birth that fell back under SP_NEWS, an extinction over a minute old. A new hunter species, and the end of one that was ever the
+// most common rival, also toast
+function speciesNews(){
+  let ex=null,nw=null;
+  for(const s of species.values()){
+    if(s.ext!==null){if(!s.toldExt){if(s.peak>=SP_NEWS&&s.told&&lineT-s.ext<60){if(!ex)ex=s}else s.toldExt=true}}
+    else if(!s.told&&s.n>=SP_NEWS&&(!nw||s.n>nw.n))nw=s;
+  }
+  // the compact HUD's one line takes the short forms, which fit from 360 px up: 'New · Qui. perspicax (12)'
+  const abbr=n=>n.replace(/^(\w{3})\w* /,'$1. ');
+  if(ex){ex.toldExt=true;lastSpNews=lineT;
+    news(`Extinct: ${ex.name}${ex.top?', once the most common rival':''}`,`Extinct · ${abbr(ex.name)}`);
+    if(ex.top)toast(`${ex.name} has died out.`,{pri:1});
+    return true}
+  if(nw){nw.told=true;lastSpNews=lineT;const cls=nw.role==='h'?'hunters':'grazers';
+    news(nw.mig?`New species: ${nw.name}, drifting ${cls} (${nw.n})`:`New species: ${nw.name} split from ${nw.pn||'its kind'} (${nw.n})`,`New · ${abbr(nw.name)} (${nw.n})`);
+    if(nw.role==='h'&&player&&cells.some(c=>c.sp===nw.id&&!c.dead&&canEat(c,player)))toast(`A new hunter species, ${nw.name}, is spreading.`,{pri:1}); // only one that can eat you now
+    return true}
+  return false;
+}
+// the species on record for snapshot(): plain data, the look as lobe/asp (its granules are drawn afresh on a restore).
+// The parent id is saved as pa: a cell's cosmetic 'parent' (the divide's neck) must never be saved, and items/13 looks
+// for that key in the whole save
+const spSave=()=>[...species.values()].map(s=>({id:s.id,name:s.name,role:s.role,g:s.g,born:s.born,pa:s.parent,pn:s.pn,peak:s.peak,ext:s.ext,
+  mig:s.mig?1:0,told:s.told?1:0,toldExt:s.toldExt?1:0,top:s.top?1:0,hue:r1(s.hue),lobe:s.dots.lobe,asp:s.dots.asp}));
 
 /* ---------- save & resume ---------- */
 const SAVE_KEY='coverslip-save';
@@ -790,15 +934,16 @@ function chronAdd(kind,txt){
 }
 function snapshot(){
   if(mode!=='play'||!player||player.dead)return null;
-  return{v:1,dna,gen,kills,lineT:r1(lineT),heirs,won,hints,maxSeen,migrantT:r1(migrantT),
+  return{v:1,dna,gen,kills,lineT:r1(lineT),heirs,won,hints,maxSeen,migrantT:r1(migrantT),spp:spSave(),nextSp,
     cells:cells.filter(c=>!c.dead).map(c=>({x:r1(c.x),y:r1(c.y),a:r1(c.a),r:r1(c.r),g:c.g,hue:r1(c.hue),age:r1(c.age),life:c.isPlayer?0:r1(c.life),hp:r1(c.hp),en:r1(c.en),kin:c.kin,p:c.isPlayer,lv:c.lv||null,
-      st:c.stalk>0?r1(c.stalk):undefined,an:c.announce>0?r1(c.announce):undefined,mg:c.migrant?1:undefined})),
+      st:c.stalk>0?r1(c.stalk):undefined,an:c.announce>0?r1(c.announce):undefined,mg:c.migrant?1:undefined,sp:c.sp||undefined})),
     algae:algae.map(f=>[r1(f.x),r1(f.y),r1(f.r),r1(f.a)]),
     meat:meat.map(m=>[r1(m.x),r1(m.y),r1(m.r),r1(m.v),r1(m.life),r1(m.rot)]),
     blooms:blooms.map(b=>({x:r1(b.x),y:r1(b.y),s:r1(b.s),vx:r1(b.vx),vy:r1(b.vy)})),hist:hist.slice(-80),chron};
 }
 function restore(sv){
   if(!sv||sv.v!==1||!Array.isArray(sv.cells))return false;
+  const sp0=species,next0=nextSp; // put back if the save turns out unreadable half way
   try{
     // Tolerant: every field has a default, so a v:1 save written by an older or newer build still loads.
     // A field added to snapshot() later must be read here through num() or another default.
@@ -813,9 +958,32 @@ function restore(sv){
       if(d.p){c.lv={};for(const u of UP)c.lv[u.k]=clamp(Math.round(num(d.lv&&d.lv[u.k],0)),0,MAX[u.k]);applyLv(c);np=c}else recompute(c);
       c.hp=clamp(num(d.hp,c.maxHp),1,c.maxHp);c.en=clamp(num(d.en,c.maxEn*.5),0,c.maxEn);
       c.stalk=num(d.st,0);c.announce=num(d.an,0);c.migrant=!!d.mg;
+      if(!d.kin&&!d.p&&Number.isInteger(d.sp))c.sp=d.sp;
       nc.push(c);
     }
     if(!np)return false;
+    // the rival species: a record without a whole-number id, a role its founder genes agree with or a name of two
+    // words is dropped (and so is a repeated id); the other fields have defaults. Their granules are drawn afresh. A
+    // rival whose species isn't on record (an old save has none) is grouped with the others of its role and genes
+    // (adoptSpecies), as a new dish's founding species are; one with a species keeps its saved hue
+    species=new Map();nextSp=1;
+    if(Array.isArray(sv.spp))for(const d of sv.spp){
+      if(!d||!Number.isInteger(d.id)||d.id<1||d.id>1e6||species.has(d.id)||!d.g||typeof d.g!=='object'||typeof d.name!=='string'||!/^[A-Z][a-z]+ [a-z]+$/.test(d.name)||d.name.length>40)continue;
+      const g={};for(const k of GENES)g[k]=clamp(Math.round(num(d.g[k],0)),0,MAX[k]);
+      const role=g.jaws>0?'h':'g';if(d.role!==role)continue;
+      const [lo,hi]=SP_BAND[role],lk=SP_LOOKS.find(([l,a])=>l===d.lobe&&a===d.asp)||SP_LOOKS[0],dots=[];
+      for(let i=0;i<7;i++){const a=rand(TAU),q=Math.sqrt(Math.random())*.55;dots.push([Math.cos(a)*q,Math.sin(a)*q])}
+      dots.lobe=lk[0];dots.asp=lk[1];
+      species.set(d.id,{id:d.id,name:d.name,role,g,born:Math.max(0,Math.floor(num(d.born,0))),parent:Number.isInteger(d.pa)?d.pa:null,
+        pn:typeof d.pn==='string'&&d.pn.length<=40&&/^[A-Z][a-z]+ [a-z]+$/.test(d.pn)?d.pn:null,peak:Math.max(0,Math.round(num(d.peak,0))),n:0,ext:Number.isFinite(d.ext)?Math.max(0,Math.floor(d.ext)):null,
+        mig:!!d.mig,told:!!d.told,toldExt:!!d.toldExt,top:!!d.top,hue:clamp(num(d.hue,(lo+hi)/2),lo,hi),dots});
+      nextSp=Math.max(nextSp,d.id+1);
+    }
+    nextSp=Math.max(nextSp,Number.isInteger(sv.nextSp)&&sv.nextSp<=1e6+1?sv.nextSp:1);
+    for(const c of nc){if(c.isPlayer||c.kin)continue;const s0=c.sp&&species.get(c.sp),s=s0&&s0.role===(c.g.jaws>0?'h':'g')?s0:null;
+      if(s){c.dots=s.dots;s.n++;s.ext=null}else{c.sp=0;const a=adoptSpecies(c.g,c.r,c.migrant);if(!a.n)a.born=Math.floor(num(sv.lineT,0));joinSpecies(c,a,false)}}
+    // two living species with one name (a save edited by hand): the later one is renamed
+    {const seen=new Set();for(const s of species.values())if(s.n>0){if(seen.has(s.name))s.name=nameSpecies(s.role,s.g);seen.add(s.name)}}
     const rows=(a,n)=>Array.isArray(a)?a.filter(w=>Array.isArray(w)&&w.length>=n&&fin(w.slice(0,n))):[];
     const na=rows(sv.algae,4).map(([x,y,r,a])=>({x,y,r,a,dead:false}));
     const nm=rows(sv.meat,6).map(([x,y,r,v,life,rot])=>({x,y,r,v,life,rot,dead:false}));
@@ -832,13 +1000,13 @@ function restore(sv){
     // maximum would skip the news of a level one rival carries but that hasn't spread yet)
     const ms={};
     for(const k of GENES){let m=0;for(const c of nc)if(!c.isPlayer&&!c.kin&&c.g[k]>m)m=c.g[k];ms[k]=clamp(Math.round(num(sv.maxSeen&&sv.maxSeen[k],m)),0,MAX[k])}
-    cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;chron=nr;maxSeen=ms;lastRivalNews=0;newsT=-1e9;unnudge();nudgeT=0;
+    cells=nc;player=np;parts=[];algae=na;meat=nm;blooms=nb;hist=nh;chron=nr;maxSeen=ms;lastRivalNews=0;lastSpNews=0;newsT=-1e9;unnudge();nudgeT=0;
     dna=num(sv.dna,0);gen=Math.max(1,num(sv.gen,1));kills=num(sv.kills,0);lineT=num(sv.lineT,0);heirs=num(sv.heirs,0);won=!!sv.won;hints=num(sv.hints,0)|0;migrantT=num(sv.migrantT,75);
     if(!chron.length)chronAdd('start',`Continued the line as ${binomial(player.g,player.r)}.`); // a save from before the record existed
     player.shield=2;youT=3;deathCam=deathCause=null;cam.x=player.x;cam.y=player.y;cam.v=viewR();FX.calm();hudDna=-1;hudName='';
     mode='play';paused=false;lastCensus=census();
     return true;
-  }catch(e){return false}
+  }catch(e){species=sp0;nextSp=next0;return false}
 }
 function saveGame(){if(updErr)return;const sv=snapshot();if(!sv)return;
   try{localStorage.setItem(SAVE_KEY,JSON.stringify(sv));canSave=true}
@@ -857,15 +1025,11 @@ function offspring(p){
   }
   const kin=p.isPlayer||p.kin;
   const r=clamp(p.r*(p.isPlayer?rand(.86,.96):1+gauss()*.07),5,kin?40:34);
-  let hue;
-  if(kin) hue=p.isPlayer?rand(330,346):clamp(p.hue+gauss()*3,326,350);
-  else{
-    const hunter=g.jaws>0;
-    if(hunter!==(p.g.jaws>0)) hue=hunter?rand(275,320):rand(195,240);
-    else hue=clamp(p.hue+gauss()*4,hunter?268:188,hunter?328:248);
-  }
+  // a rival's hue is its species' (joinSpecies): members look alike, and a new species gets a hue of its own
+  const hue=kin?(p.isPlayer?rand(330,346):clamp(p.hue+gauss()*3,326,350)):p.hue;
   const a=rand(TAU);
   const ch=makeCell(p.x+Math.cos(a)*p.r*1.3,p.y+Math.sin(a)*p.r*1.3,r,g,hue,{kin});
+  if(!kin){const s=childSpecies(p,g,r);joinSpecies(ch,s,s.n===0)} // s.n 0: ch founds s
   ch.vx=Math.cos(a)*50;ch.vy=Math.sin(a)*50;
   cells.push(ch);
   return ch;
@@ -889,7 +1053,7 @@ function kill(c,killer){
   for(let i=0;i<10;i++){const a=rand(TAU),s=rand(20,70);addPart({x:c.x,y:c.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.6,max:.6,col:hsl(dispHue(c),50,40,1),r:rand(1,2.2)})}
   if(killer&&killer.isPlayer){
     const gain=1+Math.floor(c.r/15);dna+=gain;kills++;
-    if(kills===1){toast(`First kill · +${gain} DNA`);chronAdd('kill',`First kill: ${binomial(c.g,c.r)}.`)}
+    if(kills===1){toast(`First kill · +${gain} DNA`);chronAdd('kill',`First kill: ${spName(c)}.`)}
     floater(c.x,c.y,`+${gain} DNA`,COL.brass,13,600);FX.kill();
   }
   if(c.isPlayer)onPlayerDeath(killer);
@@ -906,7 +1070,7 @@ function recordBest(g,tm){
 // takeover notice or on the game-over card with a tip. killer: the cell that ate the player, the spiny cell it bit, or
 // null (it starved)
 function onPlayerDeath(killer){
-  const p=player,nm=killer&&binomial(killer.g,killer.r);
+  const p=player,nm=killer&&spName(killer); // a rival's species name
   deathCause=killer&&canEat(killer,p)?{kind:'eaten',name:nm,pct:Math.round((killer.r/p.r-1)*100),mig:!!killer.migrant}:killer?{kind:'spines',name:nm}:{kind:'starved'};
   deathCam={x:p.x,y:p.y,t:DEATH_T,k:killer||null,from:null};FX.death();
   if(!tipBtn)hideTip();disarm(); // a trait card or an armed trait was the dead cell's: clear the view for the beat
@@ -956,7 +1120,7 @@ function statsHTML(name,dc){
 // portraits, fewer moments, and only once the line has had two forms. A form is a species name and a stage: the player's
 // radius is 10 x 1.15^Membrane, so its stage comes back from r
 const escHtml=s=>String(s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
-const BIN_RE=new RegExp(`\\b(?:${[...GEN_H,...GEN_C].join('|')}) (?:${[...new Set([...Object.values(EPI),'simplex','mordax'])].join('|')})\\b`,'g'); // a species name, set in italics
+const BIN_RE=new RegExp(`\\b(?:${[...GEN_H,...GEN_C,...SPG.g,...SPG.h].join('|')}) (?:${[...new Set([...Object.values(EPI),'simplex','mordax',...SPE_ALL])].join('|')})\\b`,'g'); // a species name (yours or a rival's), set in italics
 const formStage=e=>stageName({lv:{size:Math.round(Math.log(e.r/10)/Math.log(1.15))},g:e.g});
 function lineForms(){
   const out=[];
@@ -1392,11 +1556,12 @@ function coaching(dt){
     const can=upBtns.filter((b,i)=>player.lv[UP[i].k]<MAX[UP[i].k]&&dna>=cost(UP[i]));
     if(can.length){nudgeT=20;for(const b of can)nudge(b)}}
 }
+// the census (every 1.5 s, sample()): grazers, hunters and kin alive, and the most common rival species (dom, dn)
 function census(){
-  let g=0,h=0,k=0;const names={};
-  for(const c of cells){if(c.isPlayer)continue;if(c.kin){k++;continue}if(c.g.jaws)h++;else g++;const n=binomial(c.g,c.r);names[n]=(names[n]||0)+1}
-  let dom=null,dn=0;for(const n in names)if(names[n]>dn){dn=names[n];dom=n}
-  return{g,h,k,dom,dn};
+  let g=0,h=0,k=0;
+  for(const c of cells){if(c.isPlayer)continue;if(c.kin){k++;continue}if(c.g.jaws)h++;else g++}
+  const top=countSpecies();
+  return{g,h,k,dom:top?top.name:null,dn:top?top.n:0};
 }
 let lastCensus={g:0,h:0,k:0,dom:null,dn:0};
 function sample(){
@@ -1409,10 +1574,11 @@ function sample(){
 // carried by 5+ grazers or 5+ hunters, or by 12%+ of that class (Jaws: hunters only), and always by 3 or more: the
 // hunters are often under 10, so 12% alone would announce a single mutant. Migrants don't count: they drift in with
 // Eyespot I and Plating already. One item per 25 s, none in a lineage's first 30 s, on the census news line (a single
-// mutant used to toast at once: 4-5 of them in the first 12 s)
+// mutant used to toast at once: 4-5 of them in the first 12 s). Species news (speciesNews) shares the 25 s spacing and
+// comes only when no trait news is due; lastRivalNews stays the time of the last trait item
 const SNAME={...GNAME,photo:'Chloro'}; // the compact HUD's trait names, as in the compact tray
 function rivalNews(){
-  if(mode!=='play'||!(lineT>30)||lineT-lastRivalNews<=25)return;
+  if(mode!=='play'||!(lineT>30)||lineT-lastRivalNews<=25||lineT-lastSpNews<=25)return;
   const C=lastCensus,ok=(n,of)=>n>=3&&(n>=5||n>=of*.12);
   for(const k of GENES){
     const L=(maxSeen[k]||0)+1;if(L>MAX[k])continue;
@@ -1424,6 +1590,7 @@ function rivalNews(){
     if(k==='jaws')toast('Hunters with Jaws '+ROMAN[L]+' are spreading. Their bites hurt more.',{pri:1});
     return;
   }
+  speciesNews();
 }
 
 /* ---------- rendering ---------- */
@@ -1542,7 +1709,10 @@ function drawCell(c,px){
   // drawn at dr while a bought Membrane swells (FX.tick), r*(1+gulp) for a moment after you eat
   const ro=roleOf(c),R=ROLE[ro],r=(c.dr||c.r)*(c.gulp>0?1+c.gulp:1),h=dispHue(c,ro),g=c.g,wa=RM?.3:1,hunter=ro==='h',prow=hunter?.16:0,lod=r/px<6;
   const sil=a=>{const ca=Math.cos(a);return ca>0?1+prow*ca*ca*ca:1}; // the outline's radius at angle a (no wobble), per r
-  ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.a);
+  // a rival species' outline rides on its shared granule layout (speciesLook): lobes on the membrane, and an
+  // elongation along the swim axis that keeps the area (so the cell's size reads the same); otherwise 3 lobes, round
+  const lobe=c.dots.lobe||3,asp=c.dots.asp||1;
+  ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.a);if(asp!==1)ctx.scale(asp,1/asp);
   // flagella
   if(g.speed>0){
     const n=Math.min(3,g.speed),len=r*(1.1+.18*g.speed);
@@ -1559,7 +1729,7 @@ function drawCell(c,px){
   }
   // membrane
   ctx.beginPath();
-  const NP=lowFx?16:28;for(let k=0;k<=NP;k++){const a=k/NP*TAU,ca=Math.cos(a),rr=r*(1+(.045*Math.sin(a*3+c.wob*1.7)+.03*Math.sin(a*5-c.wob*2.3))*wa+(ca>0?prow*ca*ca*ca:0));k?ctx.lineTo(ca*rr,Math.sin(a)*rr):ctx.moveTo(rr,0)}
+  const NP=lowFx?16:28;for(let k=0;k<=NP;k++){const a=k/NP*TAU,ca=Math.cos(a),rr=r*(1+(.045*Math.sin(a*lobe+c.wob*1.7)+.03*Math.sin(a*5-c.wob*2.3))*wa+(ca>0?prow*ca*ca*ca:0));k?ctx.lineTo(ca*rr,Math.sin(a)*rr):ctx.moveTo(rr,0)}
   ctx.closePath();
   ctx.fillStyle=hsl(h,R.f[0],R.f[1],R.f[2]);ctx.fill();
   ctx.strokeStyle=hsl(h,R.s[0],R.s[1],.95);ctx.lineWidth=Math.max(px*(hunter?1.8:1.2),r*R.w);ctx.stroke();
@@ -1775,11 +1945,38 @@ function formPortrait(cnv,f){
   ptDraw(g,()=>drawCell(ptCell(f.r,f.g,ROLE0.k,{isPlayer:true}),1/s));
 }
 const FORM_PT=new WeakMap(); // a lineage record's canvas -> the form it shows ({g, r, size, R}), set by showRecord
+// The pause card's Rival species: the living species with SP_NEWS or more members, most numerous first (at most 5), each
+// with a portrait of its largest member in the species' look, its name, role and count, and what it means to you now:
+// whether any member can eat you (canEat, as the danger ring), or you some of them. Written when the card opens
+const SP_PT=new WeakMap(); // a Rival species canvas -> the cell it shows ({g, r, hue, dots})
+function showRivals(){
+  const box=$('rivalGuide'),ul=$('rivalList');if(!box||!ul)return;
+  const big=new Map();
+  for(const c of cells){if(c.isPlayer||c.kin||c.dead||!c.sp)continue;const b=big.get(c.sp);if(!b||c.r>b.r)big.set(c.sp,c)}
+  const list=[...species.values()].filter(s=>s.ext===null&&s.n>=SP_NEWS&&big.has(s.id)).sort((a,b)=>b.n-a.n).slice(0,5);
+  box.hidden=!list.length||!player;
+  if(box.hidden){ul.textContent='';return}
+  ul.innerHTML=list.map((s,i)=>{let eat=false,prey=false;
+    for(const c of cells)if(c.sp===s.id&&!c.dead){if(canEat(c,player))eat=true;else if(canEat(player,c))prey=true}
+    const say=eat?'<span class="warn">Can eat you now</span>':prey?'You can eat the smaller ones':s.role==='h'?'Too small to eat you':'Harmless: eats algae';
+    return `<li><canvas data-sp="${i}" aria-hidden="true"></canvas><span><b><i>${escHtml(s.name)}</i></b> · ${s.n} ${s.role==='h'?'hunters':'grazers'}<br>${say}</span></li>`}).join('');
+  for(const cnv of ul.querySelectorAll('canvas[data-sp]')){const s=list[+cnv.dataset.sp],c=big.get(s.id);SP_PT.set(cnv,{g:{...c.g},r:c.r,hue:c.hue,dots:s.dots})}
+}
+// a species' portrait: its cell facing right, fitted to the disc like a lineage form (formExt), plus a hunter's prow and
+// the species' elongation
+function spPortrait(cnv,f,size){
+  const g=ptCanvas(cnv,size);if(!g)return;
+  ptDisc(g,size);
+  const e=formExt(f.g),a=f.dots.asp||1;if(f.g.jaws)e[1]=Math.max(e[1],1.32+.13*f.g.jaws);
+  const px=ptFit(g,size,f.r,[e[0]*a,e[1]*a,e[2]/a],.78);
+  ptDraw(g,()=>{const c=ptCell(f.r,f.g,f.hue);c.dots=f.dots;drawCell(c,px)});
+}
 // a portrait that fails (a canvas the browser won't give a context) must never stop a card opening or a resize
 function drawPortraits(root){
   if(!root)return;
   for(const cnv of root.querySelectorAll('canvas[data-pt]'))try{portrait(cnv,cnv.dataset.pt,28)}catch(e){}
   for(const cnv of root.querySelectorAll('canvas[data-form]'))try{const f=FORM_PT.get(cnv);if(f)formPortrait(cnv,f)}catch(e){}
+  for(const cnv of root.querySelectorAll('canvas[data-sp]'))try{const f=SP_PT.get(cnv);if(f)spPortrait(cnv,f,28)}catch(e){}
 }
 function render(){
   ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(bgLayer,0,0);
@@ -2072,7 +2269,7 @@ function refreshHud(force){
   // the news line: an item for 8 s of play (brass for the first 2.5 s), then the most common rival. The compact HUD has
   // one short line: 'Rival:' and the genus as an initial ('M. simplex'), news in its short form
   const cm=COMPACT.matches,age=mode==='play'?lineT-newsT:1e9,fresh=age<2.5;
-  setT('dominant',age<8?(cm?newsSm:newsTxt):(cm?'Rival: ':'Most common rival: ')+(c.dom?`${cm?c.dom.replace(/^(\w)\w* /,'$1. '):c.dom} (${c.dn})`:'none yet'));
+  setT('dominant',age<8?(cm?newsSm:newsTxt):(cm?'Rival: ':'Most common rival: ')+(c.dom?`${cm?c.dom.replace(/^(\w{3})\w* /,'$1. '):c.dom} (${c.dn})`:'none yet'));
   if(hudC.fresh!==fresh){hudC.fresh=fresh;hEl('dominant').classList.toggle('fresh',fresh)}
 }
 // msg on the census news line (the wide HUD), sm in the compact HUD
@@ -2149,7 +2346,7 @@ function togglePause(){
   // the card says the lineage is saved, so it saves now (not only at the last 8 s autosave)
   if(paused&&player){saveGame();$('pauseStats').textContent=`Generation ${gen} · Kills ${kills} · ${fmt(lineT)} · ${goalTxt()}`;
     $('saveNote').textContent=updErr?'Not saved just now: something went wrong. Your last autosave is kept.':canSave?'Saved on this device. Close the game any time; Continue picks it up again.':"Not saved: this window can't keep your lineage, so it ends when you close it.";
-    renderGuide();showRecord('pauseRec',true)}
+    renderGuide();showRecord('pauseRec',true);showRivals()}
   showOnly(paused?'ovPause':null);if(paused)$('resumeBtn').focus();
 }
 // Starting over when that would discard a lineage takes two taps: the first only arms the button for 4 s and says
