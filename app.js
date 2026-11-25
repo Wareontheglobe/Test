@@ -1494,6 +1494,11 @@ packagePending();
 if (!S.seenIntro) view = { name: "intro", step: 0 };
 else if (recapDue() && !S.settings.reviewer) view = { name: "recap" };
 render();
+// Home-screen shortcuts: …/#start goes straight into a lesson, …/#research opens the research list.
+if (view.name === "home" && !S.settings.reviewer && S.settings.token) {
+  if (location.hash === "#start" && openCards().length) startLesson(mixLesson(openCards()));
+  else if (location.hash === "#research") { view = { name: "later" }; render(); }
+}
 sync({ quiet: true });
 
 // Exposed for local testing only.

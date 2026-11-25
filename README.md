@@ -42,6 +42,8 @@ node tests/run.cjs            # all end-to-end tests
 node tests/run.cjs streak     # only tests whose name contains "streak"
 ```
 
+`./publish.sh` runs the tests and, if they pass, pushes the current branch and updates `gh-pages`.
+
 The tests drive the real app in headless Chromium against a pretend GitHub (`tests/harness.cjs`) and a made-up deck (`tests/fixture-deck.json`). Nothing leaves the machine. They need Playwright with Chromium installed. Run them before pushing a change to `gh-pages`.
 
 ## Files
@@ -51,4 +53,5 @@ The tests drive the real app in headless Chromium against a pretend GitHub (`tes
 | `index.html`, `app.css`, `app.js` | The app (no build step, no dependencies) |
 | `mascot.js` | Pip, drawn as inline SVG |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and installability |
+| `publish.sh` | Test, then publish to GitHub Pages |
 | `tests/` | End-to-end tests. `tests/vendor/axe.min.js` is the axe-core accessibility checker (MPL-2.0), used only by the tests |

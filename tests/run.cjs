@@ -251,6 +251,28 @@ test("answers given offline wait on the phone and upload on reconnect", async (S
   assert.strictEqual((await state()).outbox.length, 0);
 });
 
+test("once opened, the app starts with no connection at all", async (S) => {
+  const { ctx, page, state } = await S.open();
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.waitForTimeout(800);                                  // let the service worker finish saving the app's files
+  await ctx.setOffline(true);
+  await page.reload(); await page.waitForTimeout(800);
+  assert.ok(await page.$("[data-act=start]"), "home screen loads from the saved copy");
+  assert.ok(await page.$("text=Offline"));
+  await page.click("[data-act=start]"); await answer(page, "a"); await next(page);
+  assert.strictEqual(Object.keys((await state()).answers).length, 1);
+});
+
+test("home-screen shortcuts open a lesson or the research list", async (S) => {
+  const a = await S.open({ state: { seenIntro: true }, key: "" });
+  await a.page.evaluate((k) => { const s = JSON.parse(localStorage.getItem("blogquest.v1")); s.settings = { token: k }; localStorage.setItem("blogquest.v1", JSON.stringify(s)); }, GOOD_KEY);
+  await a.page.reload(); await a.page.waitForTimeout(900);           // cards download on this load
+  await a.page.goto(S.base + "#start"); await a.page.reload(); await a.page.waitForTimeout(600);
+  assert.ok(await a.page.$("[data-act=check]"), "#start lands in a lesson");
+  await a.page.goto(S.base + "#research"); await a.page.reload(); await a.page.waitForTimeout(600);
+  assert.strictEqual(await text(a.page, "h1.title"), "🔖 Research list");
+});
+
 test("a key that stops working shows a clear warning, and recovers", async (S) => {
   const { page, repo, state } = await S.open();
   await page.click("[data-act=start]"); await answer(page, "a"); await next(page);

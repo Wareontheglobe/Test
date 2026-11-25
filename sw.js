@@ -1,5 +1,5 @@
 // Offline support: the app shell is cached; GitHub API calls always go to the network.
-const VERSION = "bq-v6";
+const VERSION = "bq-v7";
 const SHELL = [
   "./", "index.html", "app.css", "app.js", "mascot.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",
@@ -20,16 +20,16 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== self.location.origin) return;
-  // Network first so updates arrive when online; fall back to cache offline.
-  e.respondWith(
-    fetch(e.request)
-      .then((res) => {
-        if (res.ok) {
-          const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put(e.request, copy));
-        }
-        return res;
-      })
-      .catch(() => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match("index.html")))
-  );
+  // Network first so updates arrive when online. If the network fails, or is so slow that
+  // the app would sit on a blank screen, use the saved copy instead.
+  const saved = () => caches.match(e.request, { ignoreSearch: true }).then((r) => r || caches.match("index.html"));
+  const fresh = fetch(e.request).then((res) => {
+    if (res.ok) {
+      const copy = res.clone();
+      caches.open(VERSION).then((c) => c.put(e.request, copy));
+    }
+    return res;
+  });
+  const slow = new Promise((resolve) => setTimeout(resolve, 3000)).then(saved).then((r) => r || fresh);
+  e.respondWith(Promise.race([fresh.catch(saved), slow]));
 });
