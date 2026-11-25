@@ -2,7 +2,10 @@
 
 A gamified, offline-first phone app for fact-checking a travel blog. Each lesson is a handful of "possible error" cards. Every card shows what the post says, what sources say, and suggested fixes. Pick one, and the answer gets uploaded so it can be applied to the blog.
 
-- Streaks, miles (XP), a daily goal, badges and passport stamps. Your guide is Pip, a little globe explorer.
+- Three-card lessons, a daily goal, a streak with a week view, miles and levels, badges and passport stamps. Your guide is Pip, a little globe explorer.
+- The streak freezes when there's nothing left to check, so running out of cards never breaks it.
+- A research list for cards that need digging first. It's saved to the private repo and can be emailed, shared or copied from the app.
+- Answers can be changed until they've been applied to the blog.
 - Works offline once it's on your home screen. Answers queue on the phone and upload when you're back online.
 - Cards and answers live in a **private** GitHub repo. This public repo contains only the app code.
 

@@ -11,25 +11,37 @@ import { pip } from "./mascot.js";
 // Cards come from that deck, nothing is sent anywhere, and progress stays in this browser.
 const DEMO = window.BQ_DEMO || null;
 const KEY = DEMO ? "blogquest.demo" : "blogquest.v1";
-const LESSON_SIZE = 5;
-const XP = { answer: 10, high: 5, note: 5, source: 5, later: 2 };
+const XP = { answer: 10, high: 5, note: 5, source: 5, later: 2, opened: 3 };
+// Miles needed for each rank.
+const LEVELS = [[0, "Tourist"], [50, "Wanderer"], [120, "Backpacker"], [250, "Explorer"], [450, "Pathfinder"], [700, "Globetrotter"], [1000, "Trailblazer"], [1500, "Legend"]];
+const STREAK_MILESTONES = [3, 7, 14, 30, 50, 100];
+// Lessons are bite-size: three cards, or everything that's left when that's four or fewer.
+const lessonSize = (n) => (n <= 4 ? n : 3);
 const SEV_ORDER = { high: 0, medium: 1, low: 2 };
 const FINE_REASONS = [
   ["first_hand", "I know first-hand"],
   ["source_wrong", "The source is wrong or out of date"],
   ["different_thing", "It's about something else"],
 ];
-const TYPE_ICON = { closed: "🚪", price: "💲", hours: "🕒", show: "🎭", link: "🔗", rule: "📋", other: "🔍" };
+const TYPE_ICON = { closed: "🚪", price: "💲", hours: "🕒", show: "🎭", link: "🔗", rule: "📋", typo: "✏️", consistency: "🔁", alt: "🖼️", other: "🔍" };
 
 const DEFAULTS = {
-  settings: { token: "", repo: "Wareontheglobe/blog-fixes", branch: "main", dailyGoal: 5, sound: true },
+  settings: { token: "", repo: "Wareontheglobe/blog-fixes", branch: "main", dailyGoal: 3, sound: true, name: "", email: "" },
   decks: {},        // deckId -> {id, sha, created, cards: []}
   answers: {},      // cardId -> answer record
-  later: [],        // cardIds parked in Investigations
+  later: [],        // cardIds on the research list
+  laterNotes: {},   // cardId -> {note, at} for cards on the research list
+  researchDirty: false, // the research list changed and needs saving to the repo
+  researchResolved: 0,  // research cards she has since decided
   pending: [],      // answers not yet packaged into an upload
   outbox: [],       // [{path, body}] files waiting to upload
   xp: 0,
-  streak: { count: 0, lastDay: "" },
+  streak: { count: 0, lastDay: "", graceDay: "" },
+  frozen: "",       // day she ran out of cards with a live streak; it can't break until new cards arrive
+  frozenDays: {},   // days the streak was protected
+  fixlog: {},       // cardId -> status from fixes/applied.json
+  redone: {},       // cardIds she reopened to answer again (no second helping of miles)
+  opened: {},       // cardIds where she opened a source before deciding
   days: {},         // yyyy-mm-dd -> cards resolved that day
   badges: {},       // badgeId -> date earned
   lastSync: "",
@@ -116,9 +128,38 @@ function posts() {
     open: p.cards.filter((c) => !S.answers[c.id] && !S.later.includes(c.id)).length,
   }));
 }
-function streakNow() {
-  const s = S.streak;
-  return s.lastDay === today() || s.lastDay === yesterday() ? s.count : 0;
+function streakAlive() {
+  const s = S.streak, recent = [today(), yesterday()];
+  return recent.includes(s.lastDay) || recent.includes(s.graceDay);
+}
+function streakNow() { return S.frozen || streakAlive() ? S.streak.count : 0; }
+// Running out of cards never breaks a streak: it is frozen until new cards arrive,
+// and she then has that day and the next to pick it back up.
+function updateFreeze() {
+  const open = openCards().length;
+  if (!open && !S.frozen && S.streak.count && streakAlive()) { S.frozen = today(); save(); }
+  else if (open && S.frozen) {
+    for (let d = new Date(S.frozen + "T12:00:00"); dayKey(d) < today(); d.setDate(d.getDate() + 1)) {
+      if (!S.days[dayKey(d)]) S.frozenDays[dayKey(d)] = true;
+    }
+    S.streak.graceDay = today(); S.frozen = ""; save();
+  }
+}
+function level(xp = S.xp) {
+  let i = 0;
+  while (i + 1 < LEVELS.length && xp >= LEVELS[i + 1][0]) i++;
+  const next = LEVELS[i + 1];
+  return { n: i + 1, name: LEVELS[i][1], next: next ? next[0] : null, nextName: next ? next[1] : "",
+    pct: next ? Math.round(((xp - LEVELS[i][0]) / (next[0] - LEVELS[i][0])) * 100) : 100 };
+}
+function weekDays() {
+  const out = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const k = dayKey(d), played = S.days[k] > 0;
+    out.push({ letter: "SMTWTFS"[d.getDay()], played, frozen: !played && !!(S.frozenDays[k] || (S.frozen && k >= S.frozen)), today: i === 0 });
+  }
+  return out;
 }
 function resolvedCount() { return Object.keys(S.answers).length; }
 
@@ -128,6 +169,10 @@ const BADGES = [
   { id: "lesson", e: "🎒", name: "Day Tripper", how: "Finish a full lesson", test: () => S.badges.lesson },
   { id: "streak3", e: "🔥", name: "On a Roll", how: "3-day streak", test: () => streakNow() >= 3 },
   { id: "streak7", e: "🌋", name: "Volcano", how: "7-day streak", test: () => streakNow() >= 7 },
+  { id: "streak14", e: "🌠", name: "Fortnight", how: "14-day streak", test: () => streakNow() >= 14 },
+  { id: "streak30", e: "🌕", name: "Full Moon", how: "30-day streak", test: () => streakNow() >= 30 },
+  { id: "closed", e: "🔖", name: "Case Closed", how: "Decide a card from your research list", test: () => (S.researchResolved || 0) >= 1 },
+  { id: "checker", e: "🧐", name: "Double Checker", how: "Open a source before deciding, 5 times", test: () => Object.values(S.answers).filter((a) => a.checked_source).length >= 5 },
   { id: "ten", e: "🧭", name: "Navigator", how: "Resolve 10 cards", test: () => resolvedCount() >= 10 },
   { id: "fifty", e: "🏔️", name: "Summit", how: "Resolve 50 cards", test: () => resolvedCount() >= 50 },
   { id: "sleuth", e: "🕵️", name: "Sleuth", how: "Add your own source", test: () => Object.values(S.answers).some((a) => a.extra_source_url) },
@@ -213,8 +258,65 @@ async function pullDecks() {
       added += S.decks[id].cards.filter((c) => !before.has(c.id)).length;
     } catch (e) { /* skip malformed deck */ }
   }
+  // Decks and cards removed from the repo (a card that turned out to be wrong) disappear here too.
+  const keep = new Set(files.map((f) => f.name.replace(/\.json$/, "")));
+  Object.keys(S.decks).forEach((id) => { if (!keep.has(id)) delete S.decks[id]; });
+  const known = new Set(allCards().map((c) => c.id));
+  if (S.later.some((id) => !known.has(id))) {
+    S.later.filter((id) => !known.has(id)).forEach((id) => delete S.laterNotes[id]);
+    S.later = S.later.filter((id) => known.has(id)); S.researchDirty = true;
+  }
   save();
   return added;
+}
+
+/* ---------------- research list ---------------- */
+function researchItems() { return laterCards().map((c) => ({ c, note: S.laterNotes[c.id]?.note || "", at: S.laterNotes[c.id]?.at || "" })); }
+
+// The list as Markdown (saved to research/open.md in the repo) or as plain text (email, share, copy).
+function researchDoc(md) {
+  const items = researchItems();
+  const links = (c) => (c.sources || []).filter((s) => safeUrl(s.url));
+  if (md) {
+    const mdEsc = (s) => String(s ?? "").replace(/[\[\]]/g, "\\$&");
+    const head = `# Research list\n\n_Cards marked for more research in Blog Quest and still waiting for a decision. Updated ${today()}. The app rewrites this file, so don't edit it by hand._\n`;
+    if (!items.length) return head + "\nNothing is waiting for research right now.\n";
+    return head + items.map(({ c, note, at }, i) => `
+## ${i + 1}. ${c.headline}
+
+- **Post:** [${mdEsc(c.post?.title)}](${c.post?.url || ""})${c.claim?.section ? ` (${c.claim.section})` : ""}
+- **The post says:** "${c.claim?.quote || ""}"
+- **What Pip found:** ${c.summary || ""}
+- **Sources:** ${links(c).map((s) => `[${mdEsc(s.label)}](${s.url})`).join(", ") || "none"}
+- **Her note:** ${note || "none"}
+- **Marked:** ${(at || "").slice(0, 10) || "unknown"} · Card: \`${c.id}\`
+`).join("");
+  }
+  if (!items.length) return "Blog Quest research list\n\nNothing is waiting for research right now.";
+  return `Blog Quest research list (${items.length})\n` + items.map(({ c, note }, i) => `
+${i + 1}. ${c.headline}
+Post: ${c.post?.title || ""}
+${c.post?.url || ""}
+The post says: "${c.claim?.quote || ""}"
+Pip found: ${c.summary || ""}${links(c).length ? `\nSources: ${links(c).map((s) => s.url).join(" , ")}` : ""}${note ? `\nTo check: ${note}` : ""}
+`).join("");
+}
+
+async function pushResearch() {
+  if (!S.researchDirty) return;
+  const path = "contents/research/open.md";
+  let sha;
+  const cur = await gh(`${path}?ref=${encodeURIComponent(S.settings.branch)}`);
+  if (cur.ok) sha = (await cur.json()).sha;
+  else if (cur.status !== 404) throw new Error(await ghError(cur));
+  if (sha || S.later.length) {
+    const res = await gh(path, {
+      method: "PUT",
+      body: JSON.stringify({ message: `Blog Quest: research list (${S.later.length} open)`, content: b64(researchDoc(true)), branch: S.settings.branch, ...(sha ? { sha } : {}) }),
+    });
+    if (!res.ok) throw new Error(await ghError(res));
+  }
+  S.researchDirty = false; save();
 }
 
 // On a fresh install, mark cards that were already answered on another device / earlier install.
@@ -234,6 +336,17 @@ async function restoreAnswered() {
       }
     }
   }
+  // Her research list, as last saved by the app.
+  const rl = await gh(`contents/research/open.md?ref=${encodeURIComponent(branch)}`, { headers: { Accept: "application/vnd.github.raw+json" } });
+  if (rl.ok) {
+    (await rl.text()).split("\n## ").slice(1).forEach((sec) => {
+      const id = (sec.match(/Card: `([^`]+)`/) || [])[1];
+      if (!id || S.answers[id] || S.later.includes(id)) return;
+      const note = (sec.match(/\*\*Her note:\*\* (.*)/) || [])[1] || "";
+      S.later.push(id);
+      S.laterNotes[id] = { note: note === "none" ? "" : note, at: (sec.match(/\*\*Marked:\*\* (\d{4}-\d\d-\d\d)/) || [])[1] || "" };
+    });
+  }
   S.restored = true; save();
 }
 
@@ -241,7 +354,7 @@ async function sync({ quiet = false } = {}) {
   if (DEMO) {
     packagePending();
     const n = S.outbox.reduce((k, o) => k + o.body.answers.length, 0);
-    S.demoSent = [...(S.demoSent || []), ...S.outbox].slice(-20); S.outbox = []; save();
+    S.demoSent = [...(S.demoSent || []), ...S.outbox].slice(-20); S.outbox = []; S.researchDirty = false; save();
     if (n) toast(`Demo: ${n} answer${n === 1 ? "" : "s"} would upload now`);
     else if (!quiet) toast("Demo mode: nothing to upload");
     refreshAfterSync();
@@ -255,6 +368,7 @@ async function sync({ quiet = false } = {}) {
     packagePending();
     const sent = await flushOutbox();
     const added = await pullDecks();
+    await pushResearch();
     await restoreAnswered();
     const newlyLive = await pullFixLog();
     S.lastSync = new Date().toISOString(); save();
@@ -276,7 +390,7 @@ async function sync({ quiet = false } = {}) {
 // Re-draw only screens with nothing she could be typing into.
 function refreshAfterSync() {
   updateIconBadge();
-  if (["home", "later", "passport"].includes(view.name)) render();
+  if (["home", "passport"].includes(view.name)) render();
   else if (view.name === "complete") { const el = $(".sync-line"); if (el) el.textContent = syncLine(); }
 }
 
@@ -285,8 +399,12 @@ async function pullFixLog() {
   const res = await gh(`contents/fixes/applied.json?ref=${encodeURIComponent(S.settings.branch)}`, { headers: { Accept: "application/vnd.github.raw+json" } });
   if (!res.ok) return 0;
   let log; try { log = await res.json(); } catch (e) { return 0; }
-  S.live = {};
-  Object.entries(log || {}).forEach(([id, e]) => { if (e && e.status === "applied") S.live[id] = e; });
+  S.live = {}; S.fixlog = {};
+  Object.entries(log || {}).forEach(([id, e]) => {
+    if (!e || !e.status) return;
+    S.fixlog[id] = e.status;
+    if (e.status === "applied") S.live[id] = e;
+  });
   const n = Object.keys(S.live).length;
   const fresh = Math.max(0, n - (S.seenLive || 0));
   S.seenLive = n;
@@ -306,15 +424,21 @@ function updateIconBadge() {
 /* ---------------- answering ---------------- */
 function recordAnswer(card, decision, extra) {
   const day = today();
-  if (S.streak.lastDay !== day) {
-    S.streak = { count: S.streak.lastDay === yesterday() ? S.streak.count + 1 : 1, lastDay: day };
+  const redo = !!S.redone[card.id];          // changing an earlier answer earns nothing extra
+  const wasResearch = S.later.includes(card.id);
+  let earned = 0;
+  if (!redo) {
+    if (S.streak.lastDay !== day) {
+      S.streak = { ...S.streak, count: S.frozen || streakAlive() ? S.streak.count + 1 : 1, lastDay: day };
+    }
+    S.days[day] = (S.days[day] || 0) + 1;
+    earned = XP.answer;
+    if (card.severity === "high") earned += XP.high;
+    if (extra.note) earned += XP.note;
+    if (extra.source) earned += XP.source;
+    if (S.opened[card.id]) earned += XP.opened;
+    S.xp += earned;
   }
-  S.days[day] = (S.days[day] || 0) + 1;
-  let earned = XP.answer;
-  if (card.severity === "high") earned += XP.high;
-  if (extra.note) earned += XP.note;
-  if (extra.source) earned += XP.source;
-  S.xp += earned;
   const rec = {
     card_id: card.id,
     deck: card.deck,
@@ -326,12 +450,18 @@ function recordAnswer(card, decision, extra) {
     decision: decision.kind,                         // "apply_option" | "post_is_fine" | "other"
     option: decision.option || null,                 // {id, label, action, new_text} when apply_option
     note: extra.note || "",
+    research_note: S.laterNotes[card.id]?.note || "",  // what she wanted to check while it was on her research list
     extra_source_url: extra.source || "",
+    checked_source: !!S.opened[card.id],             // she opened a source link before deciding
     sources_shown: (card.sources || []).map((s) => s.url),
     answered_at: new Date().toISOString(),
   };
   S.answers[card.id] = rec;
-  S.later = S.later.filter((id) => id !== card.id);
+  if (wasResearch) {
+    S.later = S.later.filter((id) => id !== card.id);
+    delete S.laterNotes[card.id];
+    S.researchResolved = (S.researchResolved || 0) + 1; S.researchDirty = true;
+  }
   S.pending.push(rec);
   save();
   return earned;
@@ -339,6 +469,7 @@ function recordAnswer(card, decision, extra) {
 
 /* ---------------- views ---------------- */
 function render() {
+  updateFreeze();
   const app = $("#app");
   app.classList.toggle("lesson-mode", view.name === "lesson" || view.name === "complete");
   const html = {
@@ -364,11 +495,16 @@ function topbar() {
 
 function greeting(open) {
   if (!S.settings.token && !allCards().length) return "Hi! I'm Pip 👋 Let's get set up — tap ⚙️ Settings to connect.";
-  if (!open) return pick(["All caught up! Every fact checked. I'll have more for you soon.", "Nothing to check right now — go have an adventure! 🌍"]);
+  const name = S.settings.name ? `, ${S.settings.name}` : "";
+  if (!open) {
+    if (S.frozen) return `All caught up${name}! Your ${S.streak.count}-day streak is safe until new cards arrive ❄️`;
+    return pick([`All caught up${name}! Every fact checked. I'll have more for you soon.`, "Nothing to check right now — go have an adventure! 🌍"]);
+  }
   const doneToday = S.days[today()] || 0;
-  if (doneToday >= S.settings.dailyGoal) return pick(["Daily goal smashed! 🎉 Bonus rounds still count.", "You're on fire today. Want to keep going?"]);
-  if (streakNow() >= 2) return `${streakNow()} days in a row! Keep the streak alive 🔥`;
-  return pick([`I found ${open} things that might need a look.`, "Ready for a quick fact-check trip?", `${open} possible fixes waiting — let's go!`]);
+  if (doneToday >= S.settings.dailyGoal) return pick([`Daily goal smashed${name}! 🎉 Bonus rounds still count.`, "You're on fire today. Want to keep going?"]);
+  if (!doneToday && streakNow() >= 2) return `Check one card to keep your ${streakNow()}-day streak going${name} 🔥`;
+  if (!doneToday && S.streak.count >= 2 && !streakNow()) return `Welcome back${name}! Let's start a new streak today.`;
+  return pick([`Hi${name}! I found ${open} thing${open === 1 ? "" : "s"} that might need a look.`, `Ready for a quick fact-check trip${name}?`, `${open} possible fix${open === 1 ? "" : "es"} waiting — let's go!`]);
 }
 
 function homeView() {
@@ -377,6 +513,11 @@ function homeView() {
   const goal = S.settings.dailyGoal;
   const pct = Math.min(100, Math.round((doneToday / goal) * 100));
   const ps = posts().sort((a, b) => (b.open > 0) - (a.open > 0));
+  const L = level(), week = weekDays(), size = lessonSize(open.length);
+  const goalText = doneToday >= goal ? "Done for today — nice!"
+    : !open.length ? (S.frozen ? "Nothing left to check. Streak protected ❄️" : "Nothing left to check right now")
+    : open.length < goal - doneToday ? `${open.length} card${open.length === 1 ? "" : "s"} left to check`
+    : `${goal - doneToday} more card${goal - doneToday === 1 ? "" : "s"} to hit today's goal`;
   const standalone = DEMO || matchMedia("(display-mode: standalone)").matches || navigator.standalone;
   if (!S.settings.token) return `${topbar()}
     <div class="hero">${pip("happy", 104)}<div class="bubble">Hi! I'm Pip 👋 I hunt for things on the blog that might be out of date. Let's get connected!</div></div>
@@ -394,9 +535,14 @@ function homeView() {
     <div class="hero">${pip(open.length ? "happy" : "sleepy", 104)}<div class="bubble">${esc(greeting(open.length))}</div></div>
     <div class="goal">
       <div class="ring" style="--p:${pct}"><span>${Math.min(doneToday, goal)}/${goal}</span></div>
-      <div><b>Daily goal</b><small>${doneToday >= goal ? "Done for today — nice!" : `${goal - doneToday} more card${goal - doneToday === 1 ? "" : "s"} to hit today's goal`}</small></div>
+      <div style="flex:1;min-width:0"><b>Daily goal</b><small>${goalText}</small>
+        <div class="week" role="img" aria-label="Played ${week.filter((d) => d.played).length} of the last 7 days">${week.map((d) =>
+          `<div class="day ${d.played ? "played" : d.frozen ? "frozen" : ""} ${d.today ? "today" : ""}"><span>${d.letter}</span><i>${d.played ? "✓" : d.frozen ? "❄" : ""}</i></div>`).join("")}</div>
+      </div>
     </div>
-    ${open.length ? `<button class="btn" data-act="start">Start lesson · ${Math.min(LESSON_SIZE, open.length)} cards</button>`
+    <div class="levelrow"><b>Level ${L.n} · ${L.name}</b><div class="bar sm"><i style="width:${L.pct}%"></i></div>
+      <small>${L.next ? `${L.next - S.xp} miles to ${L.nextName}` : "Top rank!"}</small></div>
+    ${open.length ? `<button class="btn" data-act="start">Start lesson · ${size} card${size === 1 ? "" : "s"}</button>`
       : `<button class="btn ghost" data-act="sync">${S.settings.token ? "Check for new cards" : "Open Settings"}</button>`}
     ${!standalone ? `<div class="tip" style="margin-top:14px">📲 <b>Tip:</b> add this to your home screen so it works offline. iPhone: Share → <i>Add to Home Screen</i>. Android: menu ⋮ → <i>Install app</i>.</div>` : ""}
     ${ps.length ? `<h2>Your journey</h2><div class="path">${ps.map((p) => {
@@ -411,12 +557,12 @@ function homeView() {
 function navView() {
   const n = S.later.length;
   const t = (id, icon, label) => `<button class="${view.name === id ? "on" : ""}" data-nav="${id}" aria-label="${label}">${icon}<span>${label}</span>${id === "later" && n ? `<i class="dot">${n}</i>` : ""}</button>`;
-  return `<nav class="tabs"><div class="in">${t("home", "🗺️", "Journey")}${t("later", "🕵️", "Investigate")}${t("passport", "🛂", "Passport")}${t("settings", "⚙️", "Settings")}</div></nav>`;
+  return `<nav class="tabs"><div class="in">${t("home", "🗺️", "Journey")}${t("later", "🔖", "Research")}${t("passport", "🛂", "Passport")}${t("settings", "⚙️", "Settings")}</div></nav>`;
 }
 
 function startLesson(cards) {
   if (!cards.length) return;
-  lesson = { cards: cards.slice(0, LESSON_SIZE), i: 0, selected: null, earned: 0, answered: 0, parked: 0 };
+  lesson = { cards: cards.slice(0, lessonSize(cards.length)), i: 0, selected: null, earned: 0, answered: 0, parked: 0, startLevel: level().n, startStreak: streakNow() };
   view = { name: "lesson" }; render();
 }
 
@@ -439,6 +585,8 @@ function lessonView() {
       <span class="chip ${esc(sev)}">${TYPE_ICON[c.type] || "🔍"} ${esc(c.headline || "Possible issue")}</span>
       <span class="small muted" style="margin-left:6px">${esc(sevText)}</span>
       <div class="posttitle">${safeUrl(c.post?.url) ? `<a href="${esc(c.post.url)}" target="_blank" rel="noopener">${esc(c.post?.title)}</a>` : esc(c.post?.title)}${c.claim?.section ? ` · ${esc(c.claim.section)}` : ""}</div>
+      ${S.laterNotes[c.id]?.note ? `<div class="tip" style="margin-top:8px">🔖 <b>Your note:</b> ${esc(S.laterNotes[c.id].note)}</div>` : ""}
+      ${c.update?.text ? `<div class="tip" style="margin-top:8px">🔎 <b>Pip looked into it${c.update.date ? ` (${esc(c.update.date)})` : ""}:</b> ${esc(c.update.text)}</div>` : ""}
       <div class="label-sm">Your post says</div>
       <blockquote class="claim">${esc(c.claim?.quote)}</blockquote>
       ${(c.also_in || []).length ? `<div class="small muted" style="margin-top:6px">📌 Also in this post: ${c.also_in.map(esc).join(" · ")}. Any fix gets applied there too.</div>` : ""}
@@ -458,7 +606,7 @@ function lessonView() {
           </div></div>`).join("")}
       ${!navigator.onLine ? `<div class="tip">📴 You're offline — the quotes above were saved for you. Links will open when you're back online.</div>` : ""}
       <div class="label-sm">What should we do?</div>
-      ${options.map((o) => `<button class="opt ${sel === o.id ? "sel" : ""}" data-opt="${esc(o.id)}"><span class="k">${o.key}</span><span>${esc(o.label)}${o.sub ? `<small>${esc(o.sub)}</small>` : ""}</span></button>`).join("")}
+      ${options.map((o) => `<button class="opt ${sel === o.id ? "sel" : ""}" data-opt="${esc(o.id)}" aria-pressed="${sel === o.id}"><span class="k">${o.key}</span><span>${esc(o.label)}${o.sub ? `<small>${esc(o.sub)}</small>` : ""}</span></button>`).join("")}
       ${sel === "fine" ? `<div class="reasons" role="group" aria-label="Why is the post right?">
           <span class="small muted">Why? (helps Pip check better next time)</span>
           ${FINE_REASONS.map(([id, label]) => `<button class="reason ${lesson.fineReason === id ? "on" : ""}" data-reason="${id}">${label}</button>`).join("")}
@@ -469,7 +617,7 @@ function lessonView() {
             <input type="url" id="source" inputmode="url" placeholder="https:// link you found (optional)" value="${esc(lesson.source || "")}">
           </details>`}
       ${sel === "other" ? `<input type="url" id="source" inputmode="url" placeholder="https:// link you found (optional)" value="${esc(lesson.source || "")}" style="margin-top:8px">` : ""}
-      <button class="linkbtn" data-act="later">🕵️ I'll investigate this later</button>
+      <button class="linkbtn" data-act="later">🔖 ${S.later.includes(c.id) ? "Keep it on my research list" : "I need to research this first"}</button>
     </div>
     <div class="lesson-actions"><button class="btn teal" data-act="check" ${sel ? "" : "disabled"}>Save answer</button></div>
     <div class="sheet" id="sheet"><div class="in"></div></div>`;
@@ -477,11 +625,12 @@ function lessonView() {
 
 const PRAISE = ["Nice catch!", "Great detective work!", "Sharp eyes!", "Fact checked!", "Readers will thank you!", "Pip approves!", "Smooth sailing!"];
 
-function showSheet({ later = false, earned = 0, title }) {
+function showSheet({ later = false, earned = 0, title, cardId = "", bonus = "" }) {
   const sheet = $("#sheet");
   sheet.classList.toggle("later", later);
   $(".in", sheet).innerHTML = `<div class="row">${pip(later ? "wow" : "cheer", 64)}<div><h3>${esc(title)}</h3>
-    <div class="xp">${later ? "Saved to Investigate 🕵️" : `+${earned} miles ✈️`}</div></div></div>
+    <div class="xp">${later ? "Saved to your research list 🔖" : earned ? `+${earned} miles ✈️${bonus ? ` · ${esc(bonus)}` : ""}` : "Answer updated"}</div></div></div>
+    ${later ? `<input type="text" id="rnote" data-card="${esc(cardId)}" value="${esc(S.laterNotes[cardId]?.note || "")}" placeholder="What do you need to check? (optional)" aria-label="What do you need to check?" style="margin-bottom:12px">` : ""}
     <button class="btn ${later ? "sun" : "teal"}" data-act="next">Continue</button>
     <button class="linkbtn undo" data-act="undo" style="display:block;margin:6px auto 0;color:inherit">↩︎ Undo</button>`;
   requestAnimationFrame(() => sheet.classList.add("show"));
@@ -513,22 +662,29 @@ function checkAnswer() {
   const earned = recordAnswer(c, decision, { note: lesson.note, source: lesson.source, fineReason: lesson.fineReason });
   lesson.earned += earned; lesson.answered++; lesson.undo.earned = earned; lesson.undo.kind = "answer";
   chime("ok"); buzz(20);
-  showSheet({ earned, title: pick(PRAISE) });
+  const goalHit = earned && (S.days[today()] || 0) === S.settings.dailyGoal;
+  showSheet({ earned, title: goalHit ? "Daily goal reached! 🎯" : pick(PRAISE), bonus: S.opened[c.id] && earned ? "source checked" : "" });
 }
 
 function parkLater() {
   const c = lesson.cards[lesson.i];
-  lesson.undo = { ...snapshot(c), earned: XP.later, kind: "later" };
-  if (!S.later.includes(c.id)) S.later.push(c.id);
-  S.xp += XP.later; lesson.earned += XP.later; lesson.parked++;
+  const fresh = !S.later.includes(c.id);     // miles only the first time a card goes on the list
+  const earned = fresh ? XP.later : 0;
+  lesson.undo = { ...snapshot(c), earned, kind: "later", fresh };
+  if (fresh) {
+    S.later.push(c.id); S.laterNotes[c.id] = { note: "", at: new Date().toISOString() };
+    lesson.parked++; S.researchDirty = true;
+  }
+  S.xp += earned; lesson.earned += earned;
   save(); chime("later"); buzz(10);
-  showSheet({ later: true, title: "Good call — no guessing!" });
+  showSheet({ later: true, title: fresh ? "Good call — no guessing!" : "Still on your research list", cardId: c.id });
 }
 
 // Everything an answer can change, so a mis-tap can be taken back before moving on.
 function snapshot(c) {
   return { cardId: c.id, xp: S.xp, streak: { ...S.streak }, day: S.days[today()] || 0,
-    later: [...S.later], pendingLen: S.pending.length, note: lesson.note, source: lesson.source, selected: lesson.selected };
+    later: [...S.later], laterNotes: structuredClone(S.laterNotes), researchResolved: S.researchResolved || 0,
+    pendingLen: S.pending.length, note: lesson.note, source: lesson.source, selected: lesson.selected, fineReason: lesson.fineReason };
 }
 
 function undoLast() {
@@ -537,18 +693,23 @@ function undoLast() {
   // Only possible while the answer is still on the phone (not yet packaged for upload).
   if (u.kind === "answer" && S.pending.length !== u.pendingLen + 1) { toast("Already uploaded — can't undo this one"); return; }
   if (u.kind === "answer") { S.pending.pop(); delete S.answers[u.cardId]; lesson.answered--; }
-  else lesson.parked--;
+  else if (u.fresh) lesson.parked--;
   S.xp = u.xp; S.streak = u.streak; S.later = u.later;
+  S.laterNotes = u.laterNotes; S.researchResolved = u.researchResolved; S.researchDirty = true;
   if (u.day) S.days[today()] = u.day; else delete S.days[today()];
   lesson.earned -= u.earned;
   lesson.undo = null;
-  lesson.note = u.note; lesson.source = u.source; lesson.selected = u.selected;
+  lesson.note = u.note; lesson.source = u.source; lesson.selected = u.selected; lesson.fineReason = u.fineReason;
   save();
   render();
   toast("Undone — pick again");
 }
 
 function nextCard() {
+  const rn = $("#rnote");
+  if (rn && S.laterNotes[rn.dataset.card] && S.laterNotes[rn.dataset.card].note !== rn.value.trim()) {
+    S.laterNotes[rn.dataset.card].note = rn.value.trim(); S.researchDirty = true; save();
+  }
   lesson.i++; lesson.selected = null; lesson.note = ""; lesson.source = ""; lesson.undo = null; lesson.fineReason = "";
   if (lesson.i >= lesson.cards.length) return finishLesson();
   render();
@@ -577,16 +738,18 @@ function completeView() {
   return `<div class="complete">
     ${pip("cheer", 150)}
     <h1>Lesson complete!</h1>
-    <div class="muted">${L.answered} checked${L.parked ? ` · ${L.parked} saved to investigate` : ""}</div>
+    <div class="muted">${L.answered} checked${L.parked ? ` · ${L.parked} saved for research` : ""}</div>
     <div class="stats">
       <div class="stat a"><div class="t">Miles</div><div class="v">+${L.earned}</div></div>
       <div class="stat b"><div class="t">Streak</div><div class="v">🔥 ${streakNow()}</div></div>
       <div class="stat c"><div class="t">Today</div><div class="v">${S.days[today()] || 0}/${S.settings.dailyGoal}</div></div>
     </div>
+    ${level().n > L.startLevel ? `<div class="card up" style="width:100%"><b>⭐ Level up!</b><div>You're now a <b>${esc(level().name)}</b> (level ${level().n})</div></div>` : ""}
+    ${STREAK_MILESTONES.includes(streakNow()) && streakNow() > L.startStreak ? `<div class="card up" style="width:100%"><b>🔥 ${streakNow()}-day streak!</b><div>${streakNow() >= 7 ? "That's a real habit now." : "You're on a roll."}</div></div>` : ""}
     ${(L.newBadges || []).length ? `<div class="card" style="width:100%"><b>New badge${L.newBadges.length > 1 ? "s" : ""}!</b><div>${L.newBadges.map((b) => `${b.e} ${esc(b.name)}`).join(" · ")}</div></div>` : ""}
     <div class="sync-line">${syncLine()}</div>
     <div style="width:100%;margin-top:auto;display:grid;gap:12px">
-      ${openCards().length ? `<button class="btn" data-act="start">Keep going · ${Math.min(LESSON_SIZE, openCards().length)} more</button>` : ""}
+      ${openCards().length ? `<button class="btn" data-act="start">Keep going · ${lessonSize(openCards().length)} more</button>` : ""}
       <button class="btn ghost" data-act="home">Back to journey</button>
     </div></div>`;
 }
@@ -605,19 +768,55 @@ function confetti() {
 }
 
 function laterView() {
-  const cards = laterCards();
-  return `${topbar()}<h2>🕵️ Investigations</h2>
-    ${cards.length ? `<p class="muted small">Cards you parked to look into. Tap one when you're ready.</p>
-      ${cards.map((c) => `<button class="opt" data-laterid="${esc(c.id)}"><span class="k">${TYPE_ICON[c.type] || "🔍"}</span><span>${esc(c.headline)}<small>${esc(c.post?.title)}</small></span></button>`).join("")}
-      ${cards.length > 1 ? `<button class="btn sun" data-act="later-all" style="margin-top:8px">Investigate all ${Math.min(cards.length, LESSON_SIZE)}</button>` : ""}`
-      : `<div class="empty">${pip("sleepy", 110)}<p class="muted">Nothing parked. When a card needs digging, tap “I'll investigate this later”.</p></div>`}`;
+  const items = researchItems();
+  const canShare = !DEMO && typeof navigator.share === "function";
+  return `${topbar()}<h2>🔖 Research list</h2>
+    ${items.length ? `<p class="muted small">Things you want to look into before deciding. ${DEMO ? "In the real app this list is saved with your answers." : "The list is saved with your answers, so it's never lost."}</p>
+      ${items.map(({ c, note }) => {
+        const src = (c.sources || []).find((s) => safeUrl(s.url));
+        return `<div class="card research">
+          <span class="chip ${esc(c.severity || "low")}">${TYPE_ICON[c.type] || "🔍"} ${esc(c.headline)}</span>
+          <div class="posttitle">${safeUrl(c.post?.url) ? `<a href="${esc(c.post.url)}" target="_blank" rel="noopener">${esc(c.post?.title)}</a>` : esc(c.post?.title)}</div>
+          <blockquote class="claim sm">${esc(c.claim?.quote)}</blockquote>
+          <p class="small" style="margin:8px 0">${esc(c.summary)}</p>
+          ${c.update?.text ? `<div class="tip">🔎 <b>Pip looked into it${c.update.date ? ` (${esc(c.update.date)})` : ""}:</b> ${esc(c.update.text)}</div>` : ""}
+          <label class="small muted" for="rn-${esc(c.id)}">What to check</label>
+          <input type="text" id="rn-${esc(c.id)}" data-rnote="${esc(c.id)}" value="${esc(note)}" placeholder="e.g. call and ask about Monday hours">
+          <div class="row2">
+            ${src ? `<a class="btn ghost sm" href="${esc(src.url)}" target="_blank" rel="noopener">Open source ↗</a>` : ""}
+            <button class="btn teal sm" data-laterid="${esc(c.id)}">Decide now</button>
+          </div></div>`;
+      }).join("")}
+      <div class="card"><b>Take the list with you</b>
+        <div style="display:grid;gap:10px;margin-top:10px">
+          ${DEMO ? "" : `<button class="btn ghost" data-act="email-research">✉️ Email me the list</button>`}
+          ${canShare ? `<button class="btn ghost" data-act="share-research">📤 Share or save to Notes</button>` : ""}
+          <button class="btn ghost" data-act="copy-research">📋 Copy the list</button>
+          <textarea id="research-text" hidden readonly aria-label="Research list text"></textarea>
+        </div></div>`
+      : `<div class="empty">${pip("sleepy", 110)}<p class="muted">Nothing to research. When a card needs digging, tap “I need to research this first” and it lands here.</p></div>`}`;
+}
+
+function answerRows() {
+  const cards = Object.fromEntries(allCards().map((c) => [c.id, c]));
+  return Object.values(S.answers).sort((a, b) => (b.answered_at || "").localeCompare(a.answered_at || "")).slice(0, 15).map((a) => {
+    const c = cards[a.card_id], st = S.fixlog[a.card_id];
+    const status = st === "applied" ? ["live", "📰 Live on the blog"] : st === "no_change" ? ["ok", "✓ Checked, no change needed"]
+      : st ? ["wait", "👀 Being looked at"] : ["wait", "⏳ Sent, waiting for review"];
+    const what = a.decision === "apply_option" ? (a.option?.label || "Fix chosen") : a.decision === "post_is_fine" ? "Post is fine as is" : `Note: ${a.note}`;
+    return `<div class="answer"><div><b>${esc(c?.headline || a.claim_quote)}</b><small>${esc(what)}</small><span class="status ${status[0]}">${status[1]}</span></div>
+      ${c && !st ? `<button class="linkbtn" data-redo="${esc(a.card_id)}">Change</button>` : ""}</div>`;
+  }).join("");
 }
 
 function passportView() {
   const ps = posts();
   const stamped = ps.filter((p) => p.done && p.done === p.cards.length);
   const fixes = Object.values(S.answers).filter((a) => a.decision !== "post_is_fine").length;
+  const L = level();
   return `${topbar()}<h2>🛂 Passport</h2>
+    <div class="levelrow big"><b>Level ${L.n} · ${L.name}</b><div class="bar sm"><i style="width:${L.pct}%"></i></div>
+      <small>${L.next ? `${L.next - S.xp} miles to ${L.nextName}` : "Top rank!"}</small></div>
     <div class="kpis">
       <div class="kpi"><div class="v">✈️ ${S.xp}</div><div class="l">Miles earned</div></div>
       <div class="kpi"><div class="v">🔥 ${streakNow()}</div><div class="l">Day streak</div></div>
@@ -629,7 +828,20 @@ function passportView() {
     <div class="badges">${BADGES.map((b) => `<div class="badge ${S.badges[b.id] ? "" : "locked"}"><span class="e">${b.e}</span><b>${esc(b.name)}</b><small>${esc(b.how)}</small></div>`).join("")}</div>
     <h2>Stamps</h2>
     ${stamped.length ? `<div class="stamps">${stamped.map((p) => `<div class="stamp">✔ ${esc(p.title)}</div>`).join("")}</div>`
-      : `<p class="muted small">Finish every card on a post to earn its stamp.</p>`}`;
+      : `<p class="muted small">Finish every card on a post to earn its stamp.</p>`}
+    <h2>Your answers</h2>
+    ${resolvedCount() ? `<div class="answers">${answerRows()}</div><p class="muted small">You can change an answer until it has been applied to the blog.</p>`
+      : `<p class="muted small">Your answers will show here, along with what happened to each one.</p>`}`;
+}
+
+function youFields(s) {
+  return `<div class="field"><label for="name">What should Pip call you?</label>
+      <input type="text" id="name" autocomplete="given-name" maxlength="30" value="${esc(s.name)}" placeholder="Your first name"></div>
+    ${DEMO ? "" : `<div class="field"><label for="email">Your email</label>
+      <input type="email" id="email" autocomplete="email" inputmode="email" value="${esc(s.email)}" placeholder="you@example.com">
+      <div class="hint">Used only to address the research list when you email it to yourself. Stored on this phone.</div></div>`}
+    <div class="field"><label for="goal">Daily goal (cards)</label><input type="number" id="goal" min="1" max="30" value="${s.dailyGoal}"></div>
+    <label class="toggle">Sounds <input type="checkbox" id="sound" ${s.sound ? "checked" : ""}></label>`;
 }
 
 function demoSettingsView() {
@@ -638,8 +850,7 @@ function demoSettingsView() {
   return `${topbar()}<h2>⚙️ Settings</h2>
     <div class="tip"><b>Demo mode.</b> Cards are built in, nothing is sent to GitHub or the blog, and progress stays in this browser only.</div>
     <div class="card">
-      <div class="field"><label for="goal">Daily goal (cards)</label><input type="number" id="goal" min="1" max="30" value="${s.dailyGoal}"></div>
-      <label class="toggle">Sounds <input type="checkbox" id="sound" ${s.sound ? "checked" : ""}></label>
+      ${youFields(s)}
       <button class="btn teal" data-act="save-demo">Save</button>
     </div>
     <div class="card">
@@ -648,6 +859,8 @@ function demoSettingsView() {
       <div style="display:grid;gap:10px">
         <button class="btn ghost" data-act="demo-file" ${last ? "" : "disabled"}>${last ? "Show the last upload file" : "Finish a lesson to see its upload file"}</button>
         <pre id="demo-file" hidden style="overflow:auto;max-height:320px;font-size:12px;background:var(--surface-2);padding:12px;border-radius:12px;white-space:pre-wrap;word-break:break-word">${last ? esc(`${last.path}\n\n${JSON.stringify(last.body, null, 2)}`) : ""}</pre>
+        <button class="btn ghost" data-act="demo-research">Show the saved research list</button>
+        <pre id="demo-research" hidden style="overflow:auto;max-height:320px;font-size:12px;background:var(--surface-2);padding:12px;border-radius:12px;white-space:pre-wrap;word-break:break-word">${esc(`research/open.md\n\n${researchDoc(true)}`)}</pre>
         <button class="btn sun" data-act="demo-live">🎉 Pretend my fixes went live</button>
       </div>
     </div>
@@ -659,18 +872,15 @@ function settingsView() {
   const s = S.settings;
   const waiting = S.outbox.reduce((n, o) => n + o.body.answers.length, 0) + S.pending.length;
   return `${topbar()}<h2>⚙️ Settings</h2>
-    <div class="card">
-      <div class="field"><label for="token">GitHub access key</label>
+    <div class="card">${youFields(s)}</div>
+    <details class="card conn"><summary><b>Connection</b> <span class="small muted">· set up once</span></summary>
+      <div class="field" style="margin-top:12px"><label for="token">GitHub access key</label>
         <input type="password" id="token" autocomplete="off" placeholder="github_pat_…" value="${esc(s.token)}">
         <div class="hint">Only stored on this phone. Ask whoever set this up for it if it's blank.</div></div>
       <div class="field"><label for="repo">Repo</label><input type="text" id="repo" value="${esc(s.repo)}" autocapitalize="off" autocorrect="off"></div>
       <div class="field"><label for="branch">Branch</label><input type="text" id="branch" value="${esc(s.branch)}" autocapitalize="off" autocorrect="off"></div>
-      <button class="btn teal" data-act="save-settings">Save & sync</button>
-    </div>
-    <div class="card">
-      <div class="field"><label for="goal">Daily goal (cards)</label><input type="number" id="goal" min="1" max="30" value="${s.dailyGoal}"></div>
-      <label class="toggle">Sounds <input type="checkbox" id="sound" ${s.sound ? "checked" : ""}></label>
-    </div>
+    </details>
+    <button class="btn teal" data-act="save-settings" style="margin-bottom:14px">Save & sync</button>
     <div class="card small">
       <div><b>Last sync:</b> ${S.lastSync ? new Date(S.lastSync).toLocaleString() : "never"}</div>
       <div><b>Waiting to upload:</b> ${waiting} answer${waiting === 1 ? "" : "s"}</div>
@@ -682,7 +892,32 @@ function settingsView() {
 
 /* ---------------- events ---------------- */
 function bind() {
-  document.querySelectorAll("[data-nav]").forEach((b) => b.addEventListener("click", () => { view = { name: b.dataset.nav }; render(); }));
+  document.querySelectorAll("[data-nav]").forEach((b) => b.addEventListener("click", () => {
+    const leavingResearch = view.name === "later" && S.researchDirty;
+    view = { name: b.dataset.nav }; render();
+    if (leavingResearch) sync({ quiet: true });   // save edited research notes
+  }));
+  // Notes on the research list save as she types.
+  document.querySelectorAll("[data-rnote]").forEach((inp) => inp.addEventListener("input", () => {
+    const id = inp.dataset.rnote;
+    S.laterNotes[id] = { at: new Date().toISOString(), ...S.laterNotes[id], note: inp.value.trim() };
+    S.researchDirty = true; save();
+  }));
+  // Opening a source before deciding earns a small bonus, to reward checking over guessing.
+  document.querySelectorAll(".source a").forEach((a) => a.addEventListener("click", () => {
+    const c = lesson?.cards[lesson.i];
+    if (c && !S.opened[c.id]) { S.opened[c.id] = true; save(); }
+  }));
+  document.querySelectorAll("[data-redo]").forEach((b) => b.addEventListener("click", () => {
+    const id = b.dataset.redo, card = allCards().find((c) => c.id === id);
+    if (!card) return;
+    askConfirm("Change this answer?", "Your new answer replaces the old one.", "Change it", "Cancel").then((ok) => {
+      if (!ok) return;
+      delete S.answers[id]; S.redone[id] = true;
+      S.pending = S.pending.filter((a) => a.card_id !== id); save();
+      startLesson([card]);
+    });
+  }));
   document.querySelectorAll("[data-post]").forEach((b) => b.addEventListener("click", () => {
     startLesson(openCards().filter((c) => String(c.post?.id ?? c.post?.url ?? c.post?.title) === b.dataset.post));
   }));
@@ -704,7 +939,23 @@ function bind() {
 function act(a) {
   switch (a) {
     case "start": startLesson(openCards()); break;
-    case "later-all": startLesson(laterCards()); break;
+    case "email-research": {
+      const body = researchDoc(false);
+      const cut = body.length > 1700 ? body.slice(0, 1700) + "\n…(the full list is in the app)" : body;
+      const to = (S.settings.email || "").replace(/[^\w.@+-]/g, "");
+      location.href = `mailto:${to}?subject=${encodeURIComponent(`Blog Quest research list (${S.later.length})`)}&body=${encodeURIComponent(cut)}`;
+      break;
+    }
+    case "share-research":
+      navigator.share({ title: "Blog Quest research list", text: researchDoc(false) }).catch(() => {});
+      break;
+    case "copy-research": {
+      const text = researchDoc(false);
+      const fallback = () => { const t = $("#research-text"); if (t) { t.hidden = false; t.value = text; t.focus(); t.select(); toast("Select all, then copy"); } };
+      try { navigator.clipboard.writeText(text).then(() => toast("List copied — paste it into Notes or an email"), fallback); } catch (e) { fallback(); }
+      break;
+    }
+    case "demo-research": { const box = $("#demo-research"); if (box) box.hidden = !box.hidden; break; }
     case "check": checkAnswer(); break;
     case "later": parkLater(); break;
     case "quit": {
@@ -730,13 +981,16 @@ function act(a) {
     }
     case "undo": undoLast(); break;
     case "save-demo":
-      S.settings.dailyGoal = Math.max(1, Math.min(30, parseInt($("#goal").value, 10) || 5));
+      S.settings.name = $("#name").value.trim().slice(0, 30);
+      S.settings.dailyGoal = Math.max(1, Math.min(30, parseInt($("#goal").value, 10) || 3));
       S.settings.sound = $("#sound").checked; save(); toast("Saved"); break;
     case "save-settings":
       S.settings.token = $("#token").value.trim();
       S.settings.repo = $("#repo").value.trim() || DEFAULTS.settings.repo;
       S.settings.branch = $("#branch").value.trim() || "main";
-      S.settings.dailyGoal = Math.max(1, Math.min(30, parseInt($("#goal").value, 10) || 5));
+      S.settings.name = $("#name").value.trim().slice(0, 30);
+      S.settings.email = $("#email").value.trim();
+      S.settings.dailyGoal = Math.max(1, Math.min(30, parseInt($("#goal").value, 10) || 3));
       S.settings.sound = $("#sound").checked;
       save(); toast("Saved"); sync(); break;
     case "reset":
@@ -817,8 +1071,8 @@ if (DEMO) { loadDemoDeck(); save(); }
 })();
 
 if (!DEMO && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
-window.addEventListener("online", () => { sync({ quiet: true }); if (view.name !== "lesson") render(); });
-window.addEventListener("offline", () => { if (view.name !== "lesson") render(); });
+window.addEventListener("online", () => { refreshAfterSync(); sync({ quiet: true }); });
+window.addEventListener("offline", refreshAfterSync);
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") sync({ quiet: true }); });
 
 // Any answers left from a lesson that was closed mid-way get packaged for upload.
