@@ -8,7 +8,7 @@ A gamified, offline-first phone app for fact-checking a travel blog. Each lesson
 - Daily quests, a weekly recap, and gear for Pip that unlocks with each level.
 - A daily reminder she can add to her calendar in one tap (the app itself can't send notifications).
 - Lessons open with a quick fix as a warm-up, then one fact check, and typo cards show the change highlighted in place.
-- Long cards stay short on a phone: with three or more sources, the first shows and the rest fold away behind one tap.
+- Long cards stay short on a phone: with three or more sources, the first shows and the rest fold away behind one tap, and the bottom button jumps straight to the choices.
 - Answers can be changed until they've been applied to the blog.
 - Miles, streak and badges are backed up to the private repo, so a new phone picks up where the old one stopped.
 - If the access key stops working, the home screen says so plainly instead of failing quietly.

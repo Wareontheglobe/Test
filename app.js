@@ -10,7 +10,7 @@ import { pip, GEAR } from "./mascot.js";
 // Demo mode: a page can set window.BQ_DEMO = {deck} before loading this script.
 // Cards come from that deck, nothing is sent anywhere, and progress stays in this browser.
 const DEMO = window.BQ_DEMO || null;
-const APP_VERSION = "1.7";      // shown in Settings, and in the details she can copy when asking for help
+const APP_VERSION = "1.8";      // shown in Settings, and in the details she can copy when asking for help
 // Deep copy that also works on phones a few years old.
 const clone = (o) => (typeof structuredClone === "function" ? structuredClone(o) : JSON.parse(JSON.stringify(o)));
 const KEY = DEMO ? "blogquest.demo" : "blogquest.v1";
@@ -999,7 +999,7 @@ function lessonView() {
           </div></div>`).join("")}
       ${folded ? `<button class="more-sources" data-act="more-sources" aria-expanded="false">Show ${folded} more source${folded > 1 ? "s" : ""}</button>` : ""}
       ${!navigator.onLine ? `<div class="tip">📴 You're offline — the quotes above were saved for you. Links will open when you're back online.</div>` : ""}
-      <div class="label-sm">What should we do?</div>
+      <div class="label-sm" id="choices">What should we do?</div>
       ${options.map((o) => `<button class="opt ${sel === o.id ? "sel" : ""}" data-opt="${esc(o.id)}" aria-pressed="${sel === o.id}"><span class="k">${o.key}</span><span>${esc(o.label)}${o.diff ? `<small class="diff">${o.diff}</small>` : o.sub ? `<small>${esc(o.sub)}</small>` : ""}</span></button>`).join("")}
       ${sel === "fine" && hasSources ? `<div class="reasons" role="group" aria-label="Why is the post right?">
           <span class="small muted">Why? (helps Pip check better next time)</span>
@@ -1013,7 +1013,10 @@ function lessonView() {
       ${sel === "other" ? `<input type="url" id="source" inputmode="url" placeholder="https:// link you found (optional)" value="${esc(lesson.sourceText || "")}" style="margin-top:8px">` : ""}
       ${lesson.changing ? "" : `<button class="linkbtn" data-act="later">🔖 ${S.later.includes(c.id) ? "Keep it on my research list" : "I need to research this first"}</button>`}
     </div>
-    <div class="lesson-actions"><button class="btn teal" data-act="check" ${sel ? "" : "disabled"}>Save answer</button></div>
+    <div class="lesson-actions">
+      <button class="btn ghost" data-act="to-choices" ${sel ? "hidden" : ""}>Choose an answer ↓</button>
+      <button class="btn teal" data-act="check" ${sel ? "" : "hidden disabled"}>Save answer</button>
+    </div>
     <div class="sheet" id="sheet"><div class="in"></div></div>`;
 }
 
@@ -1402,6 +1405,11 @@ function bind() {
 function act(a) {
   switch (a) {
     case "start": startLesson(mixLesson(openCards())); break;
+    case "to-choices": {      // long cards: one tap takes her past the sources to the choices
+      const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      $("#choices")?.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "start" });
+      break;
+    }
     case "more-sources": if (!sheetUp()) { readExtras(); lesson.allSources = true; render(); } break;
     case "email-research": {
       const body = researchDoc(false);

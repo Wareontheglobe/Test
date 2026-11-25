@@ -67,6 +67,8 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .btn.sun { background: var(--sun); color: #3B2A00; box-shadow: 0 4px 0 var(--sun-dark); }
 .btn.ghost { background: var(--surface); color: var(--ink); border: 2px solid var(--line); box-shadow: 0 4px 0 var(--line); }
 .btn[disabled] { background: var(--line); color: var(--ink-2); box-shadow: 0 4px 0 var(--line); cursor: default; }
+.btn[hidden] { display: none; }
+#choices { scroll-margin-top: 64px; }
 .linkbtn { background: none; border: 0; color: var(--link); font-weight: 700; padding: 10px; cursor: pointer; }
 .iconbtn { background: none; border: 0; font-size: 26px; line-height: 1; padding: 6px; cursor: pointer; color: var(--ink-2); }
 

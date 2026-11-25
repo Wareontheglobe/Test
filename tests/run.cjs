@@ -467,8 +467,13 @@ test("a card with many sources folds the extras away until she asks for them", a
   const { page } = await S.open({ repo }); await skipRecap(page);
   await page.click("[data-act=start]");
   assert.strictEqual(await page.locator(".source").count(), 1, "only the first source shows at first");
+  // nothing chosen yet: the bottom button takes her down to the choices instead of sitting there greyed out
+  assert.ok(await page.isHidden("[data-act=check]")); assert.strictEqual(await text(page, "[data-act=to-choices]"), "Choose an answer ↓");
+  await page.click("[data-act=to-choices]"); await page.waitForTimeout(700);
+  assert.ok(await page.evaluate(() => { const r = document.querySelector("#choices").getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight - 100; }), "the choices are on screen");
   assert.strictEqual(await text(page, "[data-act=more-sources]"), "Show 3 more sources");
   await page.click(".opt >> nth=0"); await page.click("details.extra summary"); await page.fill("#note", "keep me");
+  assert.ok(await page.isVisible("[data-act=check]") && await page.isHidden("[data-act=to-choices]"), "once she has chosen, it becomes Save answer");
   await page.click("[data-act=more-sources]");
   assert.strictEqual(await page.locator(".source").count(), 4);
   assert.ok(!(await page.$("[data-act=more-sources]")), "the button goes away once they are all showing");
