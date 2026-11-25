@@ -573,7 +573,8 @@ function lessonView() {
   const sevText = { high: "Readers may act on this", medium: "Worth updating", low: "Minor" }[sev] || "";
   // An option can carry "valid_until": "YYYY-MM-DD" (e.g. "add a final-weekend note") and is hidden after that date.
   const options = (c.options || []).filter((o) => !o.valid_until || o.valid_until >= today()).map((o, n) => ({ key: String.fromCharCode(65 + n), id: `opt:${o.id}`, label: o.label, sub: o.new_text && o.action !== "remove" ? `“${o.new_text}”` : o.action === "remove" ? "Removes it from the post" : "" }));
-  options.push({ key: "✓", id: "fine", label: "The post is fine as is", sub: "The sources are wrong or don't apply" });
+  const hasSources = (c.sources || []).length > 0;   // quick-fix cards (typos and the like) have none
+  options.push({ key: "✓", id: "fine", label: "The post is fine as is", sub: hasSources ? "The sources are wrong or don't apply" : "Leave it the way it is" });
   options.push({ key: "✎", id: "other", label: "Something else…", sub: "Tell us what to change" });
   const sel = lesson.selected;
   return `<div class="lesson-top">
@@ -607,7 +608,7 @@ function lessonView() {
       ${!navigator.onLine ? `<div class="tip">📴 You're offline — the quotes above were saved for you. Links will open when you're back online.</div>` : ""}
       <div class="label-sm">What should we do?</div>
       ${options.map((o) => `<button class="opt ${sel === o.id ? "sel" : ""}" data-opt="${esc(o.id)}" aria-pressed="${sel === o.id}"><span class="k">${o.key}</span><span>${esc(o.label)}${o.sub ? `<small>${esc(o.sub)}</small>` : ""}</span></button>`).join("")}
-      ${sel === "fine" ? `<div class="reasons" role="group" aria-label="Why is the post right?">
+      ${sel === "fine" && hasSources ? `<div class="reasons" role="group" aria-label="Why is the post right?">
           <span class="small muted">Why? (helps Pip check better next time)</span>
           ${FINE_REASONS.map(([id, label]) => `<button class="reason ${lesson.fineReason === id ? "on" : ""}" data-reason="${id}">${label}</button>`).join("")}
         </div>` : ""}
