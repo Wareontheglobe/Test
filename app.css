@@ -294,3 +294,9 @@ details.how ul { margin: 10px 0 0; padding-left: 18px; display: grid; gap: 8px; 
 @keyframes pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .card.loading i { animation: none; } }
 h1:focus, h2:focus, .chip:focus { outline: none; }
+
+/* what changes, shown in place */
+blockquote.claim mark { background: var(--sun); color: #3B2A00; border-radius: 5px; padding: 0 3px; }
+blockquote.claim { overflow-wrap: anywhere; }
+.diff del { color: var(--coral-dark); text-decoration-thickness: 2px; }
+.diff ins { background: var(--ok-bg); color: var(--ok-ink); text-decoration: none; font-weight: 800; border-radius: 5px; padding: 0 3px; }

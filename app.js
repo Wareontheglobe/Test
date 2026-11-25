@@ -83,6 +83,40 @@ const today = () => dayKey(new Date());
 function dayKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 function yesterday() { const d = new Date(); d.setDate(d.getDate() - 1); return dayKey(d); }
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const num = (n) => Number(n || 0).toLocaleString("en-US");
+// Curly quotes and long dashes count the same as plain ones when comparing text (one character for one).
+const fold1 = (t) => String(t ?? "").replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[\u2013\u2014]/g, "-").replace(/\u00a0/g, " ");
+// What changes between the old words and the new, widened to whole words so it reads naturally.
+function diffParts(oldText, newText) {
+  const a = fold1(oldText), b = fold1(newText);
+  let p = 0, s = 0;
+  while (p < Math.min(a.length, b.length) && a[p] === b[p]) p++;
+  while (s < Math.min(a.length, b.length) - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  while (p > 0 && !/\s/.test(a[p - 1])) p--;
+  while (s > 0 && !/\s/.test(a[a.length - s])) s--;
+  return { pre: oldText.slice(0, p), del: oldText.slice(p, oldText.length - s), ins: newText.slice(p, newText.length - s), post: oldText.slice(oldText.length - s) };
+}
+const diffHtml = (oldText, newText) => { const d = diffParts(oldText, newText); return `${esc(d.pre)}${d.del ? `<del>${esc(d.del)}</del>` : ""}${d.del && d.ins ? " " : ""}${d.ins ? `<ins>${esc(d.ins)}</ins>` : ""}${esc(d.post)}`; };
+// The quoted words, shown inside their sentence when the card supplies one.
+function claimHtml(c) {
+  const q = c.claim?.quote || "", ctx = c.claim?.context || "";
+  const i = ctx ? fold1(ctx).indexOf(fold1(q)) : -1;
+  if (i < 0) return esc(q);
+  const tail = /[.!?)"']$/.test(ctx.trim()) ? "" : "…";
+  return `${esc(ctx.slice(0, i))}<mark>${esc(ctx.slice(i, i + q.length))}</mark>${esc(ctx.slice(i + q.length))}${tail}`;
+}
+const isQuickFix = (c) => !(c.sources || []).length;       // typos and the like: the evidence is the post itself
+// A general lesson leads with one fact check and fills up with quick fixes, so each one has some of both.
+function mixLesson(cards) {
+  const size = lessonSize(cards.length), facts = cards.filter((c) => !isQuickFix(c)), quick = cards.filter(isQuickFix), out = [];
+  while (out.length < size) {
+    const wantFact = out.length % 3 === 0;
+    const from = (wantFact && facts.length) || !quick.length ? facts : quick;
+    out.push(from.shift());
+  }
+  return out;
+}
+const viewsLine = (post) => (post?.views?.count ? `👀 ${num(post.views.count)} views in the last ${Math.max(1, Math.round((post.views.days || 30) / 30))} month${post.views.days > 45 ? "s" : ""}` : "");
 function toast(msg) {
   const t = $("#toast"); t.textContent = msg; t.classList.add("show");
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2600);
@@ -125,7 +159,7 @@ function posts() {
   const map = new Map();
   allCards().forEach((c) => {
     const k = c.post?.id ?? c.post?.url ?? c.post?.title;
-    if (!map.has(k)) map.set(k, { key: k, title: c.post?.title || "Untitled post", url: c.post?.url, cards: [] });
+    if (!map.has(k)) map.set(k, { key: k, title: c.post?.title || "Untitled post", url: c.post?.url, views: c.post?.views?.count || 0, post: c.post, cards: [] });
     map.get(k).cards.push(c);
   });
   return [...map.values()].map((p) => ({
@@ -579,7 +613,7 @@ function homeView() {
   const doneToday = S.days[today()] || 0;
   const goal = S.settings.dailyGoal;
   const pct = Math.min(100, Math.round((doneToday / goal) * 100));
-  const ps = posts().sort((a, b) => (b.open > 0) - (a.open > 0));
+  const ps = posts().sort((a, b) => (b.open > 0) - (a.open > 0) || b.views - a.views);
   const L = level(), week = weekDays(), size = lessonSize(open.length);
   const goalText = doneToday >= goal ? "Done for today — nice!"
     : !open.length ? (S.frozen ? "Nothing left to check. Streak protected ❄️" : "Nothing left to check right now")
@@ -626,7 +660,7 @@ function homeView() {
       const icon = p.open === 0 ? (p.done ? "⭐" : "🔒") : "📍";
       return `<button class="stop ${cls}" data-post="${esc(p.key)}" ${p.open ? "" : "disabled"}>
         <span class="node">${icon}${p.open ? `<span class="count">${p.open}</span>` : ""}</span>
-        <span class="label">${esc(p.title)}<small>${p.done}/${p.cards.length} checked</small></span></button>`;
+        <span class="label">${esc(p.title)}<small>${p.done}/${p.cards.length} checked${p.views ? ` · 👀 ${num(p.views)}` : ""}</small></span></button>`;
     }).join("")}</div>` : ""}`;
 }
 
@@ -671,7 +705,8 @@ function lessonView() {
   const sev = c.severity || "low";
   const sevText = { high: "Readers may act on this", medium: "Worth updating", low: "Minor" }[sev] || "";
   // An option can carry "valid_until": "YYYY-MM-DD" (e.g. "add a final-weekend note") and is hidden after that date.
-  const options = (c.options || []).filter((o) => !o.valid_until || o.valid_until >= today()).map((o, n) => ({ key: String.fromCharCode(65 + n), id: `opt:${o.id}`, label: o.label, sub: o.new_text && o.action !== "remove" ? `“${o.new_text}”` : o.action === "remove" ? "Removes it from the post" : "" }));
+  const options = (c.options || []).filter((o) => !o.valid_until || o.valid_until >= today()).map((o, n) => ({ key: String.fromCharCode(65 + n), id: `opt:${o.id}`, label: o.label, sub: o.new_text && o.action !== "remove" ? `“${o.new_text}”` : o.action === "remove" ? "Removes it from the post" : "",
+    diff: o.action === "replace" && o.new_text && isQuickFix(c) ? diffHtml(c.claim?.quote || "", o.new_text) : "" }));
   const hasSources = (c.sources || []).length > 0;   // quick-fix cards (typos and the like) have none
   options.push({ key: "✓", id: "fine", label: "The post is fine as is", sub: hasSources ? "The sources are wrong or don't apply" : "Leave it the way it is" });
   options.push({ key: "✎", id: "other", label: "Something else…", sub: "Tell us what to change" });
@@ -686,14 +721,15 @@ function lessonView() {
       <span class="chip ${esc(sev)}">${TYPE_ICON[c.type] || "🔍"} ${esc(c.headline || "Possible issue")}</span>
       <span class="small muted" style="margin-left:6px">${esc(sevText)}</span>
       <div class="posttitle">${safeUrl(c.post?.url) ? `<a href="${esc(c.post.url)}" target="_blank" rel="noopener noreferrer">${esc(c.post?.title)}</a>` : esc(c.post?.title)}${c.claim?.section ? ` · ${esc(c.claim.section)}` : ""}</div>
+      ${viewsLine(c.post) ? `<div class="small muted">${viewsLine(c.post)}</div>` : ""}
       ${S.laterNotes[c.id]?.note ? `<div class="tip" style="margin-top:8px">🔖 <b>Your note:</b> ${esc(S.laterNotes[c.id].note)}</div>` : ""}
       ${c.update?.text ? `<div class="tip" style="margin-top:8px">🔎 <b>Pip looked into it${c.update.date ? ` (${esc(c.update.date)})` : ""}:</b> ${esc(c.update.text)}</div>` : ""}
       <div class="label-sm">Your post says</div>
-      <blockquote class="claim">${esc(c.claim?.quote)}</blockquote>
+      <blockquote class="claim">${claimHtml(c)}</blockquote>
       ${(c.also_in || []).length ? `<div class="small muted" style="margin-top:6px">📌 Also in this post: ${c.also_in.map(esc).join(" · ")}. Any fix gets applied there too.</div>` : ""}
       <div class="think">${pip("think", 58)}<div class="bubble">${esc(c.summary)}</div></div>
-      <div class="label-sm">What I found</div>
-      ${c.confidence ? `<div class="evidence ${c.confidence === "strong" ? "strong" : "check"}">
+      ${isQuickFix(c) && c.confidence !== "check" ? "" : `<div class="label-sm">What I found</div>`}
+      ${c.confidence && !(isQuickFix(c) && c.confidence !== "check") ? `<div class="evidence ${c.confidence === "strong" ? "strong" : "check"}">
           <b>${c.confidence === "strong" ? "✅ Strong evidence" : "⚠️ Worth a look before you decide"}</b>
           ${c.evidence ? `<span>${esc(c.evidence)}</span>` : ""}</div>` : ""}
       ${(c.sources || []).map((s, n) => `<div class="source">
@@ -707,7 +743,7 @@ function lessonView() {
           </div></div>`).join("")}
       ${!navigator.onLine ? `<div class="tip">📴 You're offline — the quotes above were saved for you. Links will open when you're back online.</div>` : ""}
       <div class="label-sm">What should we do?</div>
-      ${options.map((o) => `<button class="opt ${sel === o.id ? "sel" : ""}" data-opt="${esc(o.id)}" aria-pressed="${sel === o.id}"><span class="k">${o.key}</span><span>${esc(o.label)}${o.sub ? `<small>${esc(o.sub)}</small>` : ""}</span></button>`).join("")}
+      ${options.map((o) => `<button class="opt ${sel === o.id ? "sel" : ""}" data-opt="${esc(o.id)}" aria-pressed="${sel === o.id}"><span class="k">${o.key}</span><span>${esc(o.label)}${o.diff ? `<small class="diff">${o.diff}</small>` : o.sub ? `<small>${esc(o.sub)}</small>` : ""}</span></button>`).join("")}
       ${sel === "fine" && hasSources ? `<div class="reasons" role="group" aria-label="Why is the post right?">
           <span class="small muted">Why? (helps Pip check better next time)</span>
           ${FINE_REASONS.map(([id, label]) => `<button class="reason ${lesson.fineReason === id ? "on" : ""}" data-reason="${id}">${label}</button>`).join("")}
@@ -915,6 +951,8 @@ function passportView() {
   const stamped = ps.filter((p) => p.done && p.done === p.cards.length);
   const fixes = Object.values(S.answers).filter((a) => a.decision !== "post_is_fine").length;
   const L = level();
+  // Monthly readers of the posts that now carry one of her fixes.
+  const reach = ps.filter((p) => p.cards.some((c) => S.live[c.id])).reduce((n, p) => n + Math.round((p.post?.views?.count || 0) / Math.max(1, (p.post?.views?.days || 30) / 30)), 0);
   return `${topbar()}<h2>🛂 Passport</h2>
     <div class="levelrow big"><b>Level ${L.n} · ${L.name}</b><div class="bar sm"><i style="width:${L.pct}%"></i></div>
       <small>${L.next ? `${L.next - S.xp} miles to ${L.nextName}` : "Top rank!"}</small></div>
@@ -925,6 +963,7 @@ function passportView() {
       <div class="kpi"><div class="v">${fixes}</div><div class="l">Fixes sent</div></div>
     </div>
     <div class="kpi" style="margin-top:10px"><div class="v">📰 ${Object.keys(S.live || {}).length}</div><div class="l">Fixes live on the blog</div></div>
+    ${reach ? `<div class="kpi" style="margin-top:10px"><div class="v">👀 ${num(reach)}</div><div class="l">Readers a month on posts you've fixed</div></div>` : ""}
     <details class="card how"><summary><b>How miles and streaks work</b></summary>
       <ul class="small">
         <li><b>Miles:</b> ${XP.answer} for every card you decide. +${XP.high} if readers might act on it, +${XP.note} for adding a note, +${XP.source} for adding your own source, +${XP.opened} for opening a source first, and ${XP.later} for saving a card to your Research list.</li>
@@ -1049,7 +1088,7 @@ function bind() {
 
 function act(a) {
   switch (a) {
-    case "start": startLesson(openCards()); break;
+    case "start": startLesson(mixLesson(openCards())); break;
     case "email-research": {
       const body = researchDoc(false);
       const cut = body.length > 1700 ? body.slice(0, 1700) + "\n…(the full list is in the app)" : body;

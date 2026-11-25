@@ -9,7 +9,12 @@
    "post": {
     "id": 101,
     "title": "A Weekend in Testville",
-    "url": "https://example.com/101/"
+    "url": "https://example.com/101/",
+    "views": {
+     "count": 4200,
+     "days": 90,
+     "as_of": "2026-01-01"
+    }
    },
    "headline": "Hours changed",
    "claim": {
@@ -53,7 +58,12 @@
    "post": {
     "id": 101,
     "title": "A Weekend in Testville",
-    "url": "https://example.com/101/"
+    "url": "https://example.com/101/",
+    "views": {
+     "count": 4200,
+     "days": 90,
+     "as_of": "2026-01-01"
+    }
    },
    "headline": "Price went up",
    "claim": {
@@ -88,12 +98,18 @@
    "post": {
     "id": 101,
     "title": "A Weekend in Testville",
-    "url": "https://example.com/101/"
+    "url": "https://example.com/101/",
+    "views": {
+     "count": 4200,
+     "days": 90,
+     "as_of": "2026-01-01"
+    }
    },
    "headline": "Typo: teh",
    "claim": {
     "quote": "visit teh museum",
-    "section": "Section"
+    "section": "Section",
+    "context": "You should visit teh museum before lunch."
    },
    "confidence": "strong",
    "evidence": "Test evidence",

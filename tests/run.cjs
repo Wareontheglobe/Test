@@ -40,12 +40,12 @@ test("first card shows a hint; answers upload with everything needed to apply th
   assert.ok(await page.$("text=Your first card."));
   const first = await cardId(page);
   await page.click(".source a"); await page.waitForTimeout(200);              // open a source before deciding
-  await answer(page, "a");
+  await answer(page, "fine", { reason: "first_hand" });
   assert.match(await text(page, "#sheet .xp"), /source checked/);
   await next(page);
   assert.ok(!(await page.$("text=Your first card.")), "hint goes away after the first answer");
   await answer(page, "other", { note: "Reword this please" }); await next(page);
-  await answer(page, "fine", { reason: "first_hand" }); await next(page);
+  await answer(page, "a"); await next(page);
   await page.waitForTimeout(900);
   assert.strictEqual(await text(page, ".complete h1"), "Lesson complete!");
   assert.strictEqual(repo.responses.length, 1);
@@ -53,10 +53,10 @@ test("first card shows a hint; answers upload with everything needed to apply th
   assert.match(up.path, /^responses\/\d{4}-\d\d-\d\d\/.+\.json$/);
   const [a1, a2, a3] = up.body.answers;
   assert.strictEqual(a1.card_id, first);
-  assert.strictEqual(a1.decision, "apply_option");
-  assert.ok(a1.option.new_text && a1.claim_quote && a1.post.id && a1.checked_source === true);
+  assert.deepStrictEqual([a1.decision, a1.fine_reason, a1.checked_source], ["post_is_fine", "first_hand", true]);
   assert.deepStrictEqual([a2.decision, a2.note], ["other", "Reword this please"]);
-  assert.deepStrictEqual([a3.decision, a3.fine_reason], ["post_is_fine", "first_hand"]);
+  assert.strictEqual(a3.decision, "apply_option");
+  assert.ok(a3.option.new_text && a3.option.action && a3.claim_quote && a3.post.id);
   const s = await state();
   assert.strictEqual(s.streak.count, 1);
   assert.ok(s.badges.first && s.badges.lesson);
@@ -138,6 +138,22 @@ test("expired options are hidden; quick-fix cards have no source questions", asy
   assert.ok(await page.$("text=Leave it the way it is"));
   await page.click("[data-opt=fine]");
   assert.ok(!(await page.$(".reasons")), "no 'why is the source wrong' on a typo card");
+});
+
+test("lessons mix one fact check with quick fixes; typo cards show the change in place", async (S) => {
+  const { page, repo, state } = await S.open();
+  assert.match(await text(page, '[data-post="101"] .label small'), /👀 4,200/);
+  await page.click("[data-act=start]");
+  const ids = await page.evaluate(() => window.__bq.lesson.cards.map((c) => c.id));
+  assert.deepStrictEqual(ids, ["c-101-1", "c-101-3", "c-102-2"], "highest-priority fact check first, then quick fixes");
+  assert.match(await text(page, ".posttitle + .small"), /4,200 views in the last 3 months/);
+  await answer(page, "a"); await next(page);
+  assert.strictEqual(await page.$eval("blockquote.claim", (e) => e.innerHTML), "You should <mark>visit teh museum</mark> before lunch.");
+  assert.strictEqual(await page.$eval(".opt .diff", (e) => e.innerHTML), "visit <del>teh</del> <ins>the</ins> museum");
+  await answer(page, "a"); await next(page);
+  repo.fixlog = { "c-101-1": { status: "applied" } };
+  await finishLesson(page, "a"); await page.click("[data-act=home]"); await syncNow(page); await page.click("[data-nav=passport]");
+  assert.match(await text(page, ".kpis ~ .kpi ~ .kpi"), /1,400 ?Readers a month on posts you've fixed/);
 });
 
 test("streak freezes when there is nothing left and picks up when cards arrive", async (S) => {
