@@ -73,6 +73,9 @@ test("\"Something else\" needs a note; undo takes back an answer completely", as
   const id = await cardId(page);
   await page.click('[data-opt^="opt:"]'); await page.click("[data-act=check]"); await page.waitForSelector("#sheet.show");
   assert.ok((await state()).xp > 0);
+  // She switches apps and comes back: the background sync must not upload a mid-lesson answer, or Undo would be lost.
+  await page.evaluate(() => { window.__bq.state.lastTry = 0; document.dispatchEvent(new Event("visibilitychange")); });
+  await page.waitForTimeout(700);
   await page.click("#sheet [data-act=undo]");
   const s = await state();
   assert.deepStrictEqual([s.xp, Object.keys(s.answers).length, s.pending.length, s.streak.count], [0, 0, 0, 0]);

@@ -637,7 +637,9 @@ async function sync({ quiet = false } = {}) {
       if (!quiet) toast("Up to date ✓");
       return;
     }
-    packagePending();
+    // Mid-lesson answers stay on the phone until the lesson ends, so Undo keeps working
+    // even if she switches apps to check a source and a background sync runs.
+    if (view.name !== "lesson") packagePending();
     const sent = await flushOutbox();
     const added = await pullDecks();
     await pushResearch();
