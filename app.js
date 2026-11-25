@@ -10,6 +10,9 @@ import { pip, GEAR } from "./mascot.js";
 // Demo mode: a page can set window.BQ_DEMO = {deck} before loading this script.
 // Cards come from that deck, nothing is sent anywhere, and progress stays in this browser.
 const DEMO = window.BQ_DEMO || null;
+const APP_VERSION = "1.5";      // shown in Settings, and in the details she can copy when asking for help
+// Deep copy that also works on phones a few years old.
+const clone = (o) => (typeof structuredClone === "function" ? structuredClone(o) : JSON.parse(JSON.stringify(o)));
 const KEY = DEMO ? "blogquest.demo" : "blogquest.v1";
 const XP = { answer: 10, high: 5, note: 5, source: 5, later: 2, opened: 3 };
 // Miles needed for each rank.
@@ -69,9 +72,9 @@ let syncing = false;
 function load() {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) || "null");
-    if (raw) return { ...structuredClone(DEFAULTS), ...raw, settings: { ...DEFAULTS.settings, ...raw.settings } };
+    if (raw) return { ...clone(DEFAULTS), ...raw, settings: { ...DEFAULTS.settings, ...raw.settings } };
   } catch (e) { /* storage blocked or corrupt — start fresh in memory */ }
-  return structuredClone(DEFAULTS);
+  return clone(DEFAULTS);
 }
 let saveWarned = false;
 function save() {
@@ -1036,8 +1039,8 @@ function parkLater() {
 // Everything an answer can change, so a mis-tap can be taken back before moving on.
 function snapshot(c) {
   return { cardId: c.id, xp: S.xp, streak: { ...S.streak }, day: S.days[today()] || 0,
-    later: [...S.later], laterNotes: structuredClone(S.laterNotes), researchResolved: S.researchResolved || 0,
-    q: structuredClone(S.q), xpDay: S.xpDays[today()] || 0,
+    later: [...S.later], laterNotes: clone(S.laterNotes), researchResolved: S.researchResolved || 0,
+    q: clone(S.q), xpDay: S.xpDays[today()] || 0,
     pendingLen: S.pending.length, note: lesson.note, source: lesson.source, selected: lesson.selected, fineReason: lesson.fineReason };
 }
 
@@ -1268,7 +1271,11 @@ function settingsView() {
       <div><b>Last sync:</b> ${S.lastSync ? new Date(S.lastSync).toLocaleString() : "never"}</div>
       <div><b>Waiting to upload:</b> ${waiting} answer${waiting === 1 ? "" : "s"}</div>
       <div><b>Cards on phone:</b> ${allCards().length}</div>
-      <div style="margin-top:10px"><button class="btn ghost" data-act="sync">Sync now</button></div>
+      ${S.syncError ? `<div><b>Last problem:</b> ${esc(S.syncError.msg)}</div>` : ""}
+      <div class="muted">Blog Quest ${APP_VERSION}</div>
+      <div style="margin-top:10px;display:grid;gap:10px"><button class="btn ghost" data-act="sync">Sync now</button>
+        <button class="btn ghost" data-act="copy-help">📋 Copy details for help</button>
+        <textarea id="help-text" hidden readonly aria-label="Details for help"></textarea></div>
     </div>
     ${reminderCard()}
     <button class="btn ghost" data-act="show-intro" style="margin-bottom:6px">❓ How Blog Quest works</button>
@@ -1346,6 +1353,16 @@ function act(a) {
       try { navigator.clipboard.writeText(text).then(() => toast("List copied — paste it into Notes or an email"), fallback); } catch (e) { fallback(); }
       break;
     }
+    case "copy-help": {
+      // Nothing private: no key, no answers. Just what someone helping would need to know.
+      const text = [`Blog Quest ${APP_VERSION}`, `Last sync: ${S.lastSync || "never"}`, `Last problem: ${S.syncError ? `${S.syncError.kind}: ${S.syncError.msg} (since ${S.syncError.at})` : "none"}`,
+        `Key saved: ${S.settings.token ? "yes" : "no"}`, `Repo: ${S.settings.repo} @ ${S.settings.branch}`, `Online: ${navigator.onLine}`,
+        `Cards on phone: ${allCards().length} (${openCards().length} open, ${S.later.length} research)`, `Waiting to upload: ${S.outbox.length} files, ${S.pending.length} answers`,
+        `Installed: ${matchMedia("(display-mode: standalone)").matches || !!navigator.standalone}`, `Reviewer mode: ${!!S.settings.reviewer}`, `Browser: ${navigator.userAgent}`].join("\n");
+      const fallback = () => { const t = $("#help-text"); if (t) { t.hidden = false; t.value = text; t.focus(); t.select(); toast("Select all, then copy"); } };
+      try { navigator.clipboard.writeText(text).then(() => toast("Copied. Paste it into a message."), fallback); } catch (e) { fallback(); }
+      break;
+    }
     case "copy-review": {
       const text = reviewSummary();
       const fallback = () => { const t = $("#review-text"); if (t) { t.hidden = false; t.value = text; t.focus(); t.select(); toast("Select all, then copy"); } };
@@ -1403,7 +1420,7 @@ function act(a) {
     case "reset":
       askConfirm("Reset progress?", DEMO ? "Clears this demo so you can start over." : "Answers already uploaded stay safe in GitHub.", "Reset", "Cancel").then((ok) => {
         if (!ok) return;
-        const settings = S.settings; S = structuredClone(DEFAULTS); S.settings = settings;
+        const settings = S.settings; S = clone(DEFAULTS); S.settings = settings;
         if (DEMO) loadDemoDeck();
         save(); view = { name: "home" }; render(); sync({ quiet: true });
       });

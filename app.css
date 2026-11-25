@@ -39,11 +39,11 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); }
-body { min-height: 100dvh; font-size: 17px; line-height: 1.4; overflow-x: hidden; }
+body { min-height: 100vh; min-height: 100dvh; font-size: 17px; line-height: 1.4; overflow-x: hidden; }
 a { color: var(--link); }
 button { font: inherit; color: inherit; }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
-#app { max-width: 560px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column;
+#app { max-width: 560px; margin: 0 auto; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column;
   padding-top: env(safe-area-inset-top, 0px); padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 #app.lesson-mode { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); }

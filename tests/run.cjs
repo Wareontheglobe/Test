@@ -282,6 +282,13 @@ test("a key that stops working shows a clear warning, and recovers", async (S) =
   assert.ok(await page.$(".alert"), "warning banner on the home screen");
   assert.match(await text(page, ".alert"), /access key has stopped working/);
   assert.strictEqual((await state()).outbox.length, 1, "her answer is kept");
+  await page.click("[data-nav=settings]");
+  assert.match(await text(page, ".card.small"), /Last problem: GitHub didn't accept the access key/);
+  await page.click("[data-act=copy-help]"); await page.waitForTimeout(200);
+  const help = await page.inputValue("#help-text");
+  assert.match(help, /Blog Quest \d+\.\d+/); assert.match(help, /Last problem: auth/); assert.match(help, /Waiting to upload: 1 files/);
+  assert.ok(!help.includes(GOOD_KEY), "the key is never in the help details");
+  await page.click("[data-nav=home]");
   repo.status = 0;
   await syncNow(page); await page.click("[data-nav=home]");
   assert.ok(!(await page.$(".alert")));
