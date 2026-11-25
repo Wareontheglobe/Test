@@ -6,6 +6,8 @@ A gamified, offline-first phone app for fact-checking a travel blog. Each lesson
 - The streak freezes when there's nothing left to check, so running out of cards never breaks it.
 - A research list for cards that need digging first. It's saved to the private repo and can be emailed, shared or copied from the app.
 - Answers can be changed until they've been applied to the blog.
+- Miles, streak and badges are backed up to the private repo, so a new phone picks up where the old one stopped.
+- If the access key stops working, the home screen says so plainly instead of failing quietly.
 - Works offline once it's on your home screen. Answers queue on the phone and upload when you're back online.
 - Cards and answers live in a **private** GitHub repo. This public repo contains only the app code.
 
@@ -24,6 +26,15 @@ https://wareontheglobe.github.io/Test/ is served by GitHub Pages from the **`gh-
    On iPhone, the home-screen app keeps its own storage separate from Safari, so connect *inside* the installed app.
    On Android, you can also open `https://wareontheglobe.github.io/Test/#token=<key>` once. The key is saved and removed from the address bar. Only send that link privately.
 
+## Tests
+
+```
+node tests/run.cjs            # all end-to-end tests
+node tests/run.cjs streak     # only tests whose name contains "streak"
+```
+
+The tests drive the real app in headless Chromium against a pretend GitHub (`tests/harness.cjs`) and a made-up deck (`tests/fixture-deck.json`). Nothing leaves the machine. They need Playwright with Chromium installed. Run them before pushing a change to `gh-pages`.
+
 ## Files
 
 | File | What it is |
@@ -31,3 +42,4 @@ https://wareontheglobe.github.io/Test/ is served by GitHub Pages from the **`gh-
 | `index.html`, `app.css`, `app.js` | The app (no build step, no dependencies) |
 | `mascot.js` | Pip, drawn as inline SVG |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and installability |
+| `tests/` | End-to-end tests |

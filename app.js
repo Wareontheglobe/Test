@@ -47,6 +47,11 @@ const DEFAULTS = {
   lastSync: "",
   restored: false,
   seenIntro: false, // she has been through the welcome walkthrough
+  syncError: null,  // {kind, msg, at} from the last failed sync; cleared when one succeeds
+  lastTry: 0,       // when a sync was last attempted (ms)
+  progressSaved: "",  // the progress backup as last written to the repo
+  progressSha: "",
+  progressAt: 0,
   live: {},         // cardId -> fix-log entry, for answers that are now live on the blog
   seenLive: 0,      // how many live fixes she has already been told about
 };
@@ -206,6 +211,17 @@ async function ghError(res) {
   if (res.status === 403 || res.status === 404) return "Can't reach the repo with this key. Check the repo name and key permissions.";
   return `GitHub error ${res.status}`;
 }
+// An Error that remembers what kind of failure it was, so the home screen can explain it.
+async function ghFail(res) {
+  const e = new Error(await ghError(res));
+  e.kind = res.status === 401 ? "auth" : res.status === 403 || res.status === 404 ? "access" : "other";
+  return e;
+}
+// Cards come from a file someone edits, so take only what the app can show.
+function cleanCards(list) {
+  return (Array.isArray(list) ? list : []).filter((c) => c && typeof c.id === "string" && c.claim && typeof c.claim.quote === "string" && c.post)
+    .map((c) => ({ ...c, options: Array.isArray(c.options) ? c.options.filter((o) => o && o.id && o.label) : [], sources: Array.isArray(c.sources) ? c.sources.filter(Boolean) : [] }));
+}
 
 function packagePending() {
   if (!S.pending.length) return;
@@ -234,7 +250,7 @@ async function flushOutbox() {
       }),
     });
     if (res.status === 422) { item.path = item.path.replace(/\.json$/, `-${Math.random().toString(36).slice(2, 6)}.json`); continue; }
-    if (!res.ok) throw new Error(await ghError(res));
+    if (!res.ok) throw await ghFail(res);
     S.outbox.shift(); sent += n; save();
   }
   return sent;
@@ -244,7 +260,7 @@ async function pullDecks() {
   const { branch } = S.settings;
   const res = await gh(`contents/decks?ref=${encodeURIComponent(branch)}`);
   if (res.status === 404) return 0;
-  if (!res.ok) throw new Error(await ghError(res));
+  if (!res.ok) throw await ghFail(res);
   const files = (await res.json()).filter((f) => f.type === "file" && f.name.endsWith(".json"));
   let added = 0;
   for (const f of files) {
@@ -255,7 +271,7 @@ async function pullDecks() {
     try {
       const deck = await r.json();
       const before = new Set((S.decks[id]?.cards || []).map((c) => c.id));
-      S.decks[id] = { id, sha: f.sha, created: deck.created || id, cards: Array.isArray(deck) ? deck : deck.cards || [] };
+      S.decks[id] = { id, sha: f.sha, created: deck.created || id, cards: cleanCards(Array.isArray(deck) ? deck : deck.cards) };
       added += S.decks[id].cards.filter((c) => !before.has(c.id)).length;
     } catch (e) { /* skip malformed deck */ }
   }
@@ -309,21 +325,59 @@ async function pushResearch() {
   let sha;
   const cur = await gh(`${path}?ref=${encodeURIComponent(S.settings.branch)}`);
   if (cur.ok) sha = (await cur.json()).sha;
-  else if (cur.status !== 404) throw new Error(await ghError(cur));
+  else if (cur.status !== 404) throw await ghFail(cur);
   if (sha || S.later.length) {
     const res = await gh(path, {
       method: "PUT",
       body: JSON.stringify({ message: `Blog Quest: research list (${S.later.length} open)`, content: b64(researchDoc(true)), branch: S.settings.branch, ...(sha ? { sha } : {}) }),
     });
-    if (!res.ok) throw new Error(await ghError(res));
+    if (!res.ok) throw await ghFail(res);
   }
   S.researchDirty = false; save();
+}
+
+/* ---------------- progress backup ----------------
+   Miles, streak and badges live on the phone. A copy is kept in progress/state.json in the
+   private repo so a new phone, or a reinstall, picks up where she left off. No name or email in it. */
+function progressDoc() {
+  const days = Object.fromEntries(Object.entries(S.days).sort().slice(-120));
+  return JSON.stringify({ app: "blog-quest", version: 1, xp: S.xp, streak: S.streak, frozen: S.frozen, frozenDays: S.frozenDays, days,
+    badges: S.badges, researchResolved: S.researchResolved || 0, redone: S.redone, seenLive: S.seenLive || 0,
+    dailyGoal: S.settings.dailyGoal, sound: S.settings.sound }, null, 1);
+}
+async function pushProgress(force) {
+  const doc = progressDoc();
+  if (doc === S.progressSaved || (!S.xp && !S.progressSha)) return;
+  if (!force && Date.now() - (S.progressAt || 0) < 5 * 60 * 1000) return;     // at most every five minutes
+  const path = "contents/progress/state.json";
+  const put = (sha) => gh(path, { method: "PUT", body: JSON.stringify({ message: "Blog Quest: progress backup", content: b64(doc + "\n"), branch: S.settings.branch, ...(sha ? { sha } : {}) }) });
+  let res = await put(S.progressSha);
+  if (res.status === 409 || res.status === 422) {                             // our copy of the file's version is out of date
+    const cur = await gh(`${path}?ref=${encodeURIComponent(S.settings.branch)}`);
+    res = await put(cur.ok ? (await cur.json()).sha : "");
+  }
+  if (!res.ok) throw await ghFail(res);
+  S.progressSha = (await res.json().catch(() => ({})))?.content?.sha || "";
+  S.progressSaved = doc; S.progressAt = Date.now(); save();
+}
+async function restoreProgress() {
+  const res = await gh(`contents/progress/state.json?ref=${encodeURIComponent(S.settings.branch)}`, { headers: { Accept: "application/vnd.github.raw+json" } });
+  if (!res.ok) return;
+  let p; try { p = await res.json(); } catch (e) { return; }
+  if (!p || p.app !== "blog-quest" || S.xp > (p.xp || 0)) return;
+  S.xp = p.xp || 0; S.streak = { ...S.streak, ...(p.streak || {}) }; S.frozen = p.frozen || ""; S.frozenDays = p.frozenDays || {};
+  S.days = { ...(p.days || {}), ...S.days }; S.badges = { ...(p.badges || {}), ...S.badges };
+  S.researchResolved = p.researchResolved || 0; S.redone = p.redone || {}; S.seenLive = p.seenLive || 0;
+  if (p.dailyGoal) S.settings.dailyGoal = p.dailyGoal;
+  if (typeof p.sound === "boolean") S.settings.sound = p.sound;
+  S.progressSaved = progressDoc(); S.restoredProgress = true;
 }
 
 // On a fresh install, mark cards that were already answered on another device / earlier install.
 async function restoreAnswered() {
   if (S.restored || resolvedCount() > 0) { S.restored = true; return; }
   const { branch } = S.settings;
+  await restoreProgress();
   const top = await gh(`contents/responses?ref=${encodeURIComponent(branch)}`);
   if (top.ok) {
     const dirs = (await top.json()).filter((d) => d.type === "dir");
@@ -364,16 +418,20 @@ async function sync({ quiet = false } = {}) {
   if (syncing) return;
   if (!S.settings.token) { if (!quiet) toast("Add the GitHub key in Settings first"); return; }
   if (!navigator.onLine) { if (!quiet) toast("Offline — will sync when you're back online"); return; }
-  syncing = true;
+  syncing = true; S.lastTry = Date.now();
+  if (!S.lastSync && view.name === "home") render();      // show "fetching your cards" on the very first sync
   try {
     packagePending();
     const sent = await flushOutbox();
     const added = await pullDecks();
     await pushResearch();
+    const wasFresh = !S.restored;
     await restoreAnswered();
     const newlyLive = await pullFixLog();
-    S.lastSync = new Date().toISOString(); save();
-    if (!quiet || sent || added || newlyLive) {
+    await pushProgress(!quiet || sent > 0);
+    S.lastSync = new Date().toISOString(); S.syncError = null; save();
+    if (wasFresh && S.restoredProgress) { toast(`Welcome back! Your ${S.xp} miles and streak are restored.`); quiet = true; S.restoredProgress = false; }
+    else if (!quiet || sent || added || newlyLive) {
       const bits = [];
       if (sent) bits.push(`${sent} answer${sent === 1 ? "" : "s"} uploaded`);
       if (added) bits.push(`${added} new card${added === 1 ? "" : "s"}`);
@@ -381,6 +439,7 @@ async function sync({ quiet = false } = {}) {
       toast(bits.length ? bits.join(" · ") : "All synced ✓");
     }
   } catch (e) {
+    S.syncError = { kind: e.kind || "other", msg: e.message || "Sync failed", at: S.syncError?.at || new Date().toISOString() }; save();
     if (!quiet) toast(e.message || "Sync failed — will retry");
   } finally {
     syncing = false;
@@ -481,6 +540,12 @@ function render() {
   bind();
   window.scrollTo(0, 0);
   updateIconBadge();
+  const screen = view.name + (view.name === "lesson" ? lesson.i : view.step || "");
+  if (screen !== render.screen) {
+    render.screen = screen;
+    const h = $("#app h1, #app h2, #app .chip");
+    if (h && document.activeElement?.tagName !== "INPUT") { h.tabIndex = -1; try { h.focus({ preventScroll: true }); } catch (e) {} }
+  }
 }
 
 function topbar() {
@@ -533,7 +598,16 @@ function homeView() {
         <button class="btn ghost" data-act="save-key" style="margin-top:10px">Connect</button>
       </details>
     </div>`;
-  return `${topbar()}
+  const err = S.syncError, stuck = err && (err.kind !== "other" || Date.now() - new Date(err.at).getTime() > 24 * 3600 * 1000);
+  const banner = !stuck ? "" : `<div class="alert" role="alert"><b>⚠️ ${err.kind === "other" ? "I haven't been able to sync for a while" : "I can't reach your cards"}</b>
+      <p>${err.kind === "auth" ? "The access key has stopped working. It may have expired. Ask for a new one, then paste it in Settings → Connection."
+        : err.kind === "access" ? "The access key can't open the cards any more. Ask for it to be checked, then paste the new one in Settings → Connection."
+        : "Your answers are safe on this phone and will upload when the connection works again."}</p>
+      <button class="btn ghost sm" data-nav="settings">Open Settings</button></div>`;
+  if (!allCards().length && navigator.onLine && !err && (syncing || !S.lastSync)) return `${topbar()}
+    <div class="hero">${pip("think", 104)}<div class="bubble">Fetching your cards…</div></div>
+    <div class="card loading" aria-busy="true"><i></i><i></i><i></i></div>`;
+  return `${topbar()}${banner}
     <div class="hero">${pip(open.length ? "happy" : "sleepy", 104)}<div class="bubble">${esc(greeting(open.length))}</div></div>
     <div class="goal">
       <div class="ring" style="--p:${pct}"><span>${Math.min(doneToday, goal)}/${goal}</span></div>
@@ -611,7 +685,7 @@ function lessonView() {
       ${!resolvedCount() && !S.later.length ? `<div class="tip">👋 <b>Your first card.</b> Read what your post says, look at what I found, then choose an option below. Nothing on your blog changes until your answer has been reviewed.</div>` : ""}
       <span class="chip ${esc(sev)}">${TYPE_ICON[c.type] || "🔍"} ${esc(c.headline || "Possible issue")}</span>
       <span class="small muted" style="margin-left:6px">${esc(sevText)}</span>
-      <div class="posttitle">${safeUrl(c.post?.url) ? `<a href="${esc(c.post.url)}" target="_blank" rel="noopener">${esc(c.post?.title)}</a>` : esc(c.post?.title)}${c.claim?.section ? ` · ${esc(c.claim.section)}` : ""}</div>
+      <div class="posttitle">${safeUrl(c.post?.url) ? `<a href="${esc(c.post.url)}" target="_blank" rel="noopener noreferrer">${esc(c.post?.title)}</a>` : esc(c.post?.title)}${c.claim?.section ? ` · ${esc(c.claim.section)}` : ""}</div>
       ${S.laterNotes[c.id]?.note ? `<div class="tip" style="margin-top:8px">🔖 <b>Your note:</b> ${esc(S.laterNotes[c.id].note)}</div>` : ""}
       ${c.update?.text ? `<div class="tip" style="margin-top:8px">🔎 <b>Pip looked into it${c.update.date ? ` (${esc(c.update.date)})` : ""}:</b> ${esc(c.update.text)}</div>` : ""}
       <div class="label-sm">Your post says</div>
@@ -626,7 +700,7 @@ function lessonView() {
           <b>${n + 1}. ${esc(s.label)}</b>
           ${s.quote ? `<q>${esc(s.quote)}</q>` : ""}
           <div class="meta">
-            ${safeUrl(s.url) ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">Open source ↗</a>` : ""}
+            ${safeUrl(s.url) ? `<a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">Open source ↗</a>` : ""}
             ${s.retrieved ? `<span>checked ${esc(s.retrieved)}</span>` : ""}
             ${s.via === "search snippet" ? `<span>from search preview</span>` : ""}
             ${s.via === "owner" ? `<span>✔ confirmed first-hand</span>` : ""}
@@ -803,14 +877,14 @@ function laterView() {
         const src = (c.sources || []).find((s) => safeUrl(s.url));
         return `<div class="card research">
           <span class="chip ${esc(c.severity || "low")}">${TYPE_ICON[c.type] || "🔍"} ${esc(c.headline)}</span>
-          <div class="posttitle">${safeUrl(c.post?.url) ? `<a href="${esc(c.post.url)}" target="_blank" rel="noopener">${esc(c.post?.title)}</a>` : esc(c.post?.title)}</div>
+          <div class="posttitle">${safeUrl(c.post?.url) ? `<a href="${esc(c.post.url)}" target="_blank" rel="noopener noreferrer">${esc(c.post?.title)}</a>` : esc(c.post?.title)}</div>
           <blockquote class="claim sm">${esc(c.claim?.quote)}</blockquote>
           <p class="small" style="margin:8px 0">${esc(c.summary)}</p>
           ${c.update?.text ? `<div class="tip">🔎 <b>Pip looked into it${c.update.date ? ` (${esc(c.update.date)})` : ""}:</b> ${esc(c.update.text)}</div>` : ""}
           <label class="small muted" for="rn-${esc(c.id)}">What to check</label>
           <input type="text" id="rn-${esc(c.id)}" data-rnote="${esc(c.id)}" value="${esc(note)}" placeholder="e.g. call and ask about Monday hours">
           <div class="row2">
-            ${src ? `<a class="btn ghost sm" href="${esc(src.url)}" target="_blank" rel="noopener">Open source ↗</a>` : ""}
+            ${src ? `<a class="btn ghost sm" href="${esc(src.url)}" target="_blank" rel="noopener noreferrer">Open source ↗</a>` : ""}
             <button class="btn teal sm" data-laterid="${esc(c.id)}">Decide now</button>
           </div></div>`;
       }).join("")}
@@ -1096,7 +1170,7 @@ async function connectWith(key) {
 
 function loadDemoDeck() {
   const d = DEMO.deck;
-  S.decks = { [d.created]: { id: d.created, sha: "demo", created: d.created, cards: d.cards } };
+  S.decks = { [d.created]: { id: d.created, sha: "demo", created: d.created, cards: cleanCards(d.cards) } };
   S.settings.token = "demo"; S.restored = true;
 }
 
@@ -1118,7 +1192,14 @@ if (DEMO) { loadDemoDeck(); save(); }
 if (!DEMO && "serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 window.addEventListener("online", () => { refreshAfterSync(); sync({ quiet: true }); });
 window.addEventListener("offline", refreshAfterSync);
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") sync({ quiet: true }); });
+// Coming back to the app syncs, but not more than once a minute unless something is waiting to go up.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  const waiting = S.pending.length || S.outbox.length || S.researchDirty;
+  if (waiting || Date.now() - (S.lastTry || 0) > 60 * 1000) sync({ quiet: true });
+});
+// Ask the browser not to clear the app's saved progress when the phone runs low on space.
+if (!DEMO) { try { navigator.storage?.persist?.(); } catch (e) {} }
 
 // Any answers left from a lesson that was closed mid-way get packaged for upload.
 packagePending();
@@ -1127,4 +1208,4 @@ render();
 sync({ quiet: true });
 
 // Exposed for local testing only.
-window.__bq = { get state() { return S; }, load: (decks) => { decks.forEach((d) => (S.decks[d.id] = d)); save(); render(); } };
+window.__bq = { get state() { return S; }, get lesson() { return lesson; }, get view() { return view; }, load: (decks) => { decks.forEach((d) => (S.decks[d.id] = d)); save(); render(); } };

@@ -1,0 +1,282 @@
+{
+ "created": "2026-01-01",
+ "note": "Synthetic deck for tests. Not real blog content.",
+ "cards": [
+  {
+   "id": "c-101-1",
+   "type": "hours",
+   "severity": "high",
+   "post": {
+    "id": 101,
+    "title": "A Weekend in Testville",
+    "url": "https://example.com/101/"
+   },
+   "headline": "Hours changed",
+   "claim": {
+    "quote": "Open daily from 9 AM.",
+    "section": "Section"
+   },
+   "confidence": "strong",
+   "evidence": "Test evidence",
+   "summary": "Summary for Hours changed.",
+   "sources": [
+    {
+     "label": "Official site",
+     "url": "https://example.org/source",
+     "quote": "The official wording.",
+     "via": "page",
+     "retrieved": "2026-01-01"
+    }
+   ],
+   "options": [
+    {
+     "id": "a",
+     "label": "Update to 10 AM",
+     "action": "replace",
+     "new_text": "Open daily from 10 AM."
+    },
+    {
+     "id": "b",
+     "label": "Drop the hours",
+     "action": "replace",
+     "new_text": "Open daily."
+    }
+   ],
+   "also_in": [
+    "FAQ block"
+   ]
+  },
+  {
+   "id": "c-101-2",
+   "type": "price",
+   "severity": "medium",
+   "post": {
+    "id": 101,
+    "title": "A Weekend in Testville",
+    "url": "https://example.com/101/"
+   },
+   "headline": "Price went up",
+   "claim": {
+    "quote": "Tickets cost $5.",
+    "section": "Section"
+   },
+   "confidence": "check",
+   "evidence": "Test evidence",
+   "summary": "Summary for Price went up.",
+   "sources": [
+    {
+     "label": "Official site",
+     "url": "https://example.org/source",
+     "quote": "The official wording.",
+     "via": "page",
+     "retrieved": "2026-01-01"
+    }
+   ],
+   "options": [
+    {
+     "id": "a",
+     "label": "Update to $6",
+     "action": "replace",
+     "new_text": "Tickets cost $6."
+    }
+   ]
+  },
+  {
+   "id": "c-101-3",
+   "type": "typo",
+   "severity": "low",
+   "post": {
+    "id": 101,
+    "title": "A Weekend in Testville",
+    "url": "https://example.com/101/"
+   },
+   "headline": "Typo: teh",
+   "claim": {
+    "quote": "visit teh museum",
+    "section": "Section"
+   },
+   "confidence": "strong",
+   "evidence": "Test evidence",
+   "summary": "Summary for Typo: teh.",
+   "sources": [],
+   "options": [
+    {
+     "id": "a",
+     "label": "Fix it",
+     "action": "replace",
+     "new_text": "visit the museum"
+    }
+   ]
+  },
+  {
+   "id": "c-102-1",
+   "type": "closed",
+   "severity": "medium",
+   "post": {
+    "id": 102,
+    "title": "Best Cafes in Sampleton",
+    "url": "https://example.com/102/"
+   },
+   "headline": "Cafe may have closed",
+   "claim": {
+    "quote": "Bean There is our favourite.",
+    "section": "Section"
+   },
+   "confidence": "check",
+   "evidence": "Test evidence",
+   "summary": "Summary for Cafe may have closed.",
+   "sources": [
+    {
+     "label": "Official site",
+     "url": "https://example.org/source",
+     "quote": "The official wording.",
+     "via": "page",
+     "retrieved": "2026-01-01"
+    }
+   ],
+   "options": [
+    {
+     "id": "a",
+     "label": "Remove it",
+     "action": "remove",
+     "new_text": ""
+    }
+   ]
+  },
+  {
+   "id": "c-102-2",
+   "type": "typo",
+   "severity": "low",
+   "post": {
+    "id": 102,
+    "title": "Best Cafes in Sampleton",
+    "url": "https://example.com/102/"
+   },
+   "headline": "Typo: coffe",
+   "claim": {
+    "quote": "great coffe here",
+    "section": "Section"
+   },
+   "confidence": "strong",
+   "evidence": "Test evidence",
+   "summary": "Summary for Typo: coffe.",
+   "sources": [],
+   "options": [
+    {
+     "id": "a",
+     "label": "Fix it",
+     "action": "replace",
+     "new_text": "great coffee here"
+    }
+   ]
+  },
+  {
+   "id": "c-102-3",
+   "type": "consistency",
+   "severity": "low",
+   "post": {
+    "id": 102,
+    "title": "Best Cafes in Sampleton",
+    "url": "https://example.com/102/"
+   },
+   "headline": "Name differs",
+   "claim": {
+    "quote": "Cafe Uno",
+    "section": "Section"
+   },
+   "confidence": "strong",
+   "evidence": "Test evidence",
+   "summary": "Summary for Name differs.",
+   "sources": [],
+   "options": [
+    {
+     "id": "a",
+     "label": "Fix it",
+     "action": "replace",
+     "new_text": "Café Uno"
+    }
+   ]
+  },
+  {
+   "id": "c-103-1",
+   "type": "rule",
+   "severity": "medium",
+   "post": {
+    "id": 103,
+    "title": "Airport Lounge Review",
+    "url": "https://example.com/103/"
+   },
+   "headline": "Guest fee changed",
+   "claim": {
+    "quote": "Guests are free.",
+    "section": "Section"
+   },
+   "confidence": "strong",
+   "evidence": "Test evidence",
+   "summary": "Summary for Guest fee changed.",
+   "sources": [
+    {
+     "label": "Official site",
+     "url": "https://example.org/source",
+     "quote": "The official wording.",
+     "via": "page",
+     "retrieved": "2026-01-01"
+    }
+   ],
+   "options": [
+    {
+     "id": "a",
+     "label": "Say guests cost $45",
+     "action": "replace",
+     "new_text": "Guests cost $45."
+    }
+   ],
+   "update": {
+    "date": "2026-01-02",
+    "text": "The lounge page now lists the fee."
+   }
+  },
+  {
+   "id": "c-103-2",
+   "type": "show",
+   "severity": "low",
+   "post": {
+    "id": 103,
+    "title": "Airport Lounge Review",
+    "url": "https://example.com/103/"
+   },
+   "headline": "Limited-time option",
+   "claim": {
+    "quote": "The pop-up runs all month.",
+    "section": "Section"
+   },
+   "confidence": "strong",
+   "evidence": "Test evidence",
+   "summary": "Summary for Limited-time option.",
+   "sources": [
+    {
+     "label": "Official site",
+     "url": "https://example.org/source",
+     "quote": "The official wording.",
+     "via": "page",
+     "retrieved": "2026-01-01"
+    }
+   ],
+   "options": [
+    {
+     "id": "a",
+     "label": "Add final-week note",
+     "action": "replace",
+     "new_text": "The pop-up runs all month (final week).",
+     "valid_until": "2020-01-01"
+    },
+    {
+     "id": "b",
+     "label": "Remove it",
+     "action": "remove",
+     "new_text": ""
+    }
+   ]
+  }
+ ]
+}
