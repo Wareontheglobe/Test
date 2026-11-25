@@ -707,7 +707,7 @@ function homeView() {
     : open.length < goal - doneToday ? `${open.length} card${open.length === 1 ? "" : "s"} left to check`
     : `${goal - doneToday} more card${goal - doneToday === 1 ? "" : "s"} to hit today's goal`;
   const standalone = DEMO || matchMedia("(display-mode: standalone)").matches || navigator.standalone;
-  if (!S.settings.token) return `${topbar()}
+  if (!S.settings.token) return `${topbar()}<h1 class="sr-only">Blog Quest</h1>
     <div class="hero">${pipG("happy", 104)}<div class="bubble">Hi! I'm Pip 👋 I hunt for things on the blog that might be out of date. Let's get connected!</div></div>
     ${!standalone ? `<div class="tip">📲 <b>Do this first:</b> add Blog Quest to your home screen, then open it from there and connect. (iPhone: Share → <i>Add to Home Screen</i>. Android: ⋮ → <i>Install app</i>.) The home-screen app keeps its own storage, so connecting in the browser won't carry over.</div>` : ""}
     <div class="card">
@@ -725,10 +725,10 @@ function homeView() {
         : err.kind === "access" ? "The access key can't open the cards any more. Ask for it to be checked, then paste the new one in Settings → Connection."
         : "Your answers are safe on this phone and will upload when the connection works again."}</p>
       <button class="btn ghost sm" data-nav="settings">Open Settings</button></div>`;
-  if (!allCards().length && navigator.onLine && !err && (syncing || !S.lastSync)) return `${topbar()}
+  if (!allCards().length && navigator.onLine && !err && (syncing || !S.lastSync)) return `${topbar()}<h1 class="sr-only">Blog Quest</h1>
     <div class="hero">${pipG("think", 104)}<div class="bubble">Fetching your cards…</div></div>
     <div class="card loading" aria-busy="true"><i></i><i></i><i></i></div>`;
-  return `${topbar()}${banner}
+  return `${topbar()}<h1 class="sr-only">Blog Quest</h1>${banner}
     <div class="hero">${pipG(open.length ? "happy" : "sleepy", 104)}<div class="bubble">${esc(greeting(open.length))}</div></div>
     <div class="goal">
       <div class="ring" style="--p:${pct}"><span>${Math.min(doneToday, goal)}/${goal}</span></div>
@@ -833,7 +833,7 @@ function lessonView() {
     </div>
     <div>
       ${!resolvedCount() && !S.later.length ? `<div class="tip">👋 <b>Your first card.</b> Read what your post says, look at what I found, then choose an option below. Nothing on your blog changes until your answer has been reviewed.</div>` : ""}
-      <span class="chip ${esc(sev)}">${TYPE_ICON[c.type] || "🔍"} ${esc(c.headline || "Possible issue")}</span>
+      <h1 class="chip ${esc(sev)}" style="margin:0">${TYPE_ICON[c.type] || "🔍"} ${esc(c.headline || "Possible issue")}</h1>
       <span class="small muted" style="margin-left:6px">${esc(sevText)}</span>
       <div class="posttitle">${safeUrl(c.post?.url) ? `<a href="${esc(c.post.url)}" target="_blank" rel="noopener noreferrer">${esc(c.post?.title)}</a>` : esc(c.post?.title)}${c.claim?.section ? ` · ${esc(c.claim.section)}` : ""}</div>
       ${viewsLine(c.post) ? `<div class="small muted">${viewsLine(c.post)}</div>` : ""}
@@ -880,7 +880,7 @@ const PRAISE = ["Nice catch!", "Great detective work!", "Sharp eyes!", "Fact che
 function showSheet({ later = false, earned = 0, title, cardId = "", bonus = "", quests = [] }) {
   const sheet = $("#sheet");
   sheet.classList.toggle("later", later);
-  $(".in", sheet).innerHTML = `<div class="row">${pipG(later ? "wow" : "cheer", 64)}<div><h3>${esc(title)}</h3>
+  $(".in", sheet).innerHTML = `<div class="row">${pipG(later ? "wow" : "cheer", 64)}<div><h2>${esc(title)}</h2>
     <div class="xp">${later ? "Saved to your research list 🔖" : earned ? `+${earned} miles ✈️${bonus ? ` · ${esc(bonus)}` : ""}` : "Answer updated"}</div></div></div>
     ${quests.map((q) => `<div class="questdone">⭐ Quest complete: ${esc(q.text)} <b>+${q.miles}</b></div>`).join("")}
     ${later ? `<input type="text" id="rnote" data-card="${esc(cardId)}" value="${esc(S.laterNotes[cardId]?.note || "")}" placeholder="What do you need to check? (optional)" aria-label="What do you need to check?" style="margin-bottom:12px">` : ""}
@@ -1025,7 +1025,7 @@ function confetti() {
 function laterView() {
   const items = researchItems();
   const canShare = !DEMO && typeof navigator.share === "function";
-  return `${topbar()}<h2>🔖 Research list</h2>
+  return `${topbar()}<h1 class="title">🔖 Research list</h1>
     ${items.length ? `<p class="muted small">Things you want to look into before deciding. ${DEMO ? "In the real app this list is saved with your answers." : "The list is saved with your answers, so it's never lost."}</p>
       ${items.map(({ c, note }) => {
         const src = (c.sources || []).find((s) => safeUrl(s.url));
@@ -1071,7 +1071,7 @@ function passportView() {
   const L = level();
   // Monthly readers of the posts that now carry one of her fixes.
   const reach = ps.filter((p) => p.cards.some((c) => S.live[c.id])).reduce((n, p) => n + Math.round((p.post?.views?.count || 0) / Math.max(1, (p.post?.views?.days || 30) / 30)), 0);
-  return `${topbar()}<h2>🛂 Passport</h2>
+  return `${topbar()}<h1 class="title">🛂 Passport</h1>
     <div class="levelrow big"><b>Level ${L.n} · ${L.name}</b><div class="bar sm"><i style="width:${L.pct}%"></i></div>
       <small>${L.next ? `${L.next - S.xp} miles to ${L.nextName}` : "Top rank!"}</small></div>
     <div class="gear">${pipG("happy", 72)}<div class="small"><b>Pip's gear</b><br>${GEAR.filter(([n]) => n <= L.n).map(([, g]) => esc(g)).join(", ") || "Just the hat and magnifying glass so far."}
@@ -1126,7 +1126,7 @@ function reminderCard() {
 function demoSettingsView() {
   const s = S.settings;
   const last = (S.demoSent || []).slice(-1)[0];
-  return `${topbar()}<h2>⚙️ Settings</h2>
+  return `${topbar()}<h1 class="title">⚙️ Settings</h1>
     <div class="tip"><b>Demo mode.</b> Cards are built in, nothing is sent to GitHub or the blog, and progress stays in this browser only.</div>
     <div class="card">
       ${youFields(s)}
@@ -1145,14 +1145,14 @@ function demoSettingsView() {
     </div>
     ${reminderCard()}
     <button class="btn ghost" data-act="show-intro" style="margin-bottom:6px">❓ How Blog Quest works</button>
-    <button class="linkbtn" data-act="reset" style="color:var(--coral-dark)">Reset the demo</button>`;
+    <button class="linkbtn" data-act="reset" style="color:var(--coral-text)">Reset the demo</button>`;
 }
 
 function settingsView() {
   if (DEMO) return demoSettingsView();
   const s = S.settings;
   const waiting = S.outbox.reduce((n, o) => n + o.body.answers.length, 0) + S.pending.length;
-  return `${topbar()}<h2>⚙️ Settings</h2>
+  return `${topbar()}<h1 class="title">⚙️ Settings</h1>
     <div class="card">${youFields(s)}</div>
     <details class="card conn"><summary><b>Connection</b> <span class="small muted">· set up once</span></summary>
       <div class="field" style="margin-top:12px"><label for="token">GitHub access key</label>
@@ -1170,7 +1170,7 @@ function settingsView() {
     </div>
     ${reminderCard()}
     <button class="btn ghost" data-act="show-intro" style="margin-bottom:6px">❓ How Blog Quest works</button>
-    <button class="linkbtn" data-act="reset" style="color:var(--coral-dark)">Reset this phone's progress</button>`;
+    <button class="linkbtn" data-act="reset" style="color:var(--coral-text)">Reset this phone's progress</button>`;
 }
 
 /* ---------------- events ---------------- */
@@ -1325,7 +1325,7 @@ function askConfirm(title, body, yes, no) {
     const wrap = document.createElement("div");
     wrap.className = "modal";
     wrap.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="mt">${pipG("wow", 64)}
-      <h3 id="mt">${esc(title)}</h3><p class="muted">${esc(body)}</p>
+      <h2 id="mt">${esc(title)}</h2><p class="muted">${esc(body)}</p>
       <div style="display:grid;gap:10px"><button class="btn" data-a="yes">${esc(yes)}</button><button class="btn ghost" data-a="no">${esc(no)}</button></div></div>`;
     const done = (v) => { wrap.remove(); resolve(v); };
     wrap.addEventListener("click", (e) => { const a = e.target.closest("[data-a]")?.dataset.a; if (a) done(a === "yes"); else if (e.target === wrap) done(false); });

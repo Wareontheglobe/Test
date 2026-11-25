@@ -45,4 +45,4 @@ The tests drive the real app in headless Chromium against a pretend GitHub (`tes
 | `index.html`, `app.css`, `app.js` | The app (no build step, no dependencies) |
 | `mascot.js` | Pip, drawn as inline SVG |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and installability |
-| `tests/` | End-to-end tests |
+| `tests/` | End-to-end tests. `tests/vendor/axe.min.js` is the axe-core accessibility checker (MPL-2.0), used only by the tests |

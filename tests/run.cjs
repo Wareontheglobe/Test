@@ -336,6 +336,37 @@ test("every screen fits a small phone, light and dark, with no script or policy 
   }
 });
 
+test("accessibility: every screen passes the automated WCAG AA checks, light and dark", async (S) => {
+  const axe = require("fs").readFileSync(require("path").join(__dirname, "vendor", "axe.min.js"), "utf8");
+  const problems = [];
+  const check = async (page, where) => {
+    await page.waitForTimeout(350);                      // let panels finish sliding in before measuring colours
+    await page.evaluate(axe);
+    const res = await page.evaluate(() => window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21aa", "best-practice"] } }));
+    res.violations.forEach((v) => v.nodes.forEach((n) => problems.push(`${where}: ${v.id} at ${n.target.join(" ")}`)));
+  };
+  for (const dark of [false, true]) {
+    const tag = dark ? "dark" : "light";
+    const intro = await S.open({ dark, intro: true }); await check(intro.page, `${tag} walkthrough`);
+    const nokey = await S.open({ dark, key: "" }); await check(nokey.page, `${tag} welcome`);
+    const { page, repo } = await S.open({ dark });
+    await check(page, `${tag} home`);
+    await page.click("[data-act=start]"); await check(page, `${tag} fact card`);
+    await page.click("[data-opt=fine]"); await check(page, `${tag} reasons`);
+    await answer(page, "later", { note: "x" }); await check(page, `${tag} research panel`); await next(page);
+    await check(page, `${tag} quick-fix card`);
+    await answer(page, "a"); await check(page, `${tag} answer panel`); await next(page);
+    await answer(page, "a"); await next(page); await page.waitForTimeout(400); await check(page, `${tag} lesson complete`);
+    await page.click("[data-act=home]");
+    await page.click("[data-nav=later]"); await check(page, `${tag} research list`);
+    await page.click("[data-nav=passport]"); await page.click("details.how summary"); await check(page, `${tag} passport`);
+    await page.click("[data-redo]"); await check(page, `${tag} confirmation`); await page.click(".modal [data-a=no]");
+    await page.click("[data-nav=settings]"); await page.click("details.conn summary"); await check(page, `${tag} settings`);
+    repo.status = 401; await page.click("[data-act=sync]"); await page.waitForTimeout(600); await page.click("[data-nav=home]"); await check(page, `${tag} warning banner`);
+  }
+  assert.deepStrictEqual(problems, []);
+});
+
 (async () => {
   const filter = process.argv[2];
   const server = await serve();
