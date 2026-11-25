@@ -58,6 +58,7 @@ test("first card shows a hint; answers upload with everything needed to apply th
   assert.deepStrictEqual([a2.decision, a2.note], ["other", "Reword this please"]);
   assert.strictEqual(a3.decision, "apply_option");
   assert.ok(a3.option.new_text && a3.option.action && a3.claim_quote && a3.post.id);
+  assert.deepStrictEqual(repo.badHeaders || [], [], "only headers GitHub accepts from a browser are sent");
   const s = await state();
   assert.strictEqual(s.streak.count, 1);
   assert.ok(s.badges.first && s.badges.lesson);

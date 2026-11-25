@@ -34,6 +34,9 @@ async function mockGitHub(ctx, repo) {
     const u = new URL(req.url());
     const p = u.pathname.replace(REPO, "");
     repo.requests.push(`${req.method()} ${p}`);
+    // GitHub only lets a browser on another site send a short list of headers. Anything else would fail on a real phone.
+    const extra = Object.keys(req.headers()).filter((k) => !["authorization", "accept", "content-type", "content-length", "user-agent", "referer", "origin", "accept-language", "accept-encoding", "cache-control", "pragma"].includes(k) && !k.startsWith("sec-"));
+    if (extra.length) repo.badHeaders = [...new Set([...(repo.badHeaders || []), ...extra])];
     if (repo.status) return route.fulfill({ status: repo.status, json: {} });
     if (req.headers()["authorization"] !== `Bearer ${GOOD_KEY}`) return route.fulfill({ status: 401, json: {} });
     const raw = (req.headers()["accept"] || "").includes("raw");

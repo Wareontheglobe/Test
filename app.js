@@ -317,7 +317,8 @@ function gh(path, opts = {}) {
   const { token, repo } = S.settings;
   return fetch(`https://api.github.com/repos/${repo}${path ? "/" + path : ""}`, {
     ...opts,
-    headers: { Authorization: `Bearer ${token}`, "X-GitHub-Api-Version": "2022-11-28", Accept: "application/vnd.github+json", ...(opts.headers || {}) },
+    // Only headers GitHub is certain to accept from a browser on another site: Authorization and Accept.
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", ...(opts.headers || {}) },
   });
 }
 function b64(str) {
