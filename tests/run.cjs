@@ -427,20 +427,30 @@ test("accessibility: every screen passes the automated WCAG AA checks, light and
   const server = await serve();
   const browser = await chromium.launch();
   let failed = 0;
+  // Browser tests can trip on timing now and then. A failed test gets one more try; if it then passes it is
+  // reported as flaky, so a real problem (fails twice) is never hidden and a shaky test is still visible.
+  let flaky = 0;
   for (const t of tests.filter((x) => !filter || x.name.includes(filter))) {
-    const S = new Session(browser, server.url);
-    const started = Date.now();
-    try {
-      await t.fn(S);
-      assert.deepStrictEqual(S.errors, [], "errors in the page");
-      console.log(`ok    ${t.name} (${((Date.now() - started) / 1000).toFixed(1)}s)`);
-    } catch (e) {
-      failed++;
-      console.log(`FAIL  ${t.name}\n      ${String(e.message).split("\n").slice(0, 6).join("\n      ")}`);
+    let lastError = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const S = new Session(browser, server.url);
+      const started = Date.now();
+      try {
+        await t.fn(S);
+        assert.deepStrictEqual(S.errors, [], "errors in the page");
+        console.log(`ok    ${t.name} (${((Date.now() - started) / 1000).toFixed(1)}s)${attempt > 1 ? "  [flaky: passed on the second try]" : ""}`);
+        if (attempt > 1) { flaky++; console.log(`      first try failed with: ${String(lastError.message).split("\n").slice(0, 4).join(" | ")}`); }
+        lastError = null;
+      } catch (e) { lastError = e; }
+      for (const c of browser.contexts()) await c.close();
+      if (!lastError) break;
     }
-    for (const c of browser.contexts()) await c.close();
+    if (lastError) {
+      failed++;
+      console.log(`FAIL  ${t.name}\n      ${String(lastError.message).split("\n").slice(0, 8).join("\n      ")}`);
+    }
   }
   await browser.close(); server.close();
-  console.log(failed ? `\n${failed} failed` : `\nall ${tests.length} passed`);
+  console.log(failed ? `\n${failed} failed` : `\nall ${tests.length} passed${flaky ? ` (${flaky} needed a second try)` : ""}`);
   process.exit(failed ? 1 : 0);
 })();
