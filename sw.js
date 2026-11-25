@@ -1,5 +1,5 @@
 // Offline support: the app shell is cached; GitHub API calls always go to the network.
-const VERSION = "bq-v10";
+const VERSION = "bq-v11";
 const SHELL = [
   "./", "index.html", "app.css", "app.js", "mascot.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",

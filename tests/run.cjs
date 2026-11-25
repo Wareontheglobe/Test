@@ -191,6 +191,112 @@ test("a missed day with cards waiting does break the streak", async (S) => {
   assert.strictEqual((await state()).streak.count, 1);
 });
 
+test("a first sync that fails part-way restores nothing, then restores everything on the next try", async (S) => {
+  const first = await S.open();
+  await first.page.click("[data-act=start]");
+  await answer(first.page, "later", { note: "look this up" }); await next(first.page);
+  await finishLesson(first.page, "a");
+  const s1 = await first.state();
+  const backupBefore = first.repo.files["progress/state.json"].text, researchBefore = first.repo.files["research/open.md"].text;
+  // New phone. GitHub fails on one request in the middle of the restore.
+  const repo = first.repo; repo.failOnce = /contents\/responses\/\d{4}-\d\d-\d\d$/;
+  const second = await S.open({ repo, device: "Pixel 7" });
+  await second.page.waitForTimeout(700);
+  let s2 = await second.state();
+  assert.strictEqual(s2.restored, false, "an interrupted restore is not marked done");
+  assert.deepStrictEqual([Object.keys(s2.answers).length, s2.later.length, s2.xp], [0, 0, 0], "nothing half-restored");
+  assert.strictEqual(repo.files["progress/state.json"].text, backupBefore, "the progress backup is not overwritten");
+  assert.strictEqual(repo.files["research/open.md"].text, researchBefore, "the research list is not overwritten");
+  await syncNow(second.page);
+  s2 = await second.state();
+  assert.strictEqual(s2.restored, true);
+  assert.deepStrictEqual([Object.keys(s2.answers).sort(), s2.later, s2.xp], [Object.keys(s1.answers).sort(), s1.later, s1.xp]);
+});
+
+test("the card can't be answered twice from behind the answer panel", async (S) => {
+  const { page, repo, state } = await S.open();
+  await page.click("[data-act=start]");
+  await answer(page, "a");
+  const xp = (await state()).xp;
+  for (const sel of ['[data-opt="opt:b"]', "[data-opt=fine]", "[data-act=later]"]) await page.click(sel, { force: true, timeout: 1500 }).catch(() => {});
+  await page.evaluate(() => document.querySelector("[data-act=check]")?.click());
+  const s = await state();
+  assert.deepStrictEqual([s.xp, s.pending.length, Object.values(s.days)[0]], [xp, 1, 1], "still one answer, one lot of miles");
+  assert.ok(await page.$("#sheet.show"), "the panel is still up, with Undo available");
+  await next(page); await finishLesson(page, "a");
+  assert.strictEqual(repo.responses[0].body.answers.filter((a) => a.card_id === "c-101-1").length, 1);
+});
+
+test("changing an answer and then backing out keeps the original; undo puts it back", async (S) => {
+  const { page, repo, state } = await S.open();
+  await page.click("[data-act=start]"); await finishLesson(page, "a"); await page.click("[data-act=home]");
+  const before = await state();
+  await page.click("[data-nav=passport]"); await page.click("[data-redo]"); await page.click(".modal [data-a=yes]");
+  assert.ok(!(await page.$("[data-act=later]")), "no research option while changing an answer");
+  const id = await cardId(page);
+  await page.click("[data-act=quit]"); await page.waitForTimeout(400);
+  let s = await state();
+  assert.deepStrictEqual(s.answers[id], before.answers[id], "backing out leaves her answer as it was");
+  assert.strictEqual(Object.keys(s.answers).length, 3);
+  await page.click("[data-nav=passport]"); await page.click("[data-redo]"); await page.click(".modal [data-a=yes]");
+  await answer(page, "fine"); await page.click("#sheet [data-act=undo]");
+  s = await state();
+  assert.strictEqual(s.answers[id].decision, "apply_option", "undo restores the original answer rather than deleting it");
+  assert.strictEqual(repo.responses.length, 1);
+});
+
+test("her own link is kept: a missing https:// is added, and nonsense is questioned, not dropped", async (S) => {
+  const { page, repo } = await S.open();
+  await page.click("[data-act=start]");
+  await page.click("[data-opt=fine]"); await page.click("details.extra summary");
+  await page.fill("#source", "www.example.com/hours"); await page.click('[data-opt="opt:a"]');
+  assert.strictEqual(await page.inputValue("#source"), "www.example.com/hours", "what she typed stays in the box");
+  await page.click("[data-act=check]"); await page.waitForSelector("#sheet.show"); await next(page);
+  await page.click("[data-opt=fine]"); await page.click("details.extra summary");
+  await page.fill("#source", "see their instagram"); await page.click("[data-act=check]");
+  assert.ok(!(await page.$("#sheet.show")), "asked to fix or clear it");
+  await page.fill("#source", ""); await page.click("[data-act=check]"); await page.waitForSelector("#sheet.show"); await next(page);
+  await finishLesson(page, "a");
+  assert.strictEqual(repo.responses[0].body.answers[0].extra_source_url, "https://www.example.com/hours");
+});
+
+test("reset really resets this phone, and sends anything still waiting", async (S) => {
+  const { ctx, page, repo, state } = await S.open();
+  await page.click("[data-act=start]"); await finishLesson(page, "a"); await page.click("[data-act=home]");
+  await ctx.setOffline(true);
+  await page.click("[data-act=start]"); await answer(page, "a"); await next(page); await page.click("[data-act=quit]"); await page.click(".modal [data-a=yes]");
+  assert.strictEqual((await state()).outbox.length, 1);
+  await page.click("[data-nav=settings]"); await page.click("[data-act=reset]"); await page.click(".modal [data-a=yes]");
+  let s = await state();
+  assert.deepStrictEqual([s.xp, Object.keys(s.answers).length, s.outbox.length], [0, 0, 1], "progress cleared, the waiting answer kept");
+  await ctx.setOffline(false); await page.evaluate(() => window.dispatchEvent(new Event("online"))); await page.waitForTimeout(1200);
+  s = await state();
+  assert.deepStrictEqual([s.xp, Object.keys(s.answers).length], [0, 0], "the old progress is not pulled back");
+  assert.strictEqual(repo.responses.length, 2, "the waiting answer was uploaded");
+});
+
+test("small things: date stepping back, a refused upload, odd deck data, an all-research lesson", async (S) => {
+  const tomorrow = dayStr(1);
+  const a = await S.open({ state: { seenIntro: true, restored: true, xp: 50, streak: { count: 12, lastDay: tomorrow }, days: { [tomorrow]: 2 } } });
+  assert.strictEqual(await text(a.page, ".pill.streak"), "🔥 12", "streak survives the date stepping back a day");
+  await a.page.click("[data-act=start]"); await answer(a.page, "a");
+  assert.strictEqual((await a.state()).streak.count, 12);
+  await next(a.page);
+  // a deck with also_in given as plain text must not break the card
+  const repo = newRepo(); const d = fixtureDeck(); d.cards[0].also_in = "FAQ block"; repo.decks["2026-01-01"].deck = d; repo.status422 = true;
+  const b = await S.open({ repo });
+  await b.page.click("[data-act=start]");
+  assert.match(await text(b.page, "#cardbody"), /Also in this post: FAQ block/);
+  // every card to the research list: no "Lesson complete! 0 checked"
+  for (let i = 0; i < 3; i++) { await answer(b.page, "later"); await next(b.page); }
+  assert.strictEqual(await text(b.page, "h1.title"), "🔖 Research list");
+  // an upload GitHub keeps refusing is retried a few times, not forever
+  await b.page.click("[data-laterid]"); await answer(b.page, "a"); await next(b.page); await b.page.waitForTimeout(1200);
+  const puts = repo.requests.filter((r) => r.startsWith("PUT /contents/responses")).length;
+  assert.ok(puts >= 1 && puts <= 9, `refused upload retried a bounded number of times (${puts})`);
+  assert.strictEqual((await b.state()).outbox.length, 1, "and the answer is still waiting on the phone");
+});
+
 test("daily quests track progress, pay out once, and are undone with the answer", async (S) => {
   const { page, state } = await S.open();
   let s = await state();

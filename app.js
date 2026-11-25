@@ -10,7 +10,7 @@ import { pip, GEAR } from "./mascot.js";
 // Demo mode: a page can set window.BQ_DEMO = {deck} before loading this script.
 // Cards come from that deck, nothing is sent anywhere, and progress stays in this browser.
 const DEMO = window.BQ_DEMO || null;
-const APP_VERSION = "1.5";      // shown in Settings, and in the details she can copy when asking for help
+const APP_VERSION = "1.6";      // shown in Settings, and in the details she can copy when asking for help
 // Deep copy that also works on phones a few years old.
 const clone = (o) => (typeof structuredClone === "function" ? structuredClone(o) : JSON.parse(JSON.stringify(o)));
 const KEY = DEMO ? "blogquest.demo" : "blogquest.v1";
@@ -178,8 +178,10 @@ function posts() {
   }));
 }
 function streakAlive() {
-  const s = S.streak, recent = [today(), yesterday()];
-  return recent.includes(s.lastDay) || recent.includes(s.graceDay);
+  // ">= yesterday" rather than "is today or yesterday": if the phone's date steps back a day
+  // (a flight across the date line, a clock change), the last day played can be "tomorrow".
+  const s = S.streak, y = yesterday();
+  return (s.lastDay || "") >= y || (s.graceDay || "") >= y;
 }
 function streakNow() { return S.frozen || streakAlive() ? S.streak.count : 0; }
 // Running out of cards never breaks a streak: it is frozen until new cards arrive,
@@ -294,7 +296,7 @@ function reminderLinks(time) {
 /* ---------------- badges ---------------- */
 const BADGES = [
   { id: "first", e: "🔎", name: "First Catch", how: "Resolve your first card", test: () => resolvedCount() >= 1 },
-  { id: "lesson", e: "🎒", name: "Day Tripper", how: "Finish a full lesson", test: () => S.badges.lesson },
+  { id: "lesson", e: "🎒", name: "Day Tripper", how: "Finish a full lesson", test: () => (S.fullLessons || 0) >= 1 },
   { id: "streak3", e: "🔥", name: "On a Roll", how: "3-day streak", test: () => streakNow() >= 3 },
   { id: "streak7", e: "🌋", name: "Volcano", how: "7-day streak", test: () => streakNow() >= 7 },
   { id: "streak14", e: "🌠", name: "Fortnight", how: "14-day streak", test: () => streakNow() >= 14 },
@@ -319,6 +321,7 @@ function checkBadges() {
 function gh(path, opts = {}) {
   const { token, repo } = S.settings;
   return fetch(`https://api.github.com/repos/${repo}${path ? "/" + path : ""}`, {
+    cache: "no-store",      // always the real current file; a cached copy could carry an out-of-date version id
     ...opts,
     // Only headers GitHub is certain to accept from a browser on another site: Authorization and Accept.
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", ...(opts.headers || {}) },
@@ -343,7 +346,8 @@ async function ghFail(res) {
 // Cards come from a file someone edits, so take only what the app can show.
 function cleanCards(list) {
   return (Array.isArray(list) ? list : []).filter((c) => c && typeof c.id === "string" && c.claim && typeof c.claim.quote === "string" && c.post)
-    .map((c) => ({ ...c, options: Array.isArray(c.options) ? c.options.filter((o) => o && o.id && o.label) : [], sources: Array.isArray(c.sources) ? c.sources.filter(Boolean) : [] }));
+    .map((c) => ({ ...c, options: Array.isArray(c.options) ? c.options.filter((o) => o && o.id && o.label) : [], sources: Array.isArray(c.sources) ? c.sources.filter(Boolean) : [],
+      also_in: Array.isArray(c.also_in) ? c.also_in.filter((x) => typeof x === "string") : typeof c.also_in === "string" ? [c.also_in] : [] }));
 }
 
 function packagePending() {
@@ -372,7 +376,11 @@ async function flushOutbox() {
         branch: S.settings.branch,
       }),
     });
-    if (res.status === 422) { item.path = item.path.replace(/\.json$/, `-${Math.random().toString(36).slice(2, 6)}.json`); continue; }
+    if (res.status === 422 && (item.renames || 0) < 2) {         // most likely the name is taken: try another, but not forever
+      item.renames = (item.renames || 0) + 1;
+      item.path = item.path.replace(/(-[a-z0-9]{4})?\.json$/, `-${Math.random().toString(36).slice(2, 6)}.json`); save();
+      continue;
+    }
     if (!res.ok) throw await ghFail(res);
     S.outbox.shift(); sent += n; save();
   }
@@ -449,14 +457,16 @@ async function pushResearch() {
   const cur = await gh(`${path}?ref=${encodeURIComponent(S.settings.branch)}`);
   if (cur.ok) sha = (await cur.json()).sha;
   else if (cur.status !== 404) throw await ghFail(cur);
+  const doc = researchDoc(true);
   if (sha || S.later.length) {
     const res = await gh(path, {
       method: "PUT",
-      body: JSON.stringify({ message: `Blog Quest: research list (${S.later.length} open)`, content: b64(researchDoc(true)), branch: S.settings.branch, ...(sha ? { sha } : {}) }),
+      body: JSON.stringify({ message: `Blog Quest: research list (${S.later.length} open)`, content: b64(doc), branch: S.settings.branch, ...(sha ? { sha } : {}) }),
     });
     if (!res.ok) throw await ghFail(res);
   }
-  S.researchDirty = false; save();
+  if (researchDoc(true) === doc) S.researchDirty = false;       // a note edited while this was being sent stays marked for the next sync
+  save();
 }
 
 /* ---------------- progress backup ----------------
@@ -483,11 +493,19 @@ async function pushProgress(force) {
   S.progressSha = (await res.json().catch(() => ({})))?.content?.sha || "";
   S.progressSaved = doc; S.progressAt = Date.now(); save();
 }
-async function restoreProgress() {
+// A request that found nothing (404) is fine. Anything else that failed must stop the restore, so it is tried again.
+async function found(res) {
+  if (res.ok) return true;
+  if (res.status === 404) return false;
+  throw await ghFail(res);
+}
+async function fetchProgress() {
   const res = await gh(`contents/progress/state.json?ref=${encodeURIComponent(S.settings.branch)}`, { headers: { Accept: "application/vnd.github.raw+json" } });
-  if (!res.ok) return;
-  let p; try { p = await res.json(); } catch (e) { return; }
-  if (!p || p.app !== "blog-quest" || S.xp > (p.xp || 0)) return;
+  if (!(await found(res))) return null;
+  try { const p = await res.json(); return p && p.app === "blog-quest" ? p : null; } catch (e) { return null; }
+}
+function applyProgress(p) {
+  if (S.xp > (p.xp || 0)) return;
   S.xp = p.xp || 0; S.streak = { ...S.streak, ...(p.streak || {}) }; S.frozen = p.frozen || ""; S.frozenDays = p.frozenDays || {};
   S.days = { ...(p.days || {}), ...S.days }; S.badges = { ...(p.badges || {}), ...S.badges };
   S.researchResolved = p.researchResolved || 0; S.redone = p.redone || {}; S.seenLive = p.seenLive || 0;
@@ -498,33 +516,44 @@ async function restoreProgress() {
 
 // On a fresh install, mark cards that were already answered on another device / earlier install.
 async function restoreAnswered() {
-  if (S.restored || resolvedCount() > 0) { S.restored = true; return; }
-  const { branch } = S.settings;
-  await restoreProgress();
-  const top = await gh(`contents/responses?ref=${encodeURIComponent(branch)}`);
-  if (top.ok) {
-    const dirs = (await top.json()).filter((d) => d.type === "dir");
-    for (const d of dirs) {
-      const r = await gh(`contents/${d.path}?ref=${encodeURIComponent(branch)}`);
-      if (!r.ok) continue;
+  if (S.restored) return;
+  const ref = `?ref=${encodeURIComponent(S.settings.branch)}`, rawH = { headers: { Accept: "application/vnd.github.raw+json" } };
+  // Everything is read into temporaries first and kept only once every request has succeeded.
+  // If the connection drops part-way, nothing is half-restored and the next sync starts again.
+  const progress = await fetchProgress();
+  const answers = {};
+  const top = await gh(`contents/responses${ref}`);
+  if (await found(top)) {
+    for (const d of (await top.json()).filter((x) => x.type === "dir")) {
+      const r = await gh(`contents/${d.path}${ref}`);
+      if (!(await found(r))) continue;
       for (const f of (await r.json()).filter((x) => x.name.endsWith(".json"))) {
-        const fr = await gh(`contents/${f.path}?ref=${encodeURIComponent(branch)}`, { headers: { Accept: "application/vnd.github.raw+json" } });
-        if (!fr.ok) continue;
-        try { (await fr.json()).answers?.forEach((a) => { S.answers[a.card_id] = { ...a, restored: true }; }); } catch (e) {}
+        const fr = await gh(`contents/${f.path}${ref}`, rawH);
+        if (!(await found(fr))) continue;
+        let body; try { body = await fr.json(); } catch (e) { continue; }       // one damaged file doesn't block the rest
+        (body.answers || []).forEach((a) => {
+          const prev = answers[a.card_id];
+          if (!prev || (a.answered_at || "") >= (prev.answered_at || "")) answers[a.card_id] = { ...a, restored: true };
+        });
       }
     }
   }
-  // Her research list, as last saved by the app.
-  const rl = await gh(`contents/research/open.md?ref=${encodeURIComponent(branch)}`, { headers: { Accept: "application/vnd.github.raw+json" } });
-  if (rl.ok) {
+  const research = [];
+  const rl = await gh(`contents/research/open.md${ref}`, rawH);
+  if (await found(rl)) {
     (await rl.text()).split("\n## ").slice(1).forEach((sec) => {
       const id = (sec.match(/Card: `([^`]+)`/) || [])[1];
-      if (!id || S.answers[id] || S.later.includes(id)) return;
       const note = (sec.match(/\*\*Her note:\*\* (.*)/) || [])[1] || "";
-      S.later.push(id);
-      S.laterNotes[id] = { note: note === "none" ? "" : note, at: (sec.match(/\*\*Marked:\*\* (\d{4}-\d\d-\d\d)/) || [])[1] || "" };
+      if (id) research.push({ id, note: note === "none" ? "" : note, at: (sec.match(/\*\*Marked:\*\* (\d{4}-\d\d-\d\d)/) || [])[1] || "" });
     });
   }
+  // All read. Keep it, without overwriting anything she has already done on this phone.
+  Object.entries(answers).forEach(([id, a]) => { if (!S.answers[id]) S.answers[id] = a; });
+  research.forEach(({ id, note, at }) => {
+    if (S.answers[id] || S.later.includes(id)) return;
+    S.later.push(id); S.laterNotes[id] = { note, at };
+  });
+  if (progress) applyProgress(progress);
   S.restored = true; save();
 }
 
@@ -537,9 +566,12 @@ async function pullReview() {
   const top = await gh(`contents/responses${ref}`);
   if (!top.ok && top.status !== 404) throw await ghFail(top);
   if (top.ok) {
+    S.reviewDirs = S.reviewDirs || {};
     for (const d of (await top.json()).filter((x) => x.type === "dir")) {
+      if (d.sha && S.reviewDirs[d.path] === d.sha) continue;       // nothing new in that day's folder
       const r = await gh(`contents/${d.path}${ref}`);
       if (!r.ok) continue;
+      S.reviewDirs[d.path] = d.sha;
       for (const f of (await r.json()).filter((x) => x.name.endsWith(".json") && !S.reviewCache[x.path])) {
         const fr = await gh(`contents/${f.path}${ref}`, rawH);
         if (!fr.ok) continue;
@@ -625,7 +657,7 @@ async function sync({ quiet = false } = {}) {
     refreshAfterSync();
     return;
   }
-  if (syncing) return;
+  if (syncing) { if (!quiet) toast("Already syncing…"); return; }
   if (!S.settings.token) { if (!quiet) toast("Add the GitHub key in Settings first"); return; }
   if (!navigator.onLine) { if (!quiet) toast("Offline — will sync when you're back online"); return; }
   syncing = true; S.lastTry = Date.now();
@@ -642,9 +674,9 @@ async function sync({ quiet = false } = {}) {
     if (view.name !== "lesson") packagePending();
     const sent = await flushOutbox();
     const added = await pullDecks();
-    await pushResearch();
     const wasFresh = !S.restored;
-    await restoreAnswered();
+    await restoreAnswered();          // must finish before the research list or progress backup is written
+    await pushResearch();
     const newlyLive = await pullFixLog();
     await pushProgress(!quiet || sent > 0);
     S.lastSync = new Date().toISOString(); S.syncError = null; save();
@@ -686,7 +718,7 @@ async function pullFixLog() {
   const n = Object.keys(S.live).length;
   const fresh = Math.max(0, n - (S.seenLive || 0));
   S.seenLive = n;
-  checkBadges();
+  if (view.name !== "lesson") checkBadges();       // mid-lesson, leave new badges for the lesson-complete screen to announce
   save();
   return fresh;
 }
@@ -706,7 +738,7 @@ function recordAnswer(card, decision, extra) {
   const wasResearch = S.later.includes(card.id);
   let earned = 0;
   if (!redo) {
-    if (S.streak.lastDay !== day) {
+    if ((S.streak.lastDay || "") < day) {
       S.streak = { ...S.streak, count: S.frozen || streakAlive() ? S.streak.count + 1 : 1, lastDay: day };
     }
     S.days[day] = (S.days[day] || 0) + 1;
@@ -940,6 +972,8 @@ function lessonView() {
       ${!resolvedCount() && !S.later.length ? `<div class="tip">👋 <b>Your first card.</b> Read what your post says, look at what I found, then choose an option below. Nothing on your blog changes until your answer has been reviewed.</div>` : ""}
       <h1 class="chip ${esc(sev)}" style="margin:0">${TYPE_ICON[c.type] || "🔍"} ${esc(c.headline || "Possible issue")}</h1>
       <span class="small muted" style="margin-left:6px">${esc(sevText)}</span>
+    </div>
+    <div id="cardbody">
       <div class="posttitle">${safeUrl(c.post?.url) ? `<a href="${esc(c.post.url)}" target="_blank" rel="noopener noreferrer">${esc(c.post?.title)}</a>` : esc(c.post?.title)}${c.claim?.section ? ` · ${esc(c.claim.section)}` : ""}</div>
       ${viewsLine(c.post) ? `<div class="small muted">${viewsLine(c.post)}</div>` : ""}
       ${S.laterNotes[c.id]?.note ? `<div class="tip" style="margin-top:8px">🔖 <b>Your note:</b> ${esc(S.laterNotes[c.id].note)}</div>` : ""}
@@ -969,12 +1003,12 @@ function lessonView() {
           ${FINE_REASONS.map(([id, label]) => `<button class="reason ${lesson.fineReason === id ? "on" : ""}" data-reason="${id}">${label}</button>`).join("")}
         </div>` : ""}
       ${sel === "other" ? `<textarea id="note" placeholder="What should change? (dictate with the 🎤 on your keyboard)">${esc(lesson.note || "")}</textarea>`
-        : `<details class="extra" ${lesson.note || lesson.source ? "open" : ""}><summary>+ Add a note or your own source (bonus miles)</summary>
+        : `<details class="extra" ${lesson.note || lesson.sourceText ? "open" : ""}><summary>+ Add a note or your own source (bonus miles)</summary>
             <textarea id="note" placeholder="Anything we should know?">${esc(lesson.note || "")}</textarea>
-            <input type="url" id="source" inputmode="url" placeholder="https:// link you found (optional)" value="${esc(lesson.source || "")}">
+            <input type="url" id="source" inputmode="url" placeholder="https:// link you found (optional)" value="${esc(lesson.sourceText || "")}">
           </details>`}
-      ${sel === "other" ? `<input type="url" id="source" inputmode="url" placeholder="https:// link you found (optional)" value="${esc(lesson.source || "")}" style="margin-top:8px">` : ""}
-      <button class="linkbtn" data-act="later">🔖 ${S.later.includes(c.id) ? "Keep it on my research list" : "I need to research this first"}</button>
+      ${sel === "other" ? `<input type="url" id="source" inputmode="url" placeholder="https:// link you found (optional)" value="${esc(lesson.sourceText || "")}" style="margin-top:8px">` : ""}
+      ${lesson.changing ? "" : `<button class="linkbtn" data-act="later">🔖 ${S.later.includes(c.id) ? "Keep it on my research list" : "I need to research this first"}</button>`}
     </div>
     <div class="lesson-actions"><button class="btn teal" data-act="check" ${sel ? "" : "disabled"}>Save answer</button></div>
     <div class="sheet" id="sheet"><div class="in"></div></div>`;
@@ -991,6 +1025,8 @@ function showSheet({ later = false, earned = 0, title, cardId = "", bonus = "", 
     ${later ? `<input type="text" id="rnote" data-card="${esc(cardId)}" value="${esc(S.laterNotes[cardId]?.note || "")}" placeholder="What do you need to check? (optional)" aria-label="What do you need to check?" style="margin-bottom:12px">` : ""}
     <button class="btn ${later ? "sun" : "teal"}" data-act="next">Continue</button>
     <button class="linkbtn undo" data-act="undo" style="display:block;margin:6px auto 0;color:inherit">↩︎ Undo</button>`;
+  const body = $("#cardbody"); if (body) body.inert = true;       // nothing behind the panel can be tapped
+  sheet.classList.add("up");
   requestAnimationFrame(() => sheet.classList.add("show"));
   const milesPill = $(".lesson-top .pill.miles"); if (milesPill) milesPill.textContent = `✈️ ${S.xp}`;
   $("[data-act=next]", sheet).addEventListener("click", nextCard);
@@ -998,9 +1034,19 @@ function showSheet({ later = false, earned = 0, title, cardId = "", bonus = "", 
   $(".lesson-actions").style.visibility = "hidden";
 }
 
+// True while the "Nice catch!" panel is showing. The card behind it must not react.
+const sheetUp = () => !!$("#sheet.up");
+function saveSheetNote() {
+  const rn = $("#rnote");
+  if (rn && S.laterNotes[rn.dataset.card] && S.laterNotes[rn.dataset.card].note !== rn.value.trim()) {
+    S.laterNotes[rn.dataset.card].note = rn.value.trim(); S.researchDirty = true; save();
+  }
+}
 function readExtras() {
   lesson.note = ($("#note")?.value || "").trim();
-  const src = ($("#source")?.value || "").trim();
+  lesson.sourceText = ($("#source")?.value || "").trim();
+  let src = lesson.sourceText;
+  if (src && !/^[a-z][a-z0-9+.-]*:/i.test(src) && /^[\w-]+(\.[\w-]+)+([\/?#]|$)/.test(src)) src = "https://" + src;
   lesson.source = safeUrl(src) ? src : "";
 }
 
@@ -1008,6 +1054,7 @@ function checkAnswer() {
   readExtras();
   const c = lesson.cards[lesson.i];
   const sel = lesson.selected;
+  if (lesson.sourceText && !lesson.source) { toast("That link doesn't look like a web address. Fix it or clear it."); $("#source")?.focus(); return; }
   if (sel === "other" && !lesson.note) { toast("Add a quick note so we know what to change"); $("#note")?.focus(); return; }
   let decision;
   if (sel === "fine") decision = { kind: "post_is_fine" };
@@ -1041,6 +1088,7 @@ function parkLater() {
 // Everything an answer can change, so a mis-tap can be taken back before moving on.
 function snapshot(c) {
   return { cardId: c.id, xp: S.xp, streak: { ...S.streak }, day: S.days[today()] || 0,
+    prevAnswer: S.answers[c.id] ? clone(S.answers[c.id]) : null,
     later: [...S.later], laterNotes: clone(S.laterNotes), researchResolved: S.researchResolved || 0,
     q: clone(S.q), xpDay: S.xpDays[today()] || 0,
     pendingLen: S.pending.length, note: lesson.note, source: lesson.source, selected: lesson.selected, fineReason: lesson.fineReason };
@@ -1051,7 +1099,10 @@ function undoLast() {
   if (!u) return;
   // Only possible while the answer is still on the phone (not yet packaged for upload).
   if (u.kind === "answer" && S.pending.length !== u.pendingLen + 1) { toast("Already uploaded — can't undo this one"); return; }
-  if (u.kind === "answer") { S.pending.pop(); delete S.answers[u.cardId]; lesson.answered--; }
+  if (u.kind === "answer") {
+    S.pending.pop(); lesson.answered--;
+    if (u.prevAnswer) S.answers[u.cardId] = u.prevAnswer; else delete S.answers[u.cardId];
+  }
   else if (u.fresh) lesson.parked--;
   S.xp = u.xp; S.streak = u.streak; S.later = u.later; S.q = u.q;
   if (u.xpDay) S.xpDays[today()] = u.xpDay; else delete S.xpDays[today()];
@@ -1059,24 +1110,28 @@ function undoLast() {
   if (u.day) S.days[today()] = u.day; else delete S.days[today()];
   lesson.earned -= u.earned;
   lesson.undo = null;
-  lesson.note = u.note; lesson.source = u.source; lesson.selected = u.selected; lesson.fineReason = u.fineReason;
+  lesson.note = u.note; lesson.source = u.source; lesson.sourceText = u.source; lesson.selected = u.selected; lesson.fineReason = u.fineReason;
   save();
   render();
   toast("Undone — pick again");
 }
 
 function nextCard() {
-  const rn = $("#rnote");
-  if (rn && S.laterNotes[rn.dataset.card] && S.laterNotes[rn.dataset.card].note !== rn.value.trim()) {
-    S.laterNotes[rn.dataset.card].note = rn.value.trim(); S.researchDirty = true; save();
-  }
-  lesson.i++; lesson.selected = null; lesson.note = ""; lesson.source = ""; lesson.undo = null; lesson.fineReason = "";
+  saveSheetNote();
+  lesson.i++; lesson.selected = null; lesson.note = ""; lesson.source = ""; lesson.sourceText = ""; lesson.undo = null; lesson.fineReason = "";
   if (lesson.i >= lesson.cards.length) return finishLesson();
   render();
 }
 
 function finishLesson() {
-  if (lesson.answered && lesson.answered === lesson.cards.length) S.badges.lesson = S.badges.lesson || today();
+  if (!lesson.answered) {                         // everything went to the research list: no fanfare for zero decisions
+    packagePending(); save();
+    view = { name: lesson.parked ? "later" : "home" }; render();
+    if (lesson.parked) toast("Saved to your research list");
+    sync({ quiet: true });
+    return;
+  }
+  if (lesson.answered === lesson.cards.length) S.fullLessons = (S.fullLessons || 0) + 1;
   lesson.newBadges = checkBadges();
   packagePending();
   save();
@@ -1143,7 +1198,7 @@ function laterView() {
           <label class="small muted" for="rn-${esc(c.id)}">What to check</label>
           <input type="text" id="rn-${esc(c.id)}" data-rnote="${esc(c.id)}" value="${esc(note)}" placeholder="e.g. call and ask about Monday hours">
           <div class="row2">
-            ${src ? `<a class="btn ghost sm" href="${esc(src.url)}" target="_blank" rel="noopener noreferrer">Open source ↗</a>` : ""}
+            ${src ? `<a class="btn ghost sm" data-src="${esc(c.id)}" href="${esc(src.url)}" target="_blank" rel="noopener noreferrer">Open source ↗</a>` : ""}
             <button class="btn teal sm" data-laterid="${esc(c.id)}">Decide now</button>
           </div></div>`;
       }).join("")}
@@ -1308,14 +1363,17 @@ function bind() {
     const c = lesson?.cards[lesson.i];
     if (c && !S.opened[c.id]) { S.opened[c.id] = true; save(); }
   }));
+  document.querySelectorAll("[data-src]").forEach((a) => a.addEventListener("click", () => {
+    if (!S.opened[a.dataset.src]) { S.opened[a.dataset.src] = true; save(); }
+  }));
   document.querySelectorAll("[data-redo]").forEach((b) => b.addEventListener("click", () => {
     const id = b.dataset.redo, card = allCards().find((c) => c.id === id);
     if (!card) return;
     askConfirm("Change this answer?", "Your new answer replaces the old one.", "Change it", "Cancel").then((ok) => {
       if (!ok) return;
-      delete S.answers[id]; S.redone[id] = true;
-      S.pending = S.pending.filter((a) => a.card_id !== id); save();
+      S.redone[id] = true; save();    // the old answer stays until she saves a new one; backing out changes nothing
       startLesson([card]);
+      lesson.changing = true; render();   // no "research this first" here: the old answer would still be waiting to be applied
     });
   }));
   document.querySelectorAll("[data-post]").forEach((b) => b.addEventListener("click", () => {
@@ -1325,11 +1383,13 @@ function bind() {
     startLesson(laterCards().filter((c) => c.id === b.dataset.laterid));
   }));
   document.querySelectorAll("[data-opt]").forEach((b) => b.addEventListener("click", () => {
+    if (sheetUp()) return;
     readExtras(); lesson.selected = b.dataset.opt; if (lesson.selected !== "fine") lesson.fineReason = ""; buzz(8);
     const y = window.scrollY; render(); window.scrollTo(0, y);
     if (lesson.selected === "other") $("#note")?.focus();
   }));
   document.querySelectorAll("[data-reason]").forEach((b) => b.addEventListener("click", () => {
+    if (sheetUp()) return;
     readExtras(); lesson.fineReason = lesson.fineReason === b.dataset.reason ? "" : b.dataset.reason; buzz(8);
     const y = window.scrollY; render(); window.scrollTo(0, y);
   }));
@@ -1372,10 +1432,10 @@ function act(a) {
       break;
     }
     case "demo-research": { const box = $("#demo-research"); if (box) box.hidden = !box.hidden; break; }
-    case "check": checkAnswer(); break;
-    case "later": parkLater(); break;
+    case "check": if (!sheetUp()) checkAnswer(); break;
+    case "later": if (!sheetUp()) parkLater(); break;
     case "quit": {
-      const leave = () => { packagePending(); view = { name: "home" }; render(); sync({ quiet: true }); };
+      const leave = () => { saveSheetNote(); packagePending(); view = { name: "home" }; render(); sync({ quiet: true }); };
       if (lesson.answered) askConfirm("Leave this lesson?", "Your answers so far are saved.", "Leave", "Keep going").then((ok) => ok && leave());
       else leave();
       break;
@@ -1420,9 +1480,12 @@ function act(a) {
       S.settings.reviewer = $("#reviewer").checked;
       save(); toast("Saved"); view = { name: S.settings.reviewer ? "home" : "settings" }; render(); sync(); break;
     case "reset":
-      askConfirm("Reset progress?", DEMO ? "Clears this demo so you can start over." : "Answers already uploaded stay safe in GitHub.", "Reset", "Cancel").then((ok) => {
+      askConfirm("Reset this phone?", DEMO ? "Clears this demo so you can start over." : "Clears miles, streak, badges and answered cards on this phone. Answers already uploaded stay in GitHub, and any still waiting will be sent.", "Reset", "Cancel").then((ok) => {
         if (!ok) return;
-        const settings = S.settings; S = clone(DEFAULTS); S.settings = settings;
+        packagePending();
+        const keep = { settings: S.settings, outbox: S.outbox, decks: S.decks };
+        S = clone(DEFAULTS); Object.assign(S, keep);
+        S.restored = true; S.seenIntro = true;          // a reset is a reset: don't pull the old progress straight back
         if (DEMO) loadDemoDeck();
         save(); view = { name: "home" }; render(); sync({ quiet: true });
       });
