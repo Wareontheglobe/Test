@@ -7,7 +7,8 @@ A gamified, offline-first phone app for fact-checking a travel blog. Each lesson
 - A research list for cards that need digging first. It's saved to the private repo and can be emailed, shared or copied from the app.
 - Daily quests, a weekly recap, and gear for Pip that unlocks with each level.
 - A daily reminder she can add to her calendar in one tap (the app itself can't send notifications).
-- Lessons mix one fact check with quick fixes, and typo cards show the change highlighted in place.
+- Lessons open with a quick fix as a warm-up, then one fact check, and typo cards show the change highlighted in place.
+- Long cards stay short on a phone: with three or more sources, the first shows and the rest fold away behind one tap.
 - Answers can be changed until they've been applied to the blog.
 - Miles, streak and badges are backed up to the private repo, so a new phone picks up where the old one stopped.
 - If the access key stops working, the home screen says so plainly instead of failing quietly.
@@ -42,7 +43,7 @@ node tests/run.cjs            # all end-to-end tests
 node tests/run.cjs streak     # only tests whose name contains "streak"
 ```
 
-`./publish.sh` runs the tests and, if they pass, pushes the current branch and updates `gh-pages`.
+`./publish.sh` runs the tests and, if they pass, pushes the current branch and updates `gh-pages`. It then waits for GitHub Pages to finish, retries GitHub's deploy step once if it fails, and says whether the new version is live.
 
 The tests drive the real app in headless Chromium against a pretend GitHub (`tests/harness.cjs`) and a made-up deck (`tests/fixture-deck.json`). Nothing leaves the machine. They need Playwright with Chromium installed. Run them before pushing a change to `gh-pages`.
 

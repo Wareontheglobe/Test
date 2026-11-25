@@ -125,6 +125,7 @@ blockquote.claim { margin: 0; background: var(--quote); border-radius: 14px; pad
 .source { background: var(--surface); border: 2px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; }
 .source b { display: block; }
 .source q { display: block; margin: 6px 0; quotes: "“" "”"; font-style: italic; }
+.more-sources { display: block; width: 100%; margin: 0 0 10px; padding: 10px 14px; border: 2px dashed var(--line); border-radius: 14px; background: none; color: var(--link); font: inherit; font-weight: 700; font-size: 15px; cursor: pointer; }
 .source .meta { font-size: 13px; color: var(--ink-2); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
 .source a { font-weight: 800; text-decoration: none; }
 .opt { display: flex; gap: 12px; align-items: flex-start; width: 100%; text-align: left; background: var(--surface);

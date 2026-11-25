@@ -10,7 +10,7 @@ import { pip, GEAR } from "./mascot.js";
 // Demo mode: a page can set window.BQ_DEMO = {deck} before loading this script.
 // Cards come from that deck, nothing is sent anywhere, and progress stays in this browser.
 const DEMO = window.BQ_DEMO || null;
-const APP_VERSION = "1.6";      // shown in Settings, and in the details she can copy when asking for help
+const APP_VERSION = "1.7";      // shown in Settings, and in the details she can copy when asking for help
 // Deep copy that also works on phones a few years old.
 const clone = (o) => (typeof structuredClone === "function" ? structuredClone(o) : JSON.parse(JSON.stringify(o)));
 const KEY = DEMO ? "blogquest.demo" : "blogquest.v1";
@@ -115,11 +115,11 @@ function claimHtml(c) {
   return `${esc(ctx.slice(0, i))}<mark>${esc(ctx.slice(i, i + q.length))}</mark>${esc(ctx.slice(i + q.length))}${tail}`;
 }
 const isQuickFix = (c) => !(c.sources || []).length;       // typos and the like: the evidence is the post itself
-// A general lesson leads with one fact check and fills up with quick fixes, so each one has some of both.
+// A general lesson opens with a quick fix as a warm-up, then one fact check, then fills up with quick fixes.
 function mixLesson(cards) {
   const size = lessonSize(cards.length), facts = cards.filter((c) => !isQuickFix(c)), quick = cards.filter(isQuickFix), out = [];
   while (out.length < size) {
-    const wantFact = out.length % 3 === 0;
+    const wantFact = out.length % 3 === 1;
     const from = (wantFact && facts.length) || !quick.length ? facts : quick;
     out.push(from.shift());
   }
@@ -960,6 +960,8 @@ function lessonView() {
   const options = (c.options || []).filter((o) => !o.valid_until || o.valid_until >= today()).map((o, n) => ({ key: String.fromCharCode(65 + n), id: `opt:${o.id}`, label: o.label, sub: o.new_text && o.action !== "remove" ? `“${o.new_text}”` : o.action === "remove" ? "Removes it from the post" : "",
     diff: o.action === "replace" && o.new_text && isQuickFix(c) ? diffHtml(c.claim?.quote || "", o.new_text) : "" }));
   const hasSources = (c.sources || []).length > 0;   // quick-fix cards (typos and the like) have none
+  // Long cards are hard work on a phone: with three or more sources, show the first and fold the rest away.
+  const sources = c.sources || [], folded = sources.length > 2 && !lesson.allSources ? sources.length - 1 : 0;
   options.push({ key: "✓", id: "fine", label: "The post is fine as is", sub: hasSources ? "The sources are wrong or don't apply" : "Leave it the way it is" });
   options.push({ key: "✎", id: "other", label: "Something else…", sub: "Tell us what to change" });
   const sel = lesson.selected;
@@ -986,7 +988,7 @@ function lessonView() {
       ${c.confidence && !(isQuickFix(c) && c.confidence !== "check") ? `<div class="evidence ${c.confidence === "strong" ? "strong" : "check"}">
           <b>${c.confidence === "strong" ? "✅ Strong evidence" : "⚠️ Worth a look before you decide"}</b>
           ${c.evidence ? `<span>${esc(c.evidence)}</span>` : ""}</div>` : ""}
-      ${(c.sources || []).map((s, n) => `<div class="source">
+      ${sources.slice(0, sources.length - folded).map((s, n) => `<div class="source">
           <b>${n + 1}. ${esc(s.label)}</b>
           ${s.quote ? `<q>${esc(s.quote)}</q>` : ""}
           <div class="meta">
@@ -995,6 +997,7 @@ function lessonView() {
             ${s.via === "search snippet" ? `<span>from search preview</span>` : ""}
             ${s.via === "owner" ? `<span>✔ confirmed first-hand</span>` : ""}
           </div></div>`).join("")}
+      ${folded ? `<button class="more-sources" data-act="more-sources" aria-expanded="false">Show ${folded} more source${folded > 1 ? "s" : ""}</button>` : ""}
       ${!navigator.onLine ? `<div class="tip">📴 You're offline — the quotes above were saved for you. Links will open when you're back online.</div>` : ""}
       <div class="label-sm">What should we do?</div>
       ${options.map((o) => `<button class="opt ${sel === o.id ? "sel" : ""}" data-opt="${esc(o.id)}" aria-pressed="${sel === o.id}"><span class="k">${o.key}</span><span>${esc(o.label)}${o.diff ? `<small class="diff">${o.diff}</small>` : o.sub ? `<small>${esc(o.sub)}</small>` : ""}</span></button>`).join("")}
@@ -1118,7 +1121,7 @@ function undoLast() {
 
 function nextCard() {
   saveSheetNote();
-  lesson.i++; lesson.selected = null; lesson.note = ""; lesson.source = ""; lesson.sourceText = ""; lesson.undo = null; lesson.fineReason = "";
+  lesson.i++; lesson.selected = null; lesson.allSources = false; lesson.note = ""; lesson.source = ""; lesson.sourceText = ""; lesson.undo = null; lesson.fineReason = "";
   if (lesson.i >= lesson.cards.length) return finishLesson();
   render();
 }
@@ -1399,6 +1402,7 @@ function bind() {
 function act(a) {
   switch (a) {
     case "start": startLesson(mixLesson(openCards())); break;
+    case "more-sources": if (!sheetUp()) { readExtras(); lesson.allSources = true; render(); } break;
     case "email-research": {
       const body = researchDoc(false);
       const cut = body.length > 1700 ? body.slice(0, 1700) + "\n…(the full list is in the app)" : body;

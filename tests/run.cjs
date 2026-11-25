@@ -40,13 +40,13 @@ test("first card shows a hint; answers upload with everything needed to apply th
   await page.click("[data-act=start]");
   assert.ok(await page.$("text=Your first card."));
   const first = await cardId(page);
+  await answer(page, "a"); await next(page);                                  // the warm-up quick fix
+  assert.ok(!(await page.$("text=Your first card.")), "hint goes away after the first answer");
   await page.click(".source a"); await page.waitForTimeout(200);              // open a source before deciding
   await answer(page, "fine", { reason: "first_hand" });
   assert.match(await text(page, "#sheet .xp"), /source checked/);
   await next(page);
-  assert.ok(!(await page.$("text=Your first card.")), "hint goes away after the first answer");
   await answer(page, "other", { note: "Reword this please" }); await next(page);
-  await answer(page, "a"); await next(page);
   await page.waitForTimeout(900);
   assert.strictEqual(await text(page, ".complete h1"), "Lesson complete!");
   assert.strictEqual(repo.responses.length, 1);
@@ -54,10 +54,10 @@ test("first card shows a hint; answers upload with everything needed to apply th
   assert.match(up.path, /^responses\/\d{4}-\d\d-\d\d\/.+\.json$/);
   const [a1, a2, a3] = up.body.answers;
   assert.strictEqual(a1.card_id, first);
-  assert.deepStrictEqual([a1.decision, a1.fine_reason, a1.checked_source], ["post_is_fine", "first_hand", true]);
-  assert.deepStrictEqual([a2.decision, a2.note], ["other", "Reword this please"]);
-  assert.strictEqual(a3.decision, "apply_option");
-  assert.ok(a3.option.new_text && a3.option.action && a3.claim_quote && a3.post.id);
+  assert.strictEqual(a1.decision, "apply_option");
+  assert.ok(a1.option.new_text && a1.option.action && a1.claim_quote && a1.post.id);
+  assert.deepStrictEqual([a2.decision, a2.fine_reason, a2.checked_source], ["post_is_fine", "first_hand", true]);
+  assert.deepStrictEqual([a3.decision, a3.note], ["other", "Reword this please"]);
   assert.deepStrictEqual(repo.badHeaders || [], [], "only headers GitHub accepts from a browser are sent");
   const s = await state();
   assert.strictEqual(s.streak.count, 1);
@@ -150,11 +150,11 @@ test("lessons mix one fact check with quick fixes; typo cards show the change in
   assert.match(await text(page, '[data-post="101"] .label small'), /👀 4,200/);
   await page.click("[data-act=start]");
   const ids = await page.evaluate(() => window.__bq.lesson.cards.map((c) => c.id));
-  assert.deepStrictEqual(ids, ["c-101-1", "c-101-3", "c-102-2"], "highest-priority fact check first, then quick fixes");
+  assert.deepStrictEqual(ids, ["c-101-3", "c-101-1", "c-102-2"], "a quick fix to warm up, then the highest-priority fact check, then quick fixes");
   assert.match(await text(page, ".posttitle + .small"), /4,200 views in the last 3 months/);
-  await answer(page, "a"); await next(page);
   assert.strictEqual(await page.$eval("blockquote.claim", (e) => e.innerHTML), "You should <mark>visit teh museum</mark> before lunch.");
   assert.strictEqual(await page.$eval(".opt .diff", (e) => e.innerHTML), "visit <del>teh</del> <ins>the</ins> museum");
+  await answer(page, "a"); await next(page);
   await answer(page, "a"); await next(page);
   repo.fixlog = { "c-101-1": { status: "applied" } };
   await finishLesson(page, "a"); await page.click("[data-act=home]"); await syncNow(page); await page.click("[data-nav=passport]");
@@ -216,15 +216,17 @@ test("a first sync that fails part-way restores nothing, then restores everythin
 test("the card can't be answered twice from behind the answer panel", async (S) => {
   const { page, repo, state } = await S.open();
   await page.click("[data-act=start]");
+  const first = await cardId(page);
   await answer(page, "a");
   const xp = (await state()).xp;
-  for (const sel of ['[data-opt="opt:b"]', "[data-opt=fine]", "[data-act=later]"]) await page.click(sel, { force: true, timeout: 1500 }).catch(() => {});
-  await page.evaluate(() => document.querySelector("[data-act=check]")?.click());
+  // Clicks sent straight to the buttons behind the panel, as a stray tap or a screen reader could.
+  await page.evaluate(() => ['[data-opt="opt:b"]', "[data-opt=fine]", "#cardbody [data-act=later]", "[data-act=more-sources]", "[data-act=check]"]
+    .forEach((sel) => document.querySelector(sel)?.click()));
   const s = await state();
   assert.deepStrictEqual([s.xp, s.pending.length, Object.values(s.days)[0]], [xp, 1, 1], "still one answer, one lot of miles");
   assert.ok(await page.$("#sheet.show"), "the panel is still up, with Undo available");
   await next(page); await finishLesson(page, "a");
-  assert.strictEqual(repo.responses[0].body.answers.filter((a) => a.card_id === "c-101-1").length, 1);
+  assert.strictEqual(repo.responses[0].body.answers.filter((a) => a.card_id === first).length, 1);
 });
 
 test("changing an answer and then backing out keeps the original; undo puts it back", async (S) => {
@@ -283,7 +285,7 @@ test("small things: date stepping back, a refused upload, odd deck data, an all-
   assert.strictEqual((await a.state()).streak.count, 12);
   await next(a.page);
   // a deck with also_in given as plain text must not break the card
-  const repo = newRepo(); const d = fixtureDeck(); d.cards[0].also_in = "FAQ block"; repo.decks["2026-01-01"].deck = d; repo.status422 = true;
+  const repo = newRepo(); const d = fixtureDeck(); d.cards.forEach((c) => { c.also_in = "FAQ block"; }); repo.decks["2026-01-01"].deck = d; repo.status422 = true;
   const b = await S.open({ repo });
   await b.page.click("[data-act=start]");
   assert.match(await text(b.page, "#cardbody"), /Also in this post: FAQ block/);
@@ -451,6 +453,31 @@ test("cards removed from the repo disappear; a broken deck file is ignored", asy
   assert.deepStrictEqual(Object.keys((await state()).decks), ["2026-01-03"]);
 });
 
+test("lessons open with a quick fix as a warm-up, then a fact check", async (S) => {
+  const { page } = await S.open(); await skipRecap(page);
+  await page.click("[data-act=start]");
+  const kinds = await page.evaluate(() => window.__bq.lesson.cards.map((c) => ((c.sources || []).length ? "fact" : "quick")));
+  assert.deepStrictEqual(kinds, ["quick", "fact", "quick"]);
+});
+
+test("a card with many sources folds the extras away until she asks for them", async (S) => {
+  const repo = newRepo(); const d = fixtureDeck(); const src = d.cards[0].sources[0];
+  const many = (c) => ({ ...c, sources: [1, 2, 3, 4].map((n) => ({ ...src, label: `Source ${n}` })) });
+  d.cards = [many(d.cards[0]), many(d.cards[1])]; repo.decks["2026-01-01"].deck = d;
+  const { page } = await S.open({ repo }); await skipRecap(page);
+  await page.click("[data-act=start]");
+  assert.strictEqual(await page.locator(".source").count(), 1, "only the first source shows at first");
+  assert.strictEqual(await text(page, "[data-act=more-sources]"), "Show 3 more sources");
+  await page.click(".opt >> nth=0"); await page.click("details.extra summary"); await page.fill("#note", "keep me");
+  await page.click("[data-act=more-sources]");
+  assert.strictEqual(await page.locator(".source").count(), 4);
+  assert.ok(!(await page.$("[data-act=more-sources]")), "the button goes away once they are all showing");
+  assert.strictEqual(await page.inputValue("#note"), "keep me", "a note she was typing survives");
+  assert.strictEqual(await page.locator(".opt.sel").count(), 1, "her choice survives");
+  await page.click("[data-act=check]"); await page.waitForSelector("#sheet.show"); await next(page);
+  assert.strictEqual(await page.locator(".source").count(), 1, "the next card starts folded again");
+});
+
 test("background syncs are throttled", async (S) => {
   const { page, repo } = await S.open();
   await page.waitForTimeout(400);
@@ -539,14 +566,16 @@ test("accessibility: every screen passes the automated WCAG AA checks, light and
 });
 
 (async () => {
-  const filter = process.argv[2];
+  const filter = process.argv.slice(2).filter((a) => !a.startsWith("--") && a !== "off" && a !== "on")[0];   // flags such as --trace off are not a name filter
+  if (filter && !tests.some((x) => x.name.includes(filter))) { console.error(`No test name contains "${filter}".`); process.exit(2); }
   const server = await serve();
   const browser = await chromium.launch();
   let failed = 0;
   // Browser tests can trip on timing now and then. A failed test gets one more try; if it then passes it is
   // reported as flaky, so a real problem (fails twice) is never hidden and a shaky test is still visible.
   let flaky = 0;
-  for (const t of tests.filter((x) => !filter || x.name.includes(filter))) {
+  const chosen = tests.filter((x) => !filter || x.name.includes(filter));
+  for (const t of chosen) {
     let lastError = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
       const S = new Session(browser, server.url);
@@ -567,6 +596,6 @@ test("accessibility: every screen passes the automated WCAG AA checks, light and
     }
   }
   await browser.close(); server.close();
-  console.log(failed ? `\n${failed} failed` : `\nall ${tests.length} passed${flaky ? ` (${flaky} needed a second try)` : ""}`);
+  console.log(failed ? `\n${failed} failed` : `\nall ${chosen.length} passed${chosen.length < tests.length ? ` (of ${tests.length}; name filter "${filter}")` : ""}${flaky ? ` (${flaky} needed a second try)` : ""}`);
   process.exit(failed ? 1 : 0);
 })();
