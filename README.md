@@ -29,6 +29,12 @@ https://wareontheglobe.github.io/Test/ is served by GitHub Pages from the **`gh-
    On iPhone, the home-screen app keeps its own storage separate from Safari, so connect *inside* the installed app.
    On Android, you can also open `https://wareontheglobe.github.io/Test/#token=<key>` once. The key is saved and removed from the address bar. Only send that link privately.
 
+## Reviewer mode
+
+For the person who applies the fixes. The same app shows her answers, her research list and what has been applied, instead of the game. It only reads; it never writes to the data repo.
+
+Open `https://wareontheglobe.github.io/Test/#token=<key>&reviewer=1` once on your own phone, or switch it on under Settings → Connection. A second fine-grained token with **Contents: Read-only** on the data repo is enough for this.
+
 ## Tests
 
 ```

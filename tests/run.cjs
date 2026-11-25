@@ -336,6 +336,36 @@ test("every screen fits a small phone, light and dark, with no script or policy 
   }
 });
 
+test("reviewer mode shows her answers and research list, and never writes", async (S) => {
+  const repo = newRepo();
+  const cards = fixtureDeck().cards, ans = (i, extra) => ({ card_id: cards[i].id, post: cards[i].post, claim_quote: cards[i].claim.quote, note: "", fine_reason: "", ...extra });
+  repo.responses.push({ path: "responses/2026-01-02/a.json", body: { answers: [
+    ans(0, { decision: "apply_option", option: cards[0].options[0], answered_at: "2026-01-02T10:00:00Z", checked_source: true }),
+    ans(2, { decision: "apply_option", option: cards[2].options[0], answered_at: "2026-01-02T10:01:00Z" }),
+    ans(4, { decision: "post_is_fine", fine_reason: "first_hand", answered_at: "2026-01-02T10:02:00Z" }) ] } });
+  repo.responses.push({ path: "responses/2026-01-03/b.json", body: { answers: [
+    ans(0, { decision: "other", note: "Say it opens at ten", answered_at: "2026-01-03T09:00:00Z" }) ] } });        // she changed her mind
+  repo.fixlog = { [cards[4].id]: { status: "no_change", date: "2026-01-03", summary: "She says the post is right." } };
+  repo.files["research/open.md"] = { sha: "r1", text: `# Research list\n\n## 1. x\n\n- **Her note:** ring them\n- **Marked:** 2026-01-02 · Card: \`${cards[6].id}\`\n` };
+  const { page } = await S.open({ repo, hash: "&reviewer=1" });
+  await page.waitForTimeout(600);
+  assert.ok(!(await page.$(".intro")), "the reviewer link skips the walkthrough");
+  assert.strictEqual(await text(page, "h1.title"), "Her answers");
+  assert.deepStrictEqual(await page.$$eval(".kpi .v", (els) => els.map((e) => e.textContent)), ["2", "1", "4", "0"]);
+  const body = await text(page, "#app");
+  assert.match(body, /Her own wording ?“Say it opens at ten”/, "her latest answer wins");
+  assert.ok(!body.includes("Update to 10 AM"), "the answer she replaced is not shown");
+  assert.match(body, /visit ?teh ?the ?museum/, "typo fix shown as a before/after");
+  assert.match(body, /ring them/);
+  assert.match(body, /Recently handled.*no change/);
+  assert.strictEqual(await page.$$eval("nav.tabs button", (els) => els.length), 2);
+  await page.click("[data-act=copy-review]"); await page.waitForTimeout(200);
+  assert.match(await page.inputValue("#review-text"), /2 answers to apply, 1 on her research list, 4 cards still waiting/);
+  await page.click("[data-act=sync]"); await page.waitForTimeout(600);
+  assert.ok(!repo.requests.some((r) => r.startsWith("PUT")), "reviewer mode made no writes");
+  assert.strictEqual(repo.requests.filter((r) => r.includes("responses/2026-01-02/a.json")).length, 1, "response files are downloaded once");
+});
+
 test("accessibility: every screen passes the automated WCAG AA checks, light and dark", async (S) => {
   const axe = require("fs").readFileSync(require("path").join(__dirname, "vendor", "axe.min.js"), "utf8");
   const problems = [];
@@ -363,6 +393,8 @@ test("accessibility: every screen passes the automated WCAG AA checks, light and
     await page.click("[data-redo]"); await check(page, `${tag} confirmation`); await page.click(".modal [data-a=no]");
     await page.click("[data-nav=settings]"); await page.click("details.conn summary"); await check(page, `${tag} settings`);
     repo.status = 401; await page.click("[data-act=sync]"); await page.waitForTimeout(600); await page.click("[data-nav=home]"); await check(page, `${tag} warning banner`);
+    const rv = await S.open({ dark, repo: (() => { const r = newRepo(); const c = fixtureDeck().cards[2]; r.responses.push({ path: "responses/2026-01-02/a.json", body: { answers: [{ card_id: c.id, post: c.post, claim_quote: c.claim.quote, decision: "apply_option", option: c.options[0], answered_at: "2026-01-02T10:00:00Z" }] } }); return r; })(), hash: "&reviewer=1" });
+    await check(rv.page, `${tag} reviewer`);
   }
   assert.deepStrictEqual(problems, []);
 });

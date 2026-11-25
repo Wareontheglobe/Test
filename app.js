@@ -26,7 +26,7 @@ const FINE_REASONS = [
 const TYPE_ICON = { closed: "🚪", price: "💲", hours: "🕒", show: "🎭", link: "🔗", rule: "📋", typo: "✏️", consistency: "🔁", alt: "🖼️", other: "🔍" };
 
 const DEFAULTS = {
-  settings: { token: "", repo: "Wareontheglobe/blog-fixes", branch: "main", dailyGoal: 3, sound: true, name: "", email: "", remindTime: "19:30" },
+  settings: { token: "", repo: "Wareontheglobe/blog-fixes", branch: "main", dailyGoal: 3, sound: true, name: "", email: "", remindTime: "19:30", reviewer: false },
   decks: {},        // deckId -> {id, sha, created, cards: []}
   answers: {},      // cardId -> answer record
   later: [],        // cardIds on the research list
@@ -52,6 +52,7 @@ const DEFAULTS = {
   recapSeen: "",    // Monday of the last week whose recap she has seen
   syncError: null,  // {kind, msg, at} from the last failed sync; cleared when one succeeds
   lastTry: 0,       // when a sync was last attempted (ms)
+  reviewCache: {},  // reviewer mode: response files already downloaded (they never change)
   progressSaved: "",  // the progress backup as last written to the repo
   progressSha: "",
   progressAt: 0,
@@ -523,6 +524,93 @@ async function restoreAnswered() {
   S.restored = true; save();
 }
 
+/* ---------------- reviewer mode ----------------
+   For the person who applies her fixes: the same app, showing her answers instead of the game.
+   It only reads. Nothing in this mode writes to the repo. */
+let review = null;    // { answers, applied, research, at }
+async function pullReview() {
+  const ref = `?ref=${encodeURIComponent(S.settings.branch)}`, rawH = { headers: { Accept: "application/vnd.github.raw+json" } };
+  const top = await gh(`contents/responses${ref}`);
+  if (!top.ok && top.status !== 404) throw await ghFail(top);
+  if (top.ok) {
+    for (const d of (await top.json()).filter((x) => x.type === "dir")) {
+      const r = await gh(`contents/${d.path}${ref}`);
+      if (!r.ok) continue;
+      for (const f of (await r.json()).filter((x) => x.name.endsWith(".json") && !S.reviewCache[x.path])) {
+        const fr = await gh(`contents/${f.path}${ref}`, rawH);
+        if (!fr.ok) continue;
+        try { S.reviewCache[f.path] = (await fr.json()).answers || []; } catch (e) { /* skip a broken file */ }
+      }
+    }
+  }
+  const latest = {};
+  Object.values(S.reviewCache).flat().forEach((a) => {
+    const prev = latest[a.card_id];
+    if (!prev || (a.answered_at || "") >= (prev.answered_at || "")) latest[a.card_id] = a;
+  });
+  const ap = await gh(`contents/fixes/applied.json${ref}`, rawH);
+  let applied = {}; if (ap.ok) { try { applied = (await ap.json()) || {}; } catch (e) {} }
+  const research = [];
+  const rl = await gh(`contents/research/open.md${ref}`, rawH);
+  if (rl.ok) (await rl.text()).split("\n## ").slice(1).forEach((sec) => {
+    const id = (sec.match(/Card: `([^`]+)`/) || [])[1];
+    const note = (sec.match(/\*\*Her note:\*\* (.*)/) || [])[1] || "";
+    if (id) research.push({ id, note: note === "none" ? "" : note });
+  });
+  review = { answers: Object.values(latest), applied, research, at: new Date().toISOString() };
+  save();
+}
+function reviewData() {
+  const r = review || { answers: [], applied: {}, research: [] };
+  const cards = Object.fromEntries(allCards().map((c) => [c.id, c]));
+  const answered = new Set(r.answers.map((a) => a.card_id)), parked = new Set(r.research.map((x) => x.id));
+  const pending = r.answers.filter((a) => !r.applied[a.card_id]).sort((a, b) => (a.post?.title || "").localeCompare(b.post?.title || "") || (a.answered_at || "").localeCompare(b.answered_at || ""));
+  const open = allCards().filter((c) => !answered.has(c.id) && !parked.has(c.id));
+  const tally = {};
+  Object.values(r.applied).forEach((e) => { if (e?.status) tally[e.status] = (tally[e.status] || 0) + 1; });
+  return { r, cards, pending, open, tally };
+}
+function reviewSummary() {
+  const { r, cards, pending, open } = reviewData();
+  const what = (a) => a.decision === "apply_option" ? `${a.option?.label || "fix"}: "${a.option?.new_text || "(remove)"}"` : a.decision === "post_is_fine" ? `post is fine${a.fine_reason ? ` (${a.fine_reason.replace("_", " ")})` : ""}` : `her wording: ${a.note}`;
+  return [`Blog Quest review, ${today()}`, `${pending.length} answers to apply, ${r.research.length} on her research list, ${open.length} cards still waiting for her.`, "",
+    ...pending.map((a) => `- [${a.post?.title || "?"}] ${cards[a.card_id]?.headline || a.card_id}: ${what(a)}${a.note && a.decision !== "other" ? ` (note: ${a.note})` : ""}`),
+    ...(r.research.length ? ["", "Research list:", ...r.research.map((x) => `- ${cards[x.id]?.headline || x.id}${x.note ? `: ${x.note}` : ""}`)] : [])].join("\n");
+}
+function reviewerView() {
+  const { r, cards, pending, open, tally } = reviewData();
+  const handled = Object.entries(r.applied).sort((a, b) => (b[1]?.date || "").localeCompare(a[1]?.date || "")).slice(0, 6);
+  const label = { applied: "📰 applied", no_change: "✓ no change", needs_human: "👀 needs a person", skipped: "skipped" };
+  const answerHtml = (a) => {
+    const c = cards[a.card_id];
+    const what = a.decision === "apply_option"
+      ? `<b>${esc(a.option?.label || "Fix")}</b>${a.option?.action === "remove" ? `<small>Removes: “${esc(a.claim_quote)}”</small>` : `<small class="diff">${diffHtml(a.claim_quote || "", a.option?.new_text || "")}</small>`}`
+      : a.decision === "post_is_fine" ? `<b>Post is fine as is</b><small>${esc({ first_hand: "She knows first-hand", source_wrong: "The source is wrong or out of date", different_thing: "It's about something else" }[a.fine_reason] || "No reason given")}</small>`
+      : `<b>Her own wording</b><small>“${esc(a.note)}”</small>`;
+    return `<div class="answer"><div><span class="small muted">${TYPE_ICON[c?.type] || "🔍"} ${esc(c?.headline || a.card_id)}${a.checked_source ? " · 🔗 opened a source" : ""}</span>${what}
+      ${a.note && a.decision !== "other" ? `<small>📝 ${esc(a.note)}</small>` : ""}${a.research_note ? `<small>🔖 was researching: ${esc(a.research_note)}</small>` : ""}${a.extra_source_url && safeUrl(a.extra_source_url) ? `<small><a href="${esc(a.extra_source_url)}" target="_blank" rel="noopener noreferrer">Her source ↗</a></small>` : ""}</div></div>`;
+  };
+  const byPost = new Map();
+  pending.forEach((a) => { const k = a.post?.title || "Unknown post"; if (!byPost.has(k)) byPost.set(k, []); byPost.get(k).push(a); });
+  return `<div class="topbar"><span class="pill off">🧾 Reviewer</span><span class="spacer"></span>${navigator.onLine ? "" : `<span class="pill off">📴 Offline</span>`}</div>
+    <h1 class="title">Her answers</h1>
+    ${S.syncError && S.syncError.kind !== "other" ? `<div class="alert" role="alert"><b>⚠️ Can't read the repo</b><p>${esc(S.syncError.msg)}</p></div>` : ""}
+    <div class="kpis">
+      <div class="kpi"><div class="v">${pending.length}</div><div class="l">Answers to apply</div></div>
+      <div class="kpi"><div class="v">${r.research.length}</div><div class="l">On her research list</div></div>
+      <div class="kpi"><div class="v">${open.length}</div><div class="l">Cards waiting for her</div></div>
+      <div class="kpi"><div class="v">${tally.applied || 0}</div><div class="l">Fixes applied so far</div></div>
+    </div>
+    <p class="small muted" style="margin:10px 2px">${review ? `Checked ${new Date(review.at).toLocaleString()}` : "Not checked yet"} · <button class="linkbtn" data-act="sync" style="padding:0">Check again</button></p>
+    ${pending.length ? `<div class="tip">To apply these, open Claude with the blog-fixes repo and say <b>“work through the new responses”</b>. You'll see each change before it goes live.
+        <button class="btn ghost sm" data-act="copy-review" style="margin-top:10px">📋 Copy this list</button>
+        <textarea id="review-text" hidden readonly aria-label="Review summary"></textarea></div>`
+      : `<div class="empty">${pipG("sleepy", 100)}<p class="muted">Nothing to apply right now.</p></div>`}
+    ${[...byPost.entries()].map(([title, list]) => `<h2>${esc(title)}</h2><div class="answers">${list.map(answerHtml).join("")}</div>`).join("")}
+    ${r.research.length ? `<h2>Her research list</h2><div class="answers">${r.research.map((x) => `<div class="answer"><div><b>${esc(cards[x.id]?.headline || x.id)}</b><small>${esc(cards[x.id]?.post?.title || "")}</small>${x.note ? `<small>🔖 ${esc(x.note)}</small>` : ""}</div></div>`).join("")}</div>` : ""}
+    ${handled.length ? `<h2>Recently handled</h2><div class="answers">${handled.map(([id, e]) => `<div class="answer"><div><b>${esc(cards[id]?.headline || id)}</b><small>${esc(e.summary || "")}</small><span class="status ${e.status === "applied" ? "live" : e.status === "no_change" ? "ok" : "wait"}">${label[e.status] || esc(e.status || "")}${e.date ? ` · ${esc(e.date)}` : ""}</span></div></div>`).join("")}</div>` : ""}`;
+}
+
 async function sync({ quiet = false } = {}) {
   if (DEMO) {
     packagePending();
@@ -539,6 +627,12 @@ async function sync({ quiet = false } = {}) {
   syncing = true; S.lastTry = Date.now();
   if (!S.lastSync && view.name === "home") render();      // show "fetching your cards" on the very first sync
   try {
+    if (S.settings.reviewer) {                             // read-only: her answers, the fix log, her research list
+      await pullDecks(); await pullReview();
+      S.lastSync = new Date().toISOString(); S.syncError = null; save();
+      if (!quiet) toast("Up to date ✓");
+      return;
+    }
     packagePending();
     const sent = await flushOutbox();
     const added = await pullDecks();
@@ -696,6 +790,7 @@ function greeting(open) {
 }
 
 function homeView() {
+  if (S.settings.reviewer && !DEMO) return reviewerView();
   const open = openCards();
   const doneToday = S.days[today()] || 0;
   const goal = S.settings.dailyGoal;
@@ -804,6 +899,10 @@ function introView() {
 
 function navView() {
   const n = S.later.length;
+  if (S.settings.reviewer && !DEMO) {
+    const r = (id, icon, label) => `<button class="${view.name === id ? "on" : ""}" data-nav="${id}" aria-label="${label}">${icon}<span>${label}</span></button>`;
+    return `<nav class="tabs"><div class="in">${r("home", "🧾", "Review")}${r("settings", "⚙️", "Settings")}</div></nav>`;
+  }
   const t = (id, icon, label) => `<button class="${view.name === id ? "on" : ""}" data-nav="${id}" aria-label="${label}">${icon}<span>${label}</span>${id === "later" && n ? `<i class="dot">${n}</i>` : ""}</button>`;
   return `<nav class="tabs"><div class="in">${t("home", "🗺️", "Journey")}${t("later", "🔖", "Research")}${t("passport", "🛂", "Passport")}${t("settings", "⚙️", "Settings")}</div></nav>`;
 }
@@ -1160,6 +1259,8 @@ function settingsView() {
         <div class="hint">Only stored on this phone. Ask whoever set this up for it if it's blank.</div></div>
       <div class="field"><label for="repo">Repo</label><input type="text" id="repo" value="${esc(s.repo)}" autocapitalize="off" autocorrect="off"></div>
       <div class="field"><label for="branch">Branch</label><input type="text" id="branch" value="${esc(s.branch)}" autocapitalize="off" autocorrect="off"></div>
+      <label class="toggle" for="reviewer">Reviewer mode <input type="checkbox" id="reviewer" ${s.reviewer ? "checked" : ""}></label>
+      <div class="hint">For the person who applies the fixes. Shows her answers instead of the game, and never writes anything.</div>
     </details>
     <button class="btn teal" data-act="save-settings" style="margin-bottom:14px">Save & sync</button>
     <div class="card small">
@@ -1244,6 +1345,12 @@ function act(a) {
       try { navigator.clipboard.writeText(text).then(() => toast("List copied — paste it into Notes or an email"), fallback); } catch (e) { fallback(); }
       break;
     }
+    case "copy-review": {
+      const text = reviewSummary();
+      const fallback = () => { const t = $("#review-text"); if (t) { t.hidden = false; t.value = text; t.focus(); t.select(); toast("Select all, then copy"); } };
+      try { navigator.clipboard.writeText(text).then(() => toast("Copied"), fallback); } catch (e) { fallback(); }
+      break;
+    }
     case "demo-research": { const box = $("#demo-research"); if (box) box.hidden = !box.hidden; break; }
     case "check": checkAnswer(); break;
     case "later": parkLater(); break;
@@ -1290,7 +1397,8 @@ function act(a) {
       S.settings.email = $("#email").value.trim();
       S.settings.dailyGoal = Math.max(1, Math.min(30, parseInt($("#goal").value, 10) || 3));
       S.settings.sound = $("#sound").checked;
-      save(); toast("Saved"); sync(); break;
+      S.settings.reviewer = $("#reviewer").checked;
+      save(); toast("Saved"); view = { name: S.settings.reviewer ? "home" : "settings" }; render(); sync(); break;
     case "reset":
       askConfirm("Reset progress?", DEMO ? "Clears this demo so you can start over." : "Answers already uploaded stay safe in GitHub.", "Reset", "Cancel").then((ok) => {
         if (!ok) return;
@@ -1362,9 +1470,10 @@ if (DEMO) { loadDemoDeck(); save(); }
   if (h.get("token")) {
     S.settings.token = h.get("token");
     if (h.get("repo")) S.settings.repo = h.get("repo");
+    if (h.get("reviewer")) { S.settings.reviewer = true; S.seenIntro = true; }   // setup link for the reviewer: …#token=…&reviewer=1
     save();
     history.replaceState(null, "", location.pathname + location.search);
-    setTimeout(() => toast("Connected! Pulling your cards…"), 300);
+    setTimeout(() => toast(S.settings.reviewer ? "Connected! Fetching her answers…" : "Connected! Pulling your cards…"), 300);
   }
 })();
 
@@ -1383,7 +1492,7 @@ if (!DEMO) { try { navigator.storage?.persist?.(); } catch (e) {} }
 // Any answers left from a lesson that was closed mid-way get packaged for upload.
 packagePending();
 if (!S.seenIntro) view = { name: "intro", step: 0 };
-else if (recapDue()) view = { name: "recap" };
+else if (recapDue() && !S.settings.reviewer) view = { name: "recap" };
 render();
 sync({ quiet: true });
 

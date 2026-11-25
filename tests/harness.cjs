@@ -72,7 +72,7 @@ async function mockGitHub(ctx, repo) {
 class Session {
   constructor(browser, base) { this.browser = browser; this.base = base; this.errors = []; }
   // Opens the app on a pretend phone. Options: device, dark, repo, key, intro (keep the walkthrough), state (saved state to start from).
-  async open({ device = "iPhone 13", dark = false, repo = newRepo(), key = GOOD_KEY, intro = false, state = null, viewport = null } = {}) {
+  async open({ device = "iPhone 13", dark = false, repo = newRepo(), key = GOOD_KEY, intro = false, state = null, viewport = null, hash = "" } = {}) {
     const ctx = await this.browser.newContext({ ...devices[device], ...(viewport ? { viewport } : {}), colorScheme: dark ? "dark" : "light", permissions: [] });
     await mockGitHub(ctx, repo);
     const page = await ctx.newPage();
@@ -80,7 +80,7 @@ class Session {
     page.on("console", (m) => { if (m.type() === "error" && /Content Security Policy|Refused to/.test(m.text())) this.errors.push(`CSP: ${m.text()}`); });
     ctx.on("page", (p) => { if (p !== page) p.close().catch(() => {}); });      // source links open new tabs; close them
     if (state) await page.addInitScript((s) => { if (!localStorage.getItem("blogquest.v1")) localStorage.setItem("blogquest.v1", JSON.stringify(s)); }, state);
-    await page.goto(this.base + (key ? `#token=${key}` : ""));
+    await page.goto(this.base + (key ? `#token=${key}${hash}` : ""));
     await page.waitForTimeout(700);
     if (!intro && await page.$(".intro .skip")) { await page.click(".intro .skip"); await page.waitForTimeout(150); }
     return { ctx, page, repo, state: () => page.evaluate(() => JSON.parse(JSON.stringify(window.__bq.state))) };
