@@ -46,6 +46,7 @@ const DEFAULTS = {
   badges: {},       // badgeId -> date earned
   lastSync: "",
   restored: false,
+  seenIntro: false, // she has been through the welcome walkthrough
   live: {},         // cardId -> fix-log entry, for answers that are now live on the blog
   seenLive: 0,      // how many live fixes she has already been told about
 };
@@ -471,11 +472,12 @@ function recordAnswer(card, decision, extra) {
 function render() {
   updateFreeze();
   const app = $("#app");
-  app.classList.toggle("lesson-mode", view.name === "lesson" || view.name === "complete");
+  const bare = ["lesson", "complete", "intro"].includes(view.name);   // full-screen views without the tab bar
+  app.classList.toggle("lesson-mode", bare);
   const html = {
-    home: homeView, lesson: lessonView, complete: completeView, later: laterView, passport: passportView, settings: settingsView,
+    home: homeView, lesson: lessonView, complete: completeView, later: laterView, passport: passportView, settings: settingsView, intro: introView,
   }[view.name]();
-  app.innerHTML = html + (view.name === "lesson" || view.name === "complete" ? "" : navView());
+  app.innerHTML = html + (bare ? "" : navView());
   bind();
   window.scrollTo(0, 0);
   updateIconBadge();
@@ -545,13 +547,36 @@ function homeView() {
     ${open.length ? `<button class="btn" data-act="start">Start lesson · ${size} card${size === 1 ? "" : "s"}</button>`
       : `<button class="btn ghost" data-act="sync">${S.settings.token ? "Check for new cards" : "Open Settings"}</button>`}
     ${!standalone ? `<div class="tip" style="margin-top:14px">📲 <b>Tip:</b> add this to your home screen so it works offline. iPhone: Share → <i>Add to Home Screen</i>. Android: menu ⋮ → <i>Install app</i>.</div>` : ""}
-    ${ps.length ? `<h2>Your journey</h2><div class="path">${ps.map((p) => {
+    ${ps.length ? `<h2>Your journey</h2><p class="muted small" style="margin:-4px 0 14px">Each stop is one of your posts. Tap one to check just that post.</p><div class="path">${ps.map((p) => {
       const cls = p.open === 0 ? (p.done ? "done" : "locked") : "";
       const icon = p.open === 0 ? (p.done ? "⭐" : "🔒") : "📍";
       return `<button class="stop ${cls}" data-post="${esc(p.key)}" ${p.open ? "" : "disabled"}>
         <span class="node">${icon}${p.open ? `<span class="count">${p.open}</span>` : ""}</span>
         <span class="label">${esc(p.title)}<small>${p.done}/${p.cards.length} checked</small></span></button>`;
     }).join("")}</div>` : ""}`;
+}
+
+// The welcome walkthrough: shown on first open, and again from Settings.
+const INTRO = [
+  { mood: "happy", title: "Hi, I'm Pip!", body: "I read your blog posts and look for things that may need a fix: a price that changed, new opening hours, a typo. I never change your blog myself." },
+  { mood: "think", title: "You make the call", body: "Each card shows what your post says and what I found, with links to check. Pick a suggested fix, tell me the post is fine, or write your own. Not sure? Tap “I need to research this first” and it's saved to your Research list." },
+  { mood: "cheer", title: "Then it gets fixed", body: "Your answers are saved and sent off, even if you were offline at the time. Each one is reviewed and applied to the blog, and I'll tell you when your fix is live. Until then you can change your mind in Passport." },
+  { mood: "wow", title: "A little every day", body: "A lesson is three cards and takes a minute or two. Decide at least one card a day to keep your streak 🔥. New cards arrive about once a week, and if you run out your streak is frozen ❄️ until they do." },
+];
+function introView() {
+  const i = Math.min(view.step || 0, INTRO.length - 1), step = INTRO[i], last = i === INTRO.length - 1;
+  return `<div class="intro">
+    <button class="linkbtn skip" data-act="intro-done">Skip</button>
+    ${pip(step.mood, 150)}
+    <h1>${esc(step.title)}</h1>
+    <p>${esc(step.body)}</p>
+    ${last ? `<div class="field" style="width:100%;text-align:left"><label for="intro-name">What should I call you?</label>
+      <input type="text" id="intro-name" autocomplete="given-name" maxlength="30" value="${esc(S.settings.name)}" placeholder="Your first name (optional)"></div>` : ""}
+    <div class="dots" role="img" aria-label="Step ${i + 1} of ${INTRO.length}">${INTRO.map((_, n) => `<i class="${n === i ? "on" : ""}"></i>`).join("")}</div>
+    <div class="intro-actions">
+      ${i ? `<button class="btn ghost" data-act="intro-back">Back</button>` : ""}
+      <button class="btn ${last ? "" : "teal"}" data-act="${last ? "intro-done" : "intro-next"}">${last ? "Let's go" : "Next"}</button>
+    </div></div>`;
 }
 
 function navView() {
@@ -583,6 +608,7 @@ function lessonView() {
       <span class="pill miles">✈️ ${S.xp}</span>
     </div>
     <div>
+      ${!resolvedCount() && !S.later.length ? `<div class="tip">👋 <b>Your first card.</b> Read what your post says, look at what I found, then choose an option below. Nothing on your blog changes until your answer has been reviewed.</div>` : ""}
       <span class="chip ${esc(sev)}">${TYPE_ICON[c.type] || "🔍"} ${esc(c.headline || "Possible issue")}</span>
       <span class="small muted" style="margin-left:6px">${esc(sevText)}</span>
       <div class="posttitle">${safeUrl(c.post?.url) ? `<a href="${esc(c.post.url)}" target="_blank" rel="noopener">${esc(c.post?.title)}</a>` : esc(c.post?.title)}${c.claim?.section ? ` · ${esc(c.claim.section)}` : ""}</div>
@@ -825,6 +851,14 @@ function passportView() {
       <div class="kpi"><div class="v">${fixes}</div><div class="l">Fixes sent</div></div>
     </div>
     <div class="kpi" style="margin-top:10px"><div class="v">📰 ${Object.keys(S.live || {}).length}</div><div class="l">Fixes live on the blog</div></div>
+    <details class="card how"><summary><b>How miles and streaks work</b></summary>
+      <ul class="small">
+        <li><b>Miles:</b> ${XP.answer} for every card you decide. +${XP.high} if readers might act on it, +${XP.note} for adding a note, +${XP.source} for adding your own source, +${XP.opened} for opening a source first, and ${XP.later} for saving a card to your Research list.</li>
+        <li><b>Levels:</b> miles add up to ranks, from ${LEVELS[0][1]} to ${LEVELS[LEVELS.length - 1][1]}.</li>
+        <li><b>Streak 🔥:</b> decide at least one card a day. If there are no cards left, it's frozen ❄️ and can't break. When new cards arrive you have that day and the next to carry on.</li>
+        <li><b>Daily goal:</b> ${S.settings.dailyGoal} cards. Change it in Settings.</li>
+        <li><b>Stamps and badges:</b> finish every card on a post for its stamp. Badges mark milestones.</li>
+      </ul></details>
     <h2>Badges</h2>
     <div class="badges">${BADGES.map((b) => `<div class="badge ${S.badges[b.id] ? "" : "locked"}"><span class="e">${b.e}</span><b>${esc(b.name)}</b><small>${esc(b.how)}</small></div>`).join("")}</div>
     <h2>Stamps</h2>
@@ -865,6 +899,7 @@ function demoSettingsView() {
         <button class="btn sun" data-act="demo-live">🎉 Pretend my fixes went live</button>
       </div>
     </div>
+    <button class="btn ghost" data-act="show-intro" style="margin-bottom:6px">❓ How Blog Quest works</button>
     <button class="linkbtn" data-act="reset" style="color:var(--coral-dark)">Reset the demo</button>`;
 }
 
@@ -888,6 +923,7 @@ function settingsView() {
       <div><b>Cards on phone:</b> ${allCards().length}</div>
       <div style="margin-top:10px"><button class="btn ghost" data-act="sync">Sync now</button></div>
     </div>
+    <button class="btn ghost" data-act="show-intro" style="margin-bottom:6px">❓ How Blog Quest works</button>
     <button class="linkbtn" data-act="reset" style="color:var(--coral-dark)">Reset this phone's progress</button>`;
 }
 
@@ -981,6 +1017,14 @@ function act(a) {
       connectWith(k); break;
     }
     case "undo": undoLast(); break;
+    case "intro-next": view = { name: "intro", step: (view.step || 0) + 1 }; render(); break;
+    case "intro-back": view = { name: "intro", step: Math.max(0, (view.step || 0) - 1) }; render(); break;
+    case "intro-done": {
+      const n = $("#intro-name");
+      if (n) S.settings.name = n.value.trim().slice(0, 30);
+      S.seenIntro = true; save(); view = { name: "home" }; render(); break;
+    }
+    case "show-intro": view = { name: "intro", step: 0 }; render(); break;
     case "save-demo":
       S.settings.name = $("#name").value.trim().slice(0, 30);
       S.settings.dailyGoal = Math.max(1, Math.min(30, parseInt($("#goal").value, 10) || 3));
@@ -1078,6 +1122,7 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 
 // Any answers left from a lesson that was closed mid-way get packaged for upload.
 packagePending();
+if (!S.seenIntro) view = { name: "intro", step: 0 };
 render();
 sync({ quiet: true });
 
