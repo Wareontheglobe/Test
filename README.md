@@ -5,6 +5,9 @@ A gamified, offline-first phone app for fact-checking a travel blog. Each lesson
 - Three-card lessons, a daily goal, a streak with a week view, miles and levels, badges and passport stamps. Your guide is Pip, a little globe explorer.
 - The streak freezes when there's nothing left to check, so running out of cards never breaks it.
 - A research list for cards that need digging first. It's saved to the private repo and can be emailed, shared or copied from the app.
+- Daily quests, a weekly recap, and gear for Pip that unlocks with each level.
+- A daily reminder she can add to her calendar in one tap (the app itself can't send notifications).
+- Lessons mix one fact check with quick fixes, and typo cards show the change highlighted in place.
 - Answers can be changed until they've been applied to the blog.
 - Miles, streak and badges are backed up to the private repo, so a new phone picks up where the old one stopped.
 - If the access key stops working, the home screen says so plainly instead of failing quietly.

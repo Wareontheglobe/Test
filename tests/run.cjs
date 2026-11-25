@@ -16,6 +16,7 @@ async function finishLesson(page, choice = "fine") {
 async function playAll(page) {
   for (let g = 0; g < 12 && await page.$("[data-act=start]"); g++) { await page.click("[data-act=start]"); await finishLesson(page); await page.click("[data-act=home]"); }
 }
+const skipRecap = async (page) => { if (await page.$("[data-act=recap-done]")) await page.click("[data-act=recap-done]"); };
 const syncNow = async (page) => { await page.click("[data-nav=settings]"); await page.click("[data-act=sync]"); await page.waitForTimeout(900); };
 
 test("walkthrough explains the app, asks her name, and can be replayed", async (S) => {
@@ -163,7 +164,7 @@ test("streak freezes when there is nothing left and picks up when cards arrive",
   assert.ok(s.frozen, "frozen once everything is answered");
   // Five days go by with nothing to do.
   await page.evaluate((old) => { const k = "blogquest.v1", s = JSON.parse(localStorage.getItem(k)); const t = Object.keys(s.days)[0]; s.days = { [old]: s.days[t] }; s.streak.lastDay = old; s.frozen = old; localStorage.setItem(k, JSON.stringify(s)); }, dayStr(-5));
-  await page.reload(); await page.waitForTimeout(700);
+  await page.reload(); await page.waitForTimeout(700); await skipRecap(page);
   assert.strictEqual(await text(page, ".pill.streak"), "🔥 1");
   assert.match(await text(page, ".hero .bubble"), /safe until new cards arrive/);
   const d = fixtureDeck(); d.cards = [{ ...d.cards[0], id: "c-101-9" }];
@@ -180,10 +181,60 @@ test("a missed day with cards waiting does break the streak", async (S) => {
   await page.click("[data-act=start]"); await answer(page, "a"); await next(page); await page.click("[data-act=quit]"); await page.click(".modal [data-a=yes]");
   await page.waitForTimeout(900);                       // let the upload finish before rewriting saved state
   await page.evaluate((old) => { const k = "blogquest.v1", s = JSON.parse(localStorage.getItem(k)); s.days = { [old]: 1 }; s.streak.lastDay = old; localStorage.setItem(k, JSON.stringify(s)); }, dayStr(-3));
-  await page.reload(); await page.waitForTimeout(600);
+  await page.reload(); await page.waitForTimeout(600); await skipRecap(page);
   assert.strictEqual(await text(page, ".pill.streak"), "🔥 0");
   await page.click("[data-act=start]"); await answer(page, "a");
   assert.strictEqual((await state()).streak.count, 1);
+});
+
+test("daily quests track progress, pay out once, and are undone with the answer", async (S) => {
+  const { page, state } = await S.open();
+  let s = await state();
+  assert.strictEqual(s.q.ids.length, 3); assert.strictEqual(s.q.ids[0], "goal");
+  assert.strictEqual(await page.$$eval(".quest", (els) => els.length), 3);
+  await page.click("[data-act=start]");
+  await answer(page, "a"); await page.click("#sheet [data-act=undo]");
+  s = await state();
+  assert.deepStrictEqual([s.xp, s.q.prog.goal || 0], [0, 0], "undo takes quest progress back too");
+  await answer(page, "a"); await next(page); await answer(page, "a"); await next(page);
+  const before = (await state()).xp;
+  await answer(page, "a");
+  assert.match(await text(page, "#sheet"), /Quest complete: Decide 3 cards \+10/);
+  s = await state();
+  assert.ok(s.q.done.goal); assert.ok(s.xp >= before + 20, "card miles plus the quest's 10");
+  assert.strictEqual(s.xpDays[Object.keys(s.xpDays)[0]], s.xp, "miles per day recorded for the recap");
+  await next(page); await page.waitForTimeout(500); await page.click("[data-act=home]");
+  assert.ok(await page.$(".quest.done"));
+});
+
+test("weekly recap appears once after a week with activity", async (S) => {
+  const lastMon = new Date(); lastMon.setDate(lastMon.getDate() - ((lastMon.getDay() + 6) % 7) - 7);
+  const k = (i) => { const d = new Date(lastMon); d.setDate(d.getDate() + i); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const { page, state } = await S.open({ state: { seenIntro: true, xp: 70, days: { [k(0)]: 3, [k(2)]: 2, [k(5)]: 1 }, xpDays: { [k(0)]: 40, [k(2)]: 30 }, streak: { count: 1, lastDay: k(5) } } });
+  assert.strictEqual(await text(page, ".complete h1"), "Your week");
+  assert.deepStrictEqual(await page.$$eval(".stat .v", (els) => els.map((e) => e.textContent)), ["6", "3/7", "+70"]);
+  await page.click("[data-act=recap-done]");
+  assert.ok(await page.$(".topbar"));
+  await page.reload(); await page.waitForTimeout(500);
+  assert.ok(!(await page.$("text=Your week")), "not shown twice");
+});
+
+test("reminder links, Pip's gear and the scoring guide", async (S) => {
+  const { page, state } = await S.open({ state: { seenIntro: true, xp: 130 } });      // level 3
+  assert.ok(await page.$(".hero svg.pip rect"), "Pip wears the backpack at level 3");
+  await page.click("[data-nav=passport]");
+  assert.match(await text(page, ".gear"), /a scarf, a backpack.*Next: a feather for the hat at level 5/);
+  await page.click("details.how summary");
+  assert.match(await text(page, "details.how"), /Streak 🔥: decide at least one card a day/);
+  await page.click("[data-nav=settings]");
+  await page.fill("#remind", "07:15");
+  const g = new URL(await page.getAttribute("#remind-google", "href"));
+  assert.strictEqual(g.hostname, "calendar.google.com");
+  assert.match(g.searchParams.get("dates"), /^\d{8}T071500\/\d{8}T072500$/);
+  assert.strictEqual(g.searchParams.get("recur"), "RRULE:FREQ=DAILY");
+  const ics = decodeURIComponent((await page.getAttribute("#remind-ics", "href")).split(",")[1]);
+  assert.ok(ics.startsWith("BEGIN:VCALENDAR\r\n") && ics.includes("RRULE:FREQ=DAILY") && ics.includes("BEGIN:VALARM") && /DTSTART:\d{8}T071500/.test(ics));
+  assert.strictEqual((await state()).settings.remindTime, "07:15");
 });
 
 test("answers given offline wait on the phone and upload on reconnect", async (S) => {

@@ -1,4 +1,4 @@
-import { pip } from "./mascot.js";
+import { pip, GEAR } from "./mascot.js";
 
 /* =========================================================================
    Blog Quest — daily fact-check lessons for the blog.
@@ -26,7 +26,7 @@ const FINE_REASONS = [
 const TYPE_ICON = { closed: "🚪", price: "💲", hours: "🕒", show: "🎭", link: "🔗", rule: "📋", typo: "✏️", consistency: "🔁", alt: "🖼️", other: "🔍" };
 
 const DEFAULTS = {
-  settings: { token: "", repo: "Wareontheglobe/blog-fixes", branch: "main", dailyGoal: 3, sound: true, name: "", email: "" },
+  settings: { token: "", repo: "Wareontheglobe/blog-fixes", branch: "main", dailyGoal: 3, sound: true, name: "", email: "", remindTime: "19:30" },
   decks: {},        // deckId -> {id, sha, created, cards: []}
   answers: {},      // cardId -> answer record
   later: [],        // cardIds on the research list
@@ -47,6 +47,9 @@ const DEFAULTS = {
   lastSync: "",
   restored: false,
   seenIntro: false, // she has been through the welcome walkthrough
+  q: { day: "", ids: [], prog: {}, done: {}, bonus: false },   // today's quests
+  xpDays: {},       // miles earned per day, for the weekly recap
+  recapSeen: "",    // Monday of the last week whose recap she has seen
   syncError: null,  // {kind, msg, at} from the last failed sync; cleared when one succeeds
   lastTry: 0,       // when a sync was last attempted (ms)
   progressSaved: "",  // the progress backup as last written to the repo
@@ -84,6 +87,8 @@ function dayKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
 function yesterday() { const d = new Date(); d.setDate(d.getDate() - 1); return dayKey(d); }
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const num = (n) => Number(n || 0).toLocaleString("en-US");
+// Pip, wearing whatever gear her level has unlocked.
+const pipG = (mood, size) => pip(mood, size, level().n);
 // Curly quotes and long dashes count the same as plain ones when comparing text (one character for one).
 const fold1 = (t) => String(t ?? "").replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[\u2013\u2014]/g, "-").replace(/\u00a0/g, " ");
 // What changes between the old words and the new, widened to whole words so it reads naturally.
@@ -202,6 +207,85 @@ function weekDays() {
   return out;
 }
 function resolvedCount() { return Object.keys(S.answers).length; }
+function addXp(n) { if (n) { S.xp += n; S.xpDays[today()] = (S.xpDays[today()] || 0) + n; } }
+
+/* ---------------- daily quests ----------------
+   Three small goals a day, chosen from what the day's cards make possible. They reward
+   the habits worth having: checking a source, clearing the research list, finishing a post. */
+const QUESTS = {
+  goal: { icon: "🎯", text: () => `Decide ${S.settings.dailyGoal} cards`, target: () => S.settings.dailyGoal, miles: 10, ok: (o) => o.open >= S.settings.dailyGoal },
+  source: { icon: "🔗", text: () => "Open a source before you decide", target: () => 1, miles: 5, ok: (o) => o.facts >= 1 },
+  research: { icon: "🔖", text: () => "Decide a card from your Research list", target: () => 1, miles: 10, ok: (o) => o.research >= 1 },
+  note: { icon: "✍️", text: () => "Add a note or your own source", target: () => 1, miles: 5, ok: (o) => o.open >= 1 },
+  quick: { icon: "✏️", text: () => "Do 3 quick fixes", target: () => 3, miles: 5, ok: (o) => o.quick >= 3 },
+  post: { icon: "🛂", text: () => "Finish every card on one post", target: () => 1, miles: 15, ok: (o) => o.finishable },
+};
+const QUEST_BONUS = 10;
+function ensureQuests() {
+  const open = openCards();
+  // Chosen once a day. If the day started with nothing to do, choose when the first cards arrive.
+  if (S.q?.day === today() && (S.q.ids.length || !open.length)) return;
+  const o = { open: open.length, facts: open.filter((c) => !isQuickFix(c)).length, quick: open.filter(isQuickFix).length,
+    research: S.later.length, finishable: posts().some((p) => p.open > 0 && p.open <= 4) };
+  const able = Object.keys(QUESTS).filter((id) => QUESTS[id].ok(o));
+  // A different mix each day, but the same all day: rotate the list by a number made from the date.
+  const seed = [...today()].reduce((n, ch) => n * 31 + ch.charCodeAt(0), 7) >>> 0;
+  const rest = able.filter((id) => id !== "goal");
+  const rotated = rest.map((_, i) => rest[(i + seed) % rest.length]);
+  const ids = (able.includes("goal") ? ["goal"] : []).concat(rotated).slice(0, 3);
+  S.q = { day: today(), ids, prog: {}, done: {}, bonus: false };
+  save();
+}
+// Called for each new answer. Returns the quests it completed, and adds their miles.
+function questProgress(card, extra, wasResearch) {
+  ensureQuests();
+  const q = S.q, bump = (id) => { if (q.ids.includes(id) && !q.done[id]) q.prog[id] = (q.prog[id] || 0) + 1; };
+  bump("goal");
+  if (S.opened[card.id]) bump("source");
+  if (wasResearch) bump("research");
+  if (extra.note || extra.source) bump("note");
+  if (isQuickFix(card)) bump("quick");
+  const post = posts().find((p) => p.cards.some((c) => c.id === card.id));
+  if (post && post.cards.every((c) => S.answers[c.id])) bump("post");
+  const finished = [];
+  q.ids.forEach((id) => {
+    if (!q.done[id] && (q.prog[id] || 0) >= QUESTS[id].target()) { q.done[id] = true; addXp(QUESTS[id].miles); finished.push({ text: QUESTS[id].text(), miles: QUESTS[id].miles }); }
+  });
+  if (q.ids.length && !q.bonus && q.ids.every((id) => q.done[id])) { q.bonus = true; addXp(QUEST_BONUS); finished.push({ text: "All of today's quests", miles: QUEST_BONUS }); }
+  return finished;
+}
+
+/* ---------------- weekly recap ---------------- */
+function mondayOf(d = new Date()) { const m = new Date(d); m.setDate(m.getDate() - ((m.getDay() + 6) % 7)); return m; }
+function lastWeek() {
+  const start = mondayOf(); start.setDate(start.getDate() - 7);
+  let cards = 0, played = 0, miles = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start); d.setDate(d.getDate() + i); const k = dayKey(d);
+    cards += S.days[k] || 0; played += S.days[k] ? 1 : 0; miles += S.xpDays[k] || 0;
+  }
+  return { cards, played, miles };
+}
+const recapDue = () => S.recapSeen !== dayKey(mondayOf()) && lastWeek().cards > 0;
+
+/* ---------------- daily reminder ----------------
+   The app can't send notifications by itself, so the reminder is a repeating calendar event with an alert. */
+function reminderLinks(time) {
+  const [h, m] = String(time || "19:30").split(":").map(Number);
+  const start = new Date(); start.setHours(h || 0, m || 0, 0, 0);
+  if (start < new Date()) start.setDate(start.getDate() + 1);
+  const end = new Date(start.getTime() + 10 * 60000);
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = (x) => `${x.getFullYear()}${pad(x.getMonth() + 1)}${pad(x.getDate())}T${pad(x.getHours())}${pad(x.getMinutes())}00`;
+  const url = location.origin + location.pathname, enc = encodeURIComponent;
+  const title = "Blog Quest 🌍", details = `Three cards keeps the streak going. ${url}`;
+  let tz = ""; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) {}
+  const google = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${enc(title)}&details=${enc(details)}&dates=${stamp(start)}/${stamp(end)}&recur=${enc("RRULE:FREQ=DAILY")}${tz ? `&ctz=${enc(tz)}` : ""}`;
+  const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Blog Quest//EN", "BEGIN:VEVENT", "UID:blog-quest-daily-reminder", `DTSTAMP:${stamp(new Date())}`,
+    `DTSTART:${stamp(start)}`, `DTEND:${stamp(end)}`, "RRULE:FREQ=DAILY", `SUMMARY:${title}`, `DESCRIPTION:${details}`, `URL:${url}`,
+    "BEGIN:VALARM", "TRIGGER:PT0M", "ACTION:DISPLAY", "DESCRIPTION:Blog Quest", "END:VALARM", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+  return { google, ics: "data:text/calendar;charset=utf-8," + enc(ics) };
+}
 
 /* ---------------- badges ---------------- */
 const BADGES = [
@@ -531,7 +615,7 @@ function recordAnswer(card, decision, extra) {
     if (extra.note) earned += XP.note;
     if (extra.source) earned += XP.source;
     if (S.opened[card.id]) earned += XP.opened;
-    S.xp += earned;
+    addXp(earned);
   }
   const rec = {
     card_id: card.id,
@@ -557,6 +641,8 @@ function recordAnswer(card, decision, extra) {
     S.researchResolved = (S.researchResolved || 0) + 1; S.researchDirty = true;
   }
   S.pending.push(rec);
+  recordAnswer.quests = redo ? [] : questProgress(card, extra, wasResearch);   // after the answer is stored, so "finish a post" can see it
+  earned += recordAnswer.quests.reduce((n, q) => n + q.miles, 0);
   save();
   return earned;
 }
@@ -564,11 +650,12 @@ function recordAnswer(card, decision, extra) {
 /* ---------------- views ---------------- */
 function render() {
   updateFreeze();
+  ensureQuests();
   const app = $("#app");
-  const bare = ["lesson", "complete", "intro"].includes(view.name);   // full-screen views without the tab bar
+  const bare = ["lesson", "complete", "intro", "recap"].includes(view.name);   // full-screen views without the tab bar
   app.classList.toggle("lesson-mode", bare);
   const html = {
-    home: homeView, lesson: lessonView, complete: completeView, later: laterView, passport: passportView, settings: settingsView, intro: introView,
+    home: homeView, lesson: lessonView, complete: completeView, later: laterView, passport: passportView, settings: settingsView, intro: introView, recap: recapView,
   }[view.name]();
   app.innerHTML = html + (bare ? "" : navView());
   bind();
@@ -621,7 +708,7 @@ function homeView() {
     : `${goal - doneToday} more card${goal - doneToday === 1 ? "" : "s"} to hit today's goal`;
   const standalone = DEMO || matchMedia("(display-mode: standalone)").matches || navigator.standalone;
   if (!S.settings.token) return `${topbar()}
-    <div class="hero">${pip("happy", 104)}<div class="bubble">Hi! I'm Pip 👋 I hunt for things on the blog that might be out of date. Let's get connected!</div></div>
+    <div class="hero">${pipG("happy", 104)}<div class="bubble">Hi! I'm Pip 👋 I hunt for things on the blog that might be out of date. Let's get connected!</div></div>
     ${!standalone ? `<div class="tip">📲 <b>Do this first:</b> add Blog Quest to your home screen, then open it from there and connect. (iPhone: Share → <i>Add to Home Screen</i>. Android: ⋮ → <i>Install app</i>.) The home-screen app keeps its own storage, so connecting in the browser won't carry over.</div>` : ""}
     <div class="card">
       <b>Step 1 · Connect</b>
@@ -639,10 +726,10 @@ function homeView() {
         : "Your answers are safe on this phone and will upload when the connection works again."}</p>
       <button class="btn ghost sm" data-nav="settings">Open Settings</button></div>`;
   if (!allCards().length && navigator.onLine && !err && (syncing || !S.lastSync)) return `${topbar()}
-    <div class="hero">${pip("think", 104)}<div class="bubble">Fetching your cards…</div></div>
+    <div class="hero">${pipG("think", 104)}<div class="bubble">Fetching your cards…</div></div>
     <div class="card loading" aria-busy="true"><i></i><i></i><i></i></div>`;
   return `${topbar()}${banner}
-    <div class="hero">${pip(open.length ? "happy" : "sleepy", 104)}<div class="bubble">${esc(greeting(open.length))}</div></div>
+    <div class="hero">${pipG(open.length ? "happy" : "sleepy", 104)}<div class="bubble">${esc(greeting(open.length))}</div></div>
     <div class="goal">
       <div class="ring" style="--p:${pct}"><span>${Math.min(doneToday, goal)}/${goal}</span></div>
       <div style="flex:1;min-width:0"><b>Daily goal</b><small>${goalText}</small>
@@ -654,7 +741,8 @@ function homeView() {
       <small>${L.next ? `${L.next - S.xp} miles to ${L.nextName}` : "Top rank!"}</small></div>
     ${open.length ? `<button class="btn" data-act="start">Start lesson · ${size} card${size === 1 ? "" : "s"}</button>`
       : `<button class="btn ghost" data-act="sync">${S.settings.token ? "Check for new cards" : "Open Settings"}</button>`}
-    ${!standalone ? `<div class="tip" style="margin-top:14px">📲 <b>Tip:</b> add this to your home screen so it works offline. iPhone: Share → <i>Add to Home Screen</i>. Android: menu ⋮ → <i>Install app</i>.</div>` : ""}
+    <div style="margin-top:14px">${questsHtml()}</div>
+    ${!standalone ? `<div class="tip">📲 <b>Tip:</b> add this to your home screen so it works offline. iPhone: Share → <i>Add to Home Screen</i>. Android: menu ⋮ → <i>Install app</i>.</div>` : ""}
     ${ps.length ? `<h2>Your journey</h2><p class="muted small" style="margin:-4px 0 14px">Each stop is one of your posts. Tap one to check just that post.</p><div class="path">${ps.map((p) => {
       const cls = p.open === 0 ? (p.done ? "done" : "locked") : "";
       const icon = p.open === 0 ? (p.done ? "⭐" : "🔒") : "📍";
@@ -662,6 +750,33 @@ function homeView() {
         <span class="node">${icon}${p.open ? `<span class="count">${p.open}</span>` : ""}</span>
         <span class="label">${esc(p.title)}<small>${p.done}/${p.cards.length} checked${p.views ? ` · 👀 ${num(p.views)}` : ""}</small></span></button>`;
     }).join("")}</div>` : ""}`;
+}
+
+function questsHtml() {
+  const q = S.q;
+  if (!q?.ids?.length) return "";
+  const all = q.ids.every((id) => q.done[id]);
+  return `<div class="card quests"><b>Today's quests</b>${all ? ` <span class="small muted">· all done, +${QUEST_BONUS} bonus</span>` : ""}
+    ${q.ids.map((id) => { const Q = QUESTS[id], t = Q.target(), n = Math.min(q.prog[id] || 0, t);
+      return `<div class="quest ${q.done[id] ? "done" : ""}"><span class="qi">${q.done[id] ? "✅" : Q.icon}</span>
+        <span class="qt">${esc(Q.text())}<span class="bar sm"><i style="width:${Math.round((n / t) * 100)}%"></i></span></span>
+        <span class="qm">${q.done[id] ? "" : `+${Q.miles}`}</span></div>`; }).join("")}</div>`;
+}
+
+function recapView() {
+  const w = lastWeek(), live = Object.keys(S.live || {}).length;
+  const line = w.played >= 5 ? "That's a proper habit. The blog is better for it." : w.played >= 3 ? "A solid week. Every card makes a post more trustworthy." : "Every card counts. See if you can play one more day this week.";
+  return `<div class="complete">
+    ${pipG("cheer", 140)}
+    <h1>Your week</h1>
+    <div class="muted">${esc(line)}</div>
+    <div class="stats">
+      <div class="stat a"><div class="t">Cards</div><div class="v">${w.cards}</div></div>
+      <div class="stat b"><div class="t">Days played</div><div class="v">${w.played}/7</div></div>
+      <div class="stat c"><div class="t">Miles</div><div class="v">+${w.miles}</div></div>
+    </div>
+    <div class="card" style="width:100%"><b>🔥 ${streakNow()}-day streak</b>${live ? ` · <b>📰 ${live}</b> fix${live === 1 ? "" : "es"} live on the blog` : ""}</div>
+    <div style="width:100%;margin-top:auto"><button class="btn" data-act="recap-done">Start this week</button></div></div>`;
 }
 
 // The welcome walkthrough: shown on first open, and again from Settings.
@@ -675,7 +790,7 @@ function introView() {
   const i = Math.min(view.step || 0, INTRO.length - 1), step = INTRO[i], last = i === INTRO.length - 1;
   return `<div class="intro">
     <button class="linkbtn skip" data-act="intro-done">Skip</button>
-    ${pip(step.mood, 150)}
+    ${pipG(step.mood, 150)}
     <h1>${esc(step.title)}</h1>
     <p>${esc(step.body)}</p>
     ${last ? `<div class="field" style="width:100%;text-align:left"><label for="intro-name">What should I call you?</label>
@@ -727,7 +842,7 @@ function lessonView() {
       <div class="label-sm">Your post says</div>
       <blockquote class="claim">${claimHtml(c)}</blockquote>
       ${(c.also_in || []).length ? `<div class="small muted" style="margin-top:6px">📌 Also in this post: ${c.also_in.map(esc).join(" · ")}. Any fix gets applied there too.</div>` : ""}
-      <div class="think">${pip("think", 58)}<div class="bubble">${esc(c.summary)}</div></div>
+      <div class="think">${pipG("think", 58)}<div class="bubble">${esc(c.summary)}</div></div>
       ${isQuickFix(c) && c.confidence !== "check" ? "" : `<div class="label-sm">What I found</div>`}
       ${c.confidence && !(isQuickFix(c) && c.confidence !== "check") ? `<div class="evidence ${c.confidence === "strong" ? "strong" : "check"}">
           <b>${c.confidence === "strong" ? "✅ Strong evidence" : "⚠️ Worth a look before you decide"}</b>
@@ -762,11 +877,12 @@ function lessonView() {
 
 const PRAISE = ["Nice catch!", "Great detective work!", "Sharp eyes!", "Fact checked!", "Readers will thank you!", "Pip approves!", "Smooth sailing!"];
 
-function showSheet({ later = false, earned = 0, title, cardId = "", bonus = "" }) {
+function showSheet({ later = false, earned = 0, title, cardId = "", bonus = "", quests = [] }) {
   const sheet = $("#sheet");
   sheet.classList.toggle("later", later);
-  $(".in", sheet).innerHTML = `<div class="row">${pip(later ? "wow" : "cheer", 64)}<div><h3>${esc(title)}</h3>
+  $(".in", sheet).innerHTML = `<div class="row">${pipG(later ? "wow" : "cheer", 64)}<div><h3>${esc(title)}</h3>
     <div class="xp">${later ? "Saved to your research list 🔖" : earned ? `+${earned} miles ✈️${bonus ? ` · ${esc(bonus)}` : ""}` : "Answer updated"}</div></div></div>
+    ${quests.map((q) => `<div class="questdone">⭐ Quest complete: ${esc(q.text)} <b>+${q.miles}</b></div>`).join("")}
     ${later ? `<input type="text" id="rnote" data-card="${esc(cardId)}" value="${esc(S.laterNotes[cardId]?.note || "")}" placeholder="What do you need to check? (optional)" aria-label="What do you need to check?" style="margin-bottom:12px">` : ""}
     <button class="btn ${later ? "sun" : "teal"}" data-act="next">Continue</button>
     <button class="linkbtn undo" data-act="undo" style="display:block;margin:6px auto 0;color:inherit">↩︎ Undo</button>`;
@@ -800,7 +916,7 @@ function checkAnswer() {
   lesson.earned += earned; lesson.answered++; lesson.undo.earned = earned; lesson.undo.kind = "answer";
   chime("ok"); buzz(20);
   const goalHit = earned && (S.days[today()] || 0) === S.settings.dailyGoal;
-  showSheet({ earned, title: goalHit ? "Daily goal reached! 🎯" : pick(PRAISE), bonus: S.opened[c.id] && earned ? "source checked" : "" });
+  showSheet({ earned, title: goalHit ? "Daily goal reached! 🎯" : pick(PRAISE), bonus: S.opened[c.id] && earned ? "source checked" : "", quests: recordAnswer.quests });
 }
 
 function parkLater() {
@@ -812,7 +928,7 @@ function parkLater() {
     S.later.push(c.id); S.laterNotes[c.id] = { note: "", at: new Date().toISOString() };
     lesson.parked++; S.researchDirty = true;
   }
-  S.xp += earned; lesson.earned += earned;
+  addXp(earned); lesson.earned += earned;
   save(); chime("later"); buzz(10);
   showSheet({ later: true, title: fresh ? "Good call — no guessing!" : "Still on your research list", cardId: c.id });
 }
@@ -821,6 +937,7 @@ function parkLater() {
 function snapshot(c) {
   return { cardId: c.id, xp: S.xp, streak: { ...S.streak }, day: S.days[today()] || 0,
     later: [...S.later], laterNotes: structuredClone(S.laterNotes), researchResolved: S.researchResolved || 0,
+    q: structuredClone(S.q), xpDay: S.xpDays[today()] || 0,
     pendingLen: S.pending.length, note: lesson.note, source: lesson.source, selected: lesson.selected, fineReason: lesson.fineReason };
 }
 
@@ -831,7 +948,8 @@ function undoLast() {
   if (u.kind === "answer" && S.pending.length !== u.pendingLen + 1) { toast("Already uploaded — can't undo this one"); return; }
   if (u.kind === "answer") { S.pending.pop(); delete S.answers[u.cardId]; lesson.answered--; }
   else if (u.fresh) lesson.parked--;
-  S.xp = u.xp; S.streak = u.streak; S.later = u.later;
+  S.xp = u.xp; S.streak = u.streak; S.later = u.later; S.q = u.q;
+  if (u.xpDay) S.xpDays[today()] = u.xpDay; else delete S.xpDays[today()];
   S.laterNotes = u.laterNotes; S.researchResolved = u.researchResolved; S.researchDirty = true;
   if (u.day) S.days[today()] = u.day; else delete S.days[today()];
   lesson.earned -= u.earned;
@@ -873,7 +991,7 @@ function syncLine() {
 function completeView() {
   const L = lesson;
   return `<div class="complete">
-    ${pip("cheer", 150)}
+    ${pipG("cheer", 150)}
     <h1>Lesson complete!</h1>
     <div class="muted">${L.answered} checked${L.parked ? ` · ${L.parked} saved for research` : ""}</div>
     <div class="stats">
@@ -881,7 +999,7 @@ function completeView() {
       <div class="stat b"><div class="t">Streak</div><div class="v">🔥 ${streakNow()}</div></div>
       <div class="stat c"><div class="t">Today</div><div class="v">${S.days[today()] || 0}/${S.settings.dailyGoal}</div></div>
     </div>
-    ${level().n > L.startLevel ? `<div class="card up" style="width:100%"><b>⭐ Level up!</b><div>You're now a <b>${esc(level().name)}</b> (level ${level().n})</div></div>` : ""}
+    ${level().n > L.startLevel ? `<div class="card up" style="width:100%"><b>⭐ Level up!</b><div>You're now a <b>${esc(level().name)}</b> (level ${level().n})${GEAR.filter(([n]) => n > L.startLevel && n <= level().n).map(([, g]) => `<br>Pip earned ${esc(g)}!`).join("")}</div></div>` : ""}
     ${STREAK_MILESTONES.includes(streakNow()) && streakNow() > L.startStreak ? `<div class="card up" style="width:100%"><b>🔥 ${streakNow()}-day streak!</b><div>${streakNow() >= 7 ? "That's a real habit now." : "You're on a roll."}</div></div>` : ""}
     ${(L.newBadges || []).length ? `<div class="card" style="width:100%"><b>New badge${L.newBadges.length > 1 ? "s" : ""}!</b><div>${L.newBadges.map((b) => `${b.e} ${esc(b.name)}`).join(" · ")}</div></div>` : ""}
     <div class="sync-line">${syncLine()}</div>
@@ -931,7 +1049,7 @@ function laterView() {
           <button class="btn ghost" data-act="copy-research">📋 Copy the list</button>
           <textarea id="research-text" hidden readonly aria-label="Research list text"></textarea>
         </div></div>`
-      : `<div class="empty">${pip("sleepy", 110)}<p class="muted">Nothing to research. When a card needs digging, tap “I need to research this first” and it lands here.</p></div>`}`;
+      : `<div class="empty">${pipG("sleepy", 110)}<p class="muted">Nothing to research. When a card needs digging, tap “I need to research this first” and it lands here.</p></div>`}`;
 }
 
 function answerRows() {
@@ -956,6 +1074,8 @@ function passportView() {
   return `${topbar()}<h2>🛂 Passport</h2>
     <div class="levelrow big"><b>Level ${L.n} · ${L.name}</b><div class="bar sm"><i style="width:${L.pct}%"></i></div>
       <small>${L.next ? `${L.next - S.xp} miles to ${L.nextName}` : "Top rank!"}</small></div>
+    <div class="gear">${pipG("happy", 72)}<div class="small"><b>Pip's gear</b><br>${GEAR.filter(([n]) => n <= L.n).map(([, g]) => esc(g)).join(", ") || "Just the hat and magnifying glass so far."}
+      ${GEAR.find(([n]) => n > L.n) ? `<br><span class="muted">Next: ${esc(GEAR.find(([n]) => n > L.n)[1])} at level ${GEAR.find(([n]) => n > L.n)[0]}</span>` : ""}</div></div>
     <div class="kpis">
       <div class="kpi"><div class="v">✈️ ${S.xp}</div><div class="l">Miles earned</div></div>
       <div class="kpi"><div class="v">🔥 ${streakNow()}</div><div class="l">Day streak</div></div>
@@ -992,6 +1112,17 @@ function youFields(s) {
     <label class="toggle">Sounds <input type="checkbox" id="sound" ${s.sound ? "checked" : ""}></label>`;
 }
 
+function reminderCard() {
+  const r = reminderLinks(S.settings.remindTime);
+  return `<div class="card"><b>Daily reminder</b>
+    <p class="small muted" style="margin:6px 0 10px">Adds a repeating event with an alert to your calendar, so your phone nudges you. Delete the event to stop it.</p>
+    <div class="field"><label for="remind">Remind me at</label><input type="time" id="remind" value="${esc(S.settings.remindTime || "19:30")}"></div>
+    <div style="display:grid;gap:10px">
+      <a class="btn ghost" id="remind-google" href="${esc(r.google)}" target="_blank" rel="noopener noreferrer">📅 Add to Google Calendar</a>
+      ${DEMO ? "" : `<a class="btn ghost" id="remind-ics" href="${esc(r.ics)}" download="blog-quest-reminder.ics">🍎 Add to Apple or another calendar</a>`}
+    </div></div>`;
+}
+
 function demoSettingsView() {
   const s = S.settings;
   const last = (S.demoSent || []).slice(-1)[0];
@@ -1012,6 +1143,7 @@ function demoSettingsView() {
         <button class="btn sun" data-act="demo-live">🎉 Pretend my fixes went live</button>
       </div>
     </div>
+    ${reminderCard()}
     <button class="btn ghost" data-act="show-intro" style="margin-bottom:6px">❓ How Blog Quest works</button>
     <button class="linkbtn" data-act="reset" style="color:var(--coral-dark)">Reset the demo</button>`;
 }
@@ -1036,6 +1168,7 @@ function settingsView() {
       <div><b>Cards on phone:</b> ${allCards().length}</div>
       <div style="margin-top:10px"><button class="btn ghost" data-act="sync">Sync now</button></div>
     </div>
+    ${reminderCard()}
     <button class="btn ghost" data-act="show-intro" style="margin-bottom:6px">❓ How Blog Quest works</button>
     <button class="linkbtn" data-act="reset" style="color:var(--coral-dark)">Reset this phone's progress</button>`;
 }
@@ -1047,6 +1180,12 @@ function bind() {
     view = { name: b.dataset.nav }; render();
     if (leavingResearch) sync({ quiet: true });   // save edited research notes
   }));
+  // Changing the reminder time updates the calendar links straight away.
+  $("#remind")?.addEventListener("input", (e) => {
+    S.settings.remindTime = e.target.value || "19:30"; save();
+    const r = reminderLinks(S.settings.remindTime);
+    $("#remind-google")?.setAttribute("href", r.google); $("#remind-ics")?.setAttribute("href", r.ics);
+  });
   // Notes on the research list save as she types.
   document.querySelectorAll("[data-rnote]").forEach((inp) => inp.addEventListener("input", () => {
     const id = inp.dataset.rnote;
@@ -1138,6 +1277,7 @@ function act(a) {
       S.seenIntro = true; save(); view = { name: "home" }; render(); break;
     }
     case "show-intro": view = { name: "intro", step: 0 }; render(); break;
+    case "recap-done": S.recapSeen = dayKey(mondayOf()); save(); view = { name: "home" }; render(); break;
     case "save-demo":
       S.settings.name = $("#name").value.trim().slice(0, 30);
       S.settings.dailyGoal = Math.max(1, Math.min(30, parseInt($("#goal").value, 10) || 3));
@@ -1184,7 +1324,7 @@ function askConfirm(title, body, yes, no) {
   return new Promise((resolve) => {
     const wrap = document.createElement("div");
     wrap.className = "modal";
-    wrap.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="mt">${pip("wow", 64)}
+    wrap.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="mt">${pipG("wow", 64)}
       <h3 id="mt">${esc(title)}</h3><p class="muted">${esc(body)}</p>
       <div style="display:grid;gap:10px"><button class="btn" data-a="yes">${esc(yes)}</button><button class="btn ghost" data-a="no">${esc(no)}</button></div></div>`;
     const done = (v) => { wrap.remove(); resolve(v); };
@@ -1243,6 +1383,7 @@ if (!DEMO) { try { navigator.storage?.persist?.(); } catch (e) {} }
 // Any answers left from a lesson that was closed mid-way get packaged for upload.
 packagePending();
 if (!S.seenIntro) view = { name: "intro", step: 0 };
+else if (recapDue()) view = { name: "recap" };
 render();
 sync({ quiet: true });
 

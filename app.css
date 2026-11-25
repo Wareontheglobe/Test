@@ -130,7 +130,7 @@ blockquote.claim { margin: 0; background: var(--quote); border-radius: 14px; pad
 .opt small { display: block; font-weight: 500; color: var(--ink-2); margin-top: 3px; }
 .opt.sel { border-color: var(--teal); background: var(--sel); box-shadow: 0 3px 0 var(--teal); }
 .opt.sel .k { border-color: var(--teal); color: var(--teal-dark); }
-textarea, input[type=text], input[type=password], input[type=url], input[type=number], input[type=email], select {
+textarea, input[type=text], input[type=password], input[type=url], input[type=number], input[type=email], input[type=time], select {
   width: 100%; font: inherit; font-size: 16px; border: 2px solid var(--line); border-radius: 14px; padding: 12px;
   background: var(--surface); color: var(--ink); }
 textarea { min-height: 90px; resize: vertical; }
@@ -300,3 +300,24 @@ blockquote.claim mark { background: var(--sun); color: #3B2A00; border-radius: 5
 blockquote.claim { overflow-wrap: anywhere; }
 .diff del { color: var(--coral-dark); text-decoration-thickness: 2px; }
 .diff ins { background: var(--ok-bg); color: var(--ok-ink); text-decoration: none; font-weight: 800; border-radius: 5px; padding: 0 3px; }
+
+/* Pip comes alive a little: a slow bob on the home screen and a blink now and then */
+.hero .pip { animation: bob 3.2s ease-in-out infinite; }
+.pip-eyes { transform-box: fill-box; transform-origin: center; animation: blink 5s infinite; }
+.pip-stars { transform-box: fill-box; transform-origin: center; animation: twinkle 2.4s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(-4px); } }
+@keyframes blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.1); } }
+@keyframes twinkle { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .hero .pip, .pip-eyes, .pip-stars { animation: none; } }
+
+/* quests, gear */
+.card.quests { padding-bottom: 6px; }
+.quest { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 2px solid var(--line); font-size: 15px; font-weight: 700; }
+.quest:first-of-type { margin-top: 8px; }
+.quest .qi { font-size: 20px; width: 26px; text-align: center; flex: none; }
+.quest .qt { flex: 1; min-width: 0; }
+.quest .qt .bar { display: block; margin-top: 5px; height: 8px; }
+.quest .qm { color: var(--teal-dark); font-weight: 900; flex: none; }
+.quest.done { color: var(--ink-2); }
+.questdone { background: rgba(255,255,255,.55); border-radius: 12px; padding: 8px 12px; margin: -4px 0 10px; font-weight: 700; font-size: 15px; }
+.gear { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
